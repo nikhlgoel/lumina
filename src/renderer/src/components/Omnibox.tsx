@@ -108,11 +108,46 @@ export const Omnibox: React.FC = () => {
 
       {/* Error message */}
       {inspectError && (
-        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center justify-between animate-in fade-in">
           <span>{inspectError}</span>
           <button onClick={() => setUrlInput('')} className="underline text-[11px] hover:text-red-300">
             Clear
           </button>
+        </div>
+      )}
+
+      {/* Quick Suggestions & Keyboard Hint */}
+      {!urlInput && !isInspecting && (
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 px-1 text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span>Quick Test:</span>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+                setUrlInput(url);
+                inspectUrl(url);
+              }}
+              className="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-lumina-cyan/15 hover:text-lumina-cyan transition-colors"
+            >
+              Me at the zoo (19s)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+                setUrlInput(url);
+                inspectUrl(url);
+              }}
+              className="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-lumina-cyan/15 hover:text-lumina-cyan transition-colors"
+            >
+              Rick Astley (4K Remaster)
+            </button>
+          </div>
+
+          <span className="hidden sm:inline-block text-[10px] text-slate-600 font-mono">
+            Tip: Press <kbd className="px-1 py-0.5 rounded bg-white/10 text-slate-300">Ctrl</kbd> + <kbd className="px-1 py-0.5 rounded bg-white/10 text-slate-300">V</kbd> anywhere to inspect
+          </span>
         </div>
       )}
     </div>

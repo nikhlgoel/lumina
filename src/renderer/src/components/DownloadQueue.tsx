@@ -14,7 +14,7 @@ import { useLuminaStore } from '../store/useLuminaStore';
 import type { DownloadProgress } from '@shared/types';
 
 export const DownloadQueue: React.FC = () => {
-  const { downloads, cancelDownload, activeTasksMetadata } = useLuminaStore();
+  const { downloads, cancelDownload, clearCompletedDownloads, activeTasksMetadata } = useLuminaStore();
 
   if (downloads.length === 0) {
     return (
@@ -40,12 +40,24 @@ export const DownloadQueue: React.FC = () => {
     if (path) window.luminaAPI?.openDirectory?.(path);
   };
 
+  const hasFinished = downloads.some(
+    (d) => d.status === 'completed' || d.status === 'error' || d.status === 'cancelled'
+  );
+
   return (
     <div className="w-full space-y-3">
       <div className="flex items-center justify-between px-1">
         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
           Download Queue ({downloads.length})
         </h3>
+        {hasFinished && (
+          <button
+            onClick={clearCompletedDownloads}
+            className="text-[11px] font-medium text-slate-400 hover:text-white px-2 py-0.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            Clear Finished
+          </button>
+        )}
       </div>
 
       <div className="space-y-2.5">

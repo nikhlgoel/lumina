@@ -13,12 +13,42 @@ import { SplashScreen } from './components/SplashScreen';
 import { useLuminaStore } from './store/useLuminaStore';
 
 export const App: React.FC = () => {
-  const { activeTab, initialize } = useLuminaStore();
+  const { activeTab, initialize, inspectUrl, clearInspectedMedia, togglePlayPause, currentPlayingTrack, setUrlInput } = useLuminaStore();
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     initialize();
-  }, [initialize]);
+
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // Escape: Dismiss active preview
+      if (e.key === 'Escape') {
+        clearInspectedMedia();
+      }
+
+      // Space: Toggle in-app player play/pause if not typing
+      if (e.code === 'Space' && !isInputFocused && currentPlayingTrack) {
+        e.preventDefault();
+        togglePlayPause();
+      }
+
+      // Ctrl+V or Cmd+V anywhere outside input: Auto-paste and inspect
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !isInputFocused) {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text && text.trim().startsWith('http')) {
+            setUrlInput(text.trim());
+            inspectUrl(text.trim());
+          }
+        } catch (err) {}
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [initialize, inspectUrl, clearInspectedMedia, togglePlayPause, currentPlayingTrack, setUrlInput]);
 
   return (
     <div className="relative w-screen h-screen flex flex-col bg-lumina-dark text-slate-100 overflow-hidden font-sans">

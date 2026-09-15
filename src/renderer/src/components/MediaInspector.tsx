@@ -71,6 +71,11 @@ export const MediaInspector: React.FC = () => {
                   {inspectedMedia.viewCount.toLocaleString()} views
                 </span>
               )}
+              {(inspectedMedia.url.includes('/shorts/') || inspectedMedia.url.includes('/reel/')) && (
+                <span className="px-2 py-0.5 rounded-md bg-lumina-magenta/20 border border-lumina-magenta/40 text-lumina-magenta font-mono text-[9px] font-bold">
+                  ⚡ Vertical Short / Reel
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -247,8 +252,11 @@ export const MediaInspector: React.FC = () => {
       {/* Start Download Action Button */}
       <div className="pt-2">
         <button
-          onClick={startDownload}
-          className="w-full py-3.5 rounded-2xl text-sm font-bold text-black glass-button-primary flex items-center justify-center gap-2 shadow-lg shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40 transition-all"
+          onClick={async () => {
+            await startDownload();
+            clearInspectedMedia();
+          }}
+          className="w-full py-3.5 rounded-2xl text-sm font-bold text-black glass-button-primary flex items-center justify-center gap-2 shadow-lg shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40 transition-all active:scale-[0.99]"
         >
           <Download className="w-4 h-4 stroke-[2.5]" />
           <span>

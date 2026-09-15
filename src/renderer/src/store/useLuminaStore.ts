@@ -42,6 +42,7 @@ interface LuminaState {
   activeTasksMetadata: Map<string, { title: string; thumbnail: string; uploader: string; mode: string }>;
   startDownload: () => Promise<void>;
   cancelDownload: (taskId: string) => Promise<void>;
+  clearCompletedDownloads: () => void;
   updateDownloadProgress: (progress: DownloadProgress) => void;
 
   // Storage Drives
@@ -166,6 +167,14 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
 
   cancelDownload: async (taskId) => {
     await window.luminaAPI.cancelDownload(taskId);
+  },
+
+  clearCompletedDownloads: () => {
+    set((state) => ({
+      downloads: state.downloads.filter(
+        (d) => d.status !== 'completed' && d.status !== 'cancelled' && d.status !== 'error'
+      )
+    }));
   },
 
   updateDownloadProgress: (progress) => {
