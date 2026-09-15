@@ -13,13 +13,13 @@
   "linux": {
     "target": ["rpm", "AppImage"],
     "category": "AudioVideo",
-    "icon": "assets/branding/logo_concept.jpg",
+    "icon": "assets/icon.png",
     "synopsis": "Ultra-sleek universal media downloader and player",
     "description": "Download 8K/4K videos, extract lossless audio, save to USB drives, and enjoy your media locally."
   },
   "win": {
     "target": ["nsis"],
-    "icon": "assets/branding/logo_concept.jpg"
+    "icon": "assets/icon.png"
   },
   "mac": {
     "target": ["dmg"],

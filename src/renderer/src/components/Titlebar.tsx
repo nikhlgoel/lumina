@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, Copy, X } from 'lucide-react';
+import { Minus, Square, Copy, X, Palette } from 'lucide-react';
+import { useLuminaStore } from '../store/useLuminaStore';
 
 export const Titlebar: React.FC = () => {
   const [isMax, setIsMax] = useState(false);
+  const { settings, cycleTheme } = useLuminaStore();
 
   useEffect(() => {
     window.luminaAPI?.isMaximized?.().then(setIsMax);
@@ -34,8 +36,17 @@ export const Titlebar: React.FC = () => {
         </span>
       </div>
 
-      {/* Window Controls */}
+      {/* Window Controls & Theme Switcher */}
       <div className="flex items-center gap-1 no-drag">
+        <button
+          onClick={cycleTheme}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors text-[10px] font-medium mr-1.5"
+          title={`Theme: ${settings?.theme || 'onyx'} (Click to cycle themes)`}
+        >
+          <Palette className="w-3.5 h-3.5 text-lumina-cyan" />
+          <span className="capitalize hidden md:inline">{settings?.theme || 'onyx'}</span>
+        </button>
+
         <button
           onClick={handleMinimize}
           className="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors"

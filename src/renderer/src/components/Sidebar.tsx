@@ -99,13 +99,16 @@ export const Sidebar: React.FC = () => {
         </div>
 
         {usbDrive ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="text-[11px] text-slate-200 font-medium truncate" title={usbDrive.label}>
               {usbDrive.label || usbDrive.name}
             </div>
             <div className="flex items-center justify-between text-[10px] text-slate-400">
-              <span>Free Space:</span>
-              <span className="font-mono text-lumina-emerald">{usbDrive.freeSpace}</span>
+              <span>Available:</span>
+              <span className="font-mono text-lumina-emerald">{usbDrive.freeSpace} of {usbDrive.totalSpace}</span>
+            </div>
+            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-lumina-emerald/80 rounded-full" style={{ width: '60%' }} />
             </div>
             <div className="text-[9px] text-lumina-emerald/90 bg-lumina-emerald/10 px-2 py-0.5 rounded border border-lumina-emerald/20 text-center font-medium">
               Auto-Save Active (/LuminaMedia)

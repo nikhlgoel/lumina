@@ -73,9 +73,28 @@ interface LuminaState {
   settings: LuminaSettings | null;
   loadSettings: () => Promise<void>;
   saveSettings: (newSettings: Partial<LuminaSettings>) => Promise<void>;
+  cycleTheme: () => Promise<void>;
 
   // App Initializer
   initialize: () => void;
+}
+
+function playCompletionChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // A5
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (e) {}
 }
 
 export const useLuminaStore = create<LuminaState>((set, get) => ({
@@ -181,10 +200,17 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
     set((state) => {
       const index = state.downloads.findIndex((d) => d.taskId === progress.taskId);
       if (index >= 0) {
+        const prev = state.downloads[index];
+        if (prev.status !== 'completed' && progress.status === 'completed') {
+          playCompletionChime();
+        }
         const next = [...state.downloads];
         next[index] = progress;
         return { downloads: next };
       } else {
+        if (progress.status === 'completed') {
+          playCompletionChime();
+        }
         return { downloads: [progress, ...state.downloads] };
       }
     });
@@ -276,6 +302,13 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
       const updated = await window.luminaAPI.saveSettings(newSettings);
       set({ settings: updated });
     } catch (e) {}
+  },
+
+  cycleTheme: async () => {
+    const current = get().settings?.theme || 'onyx';
+    const themes: ('onyx' | 'cyber' | 'arctic' | 'teal')[] = ['onyx', 'cyber', 'arctic', 'teal'];
+    const next = themes[(themes.indexOf(current) + 1) % themes.length];
+    await get().saveSettings({ theme: next });
   },
 
   initialize: () => {
