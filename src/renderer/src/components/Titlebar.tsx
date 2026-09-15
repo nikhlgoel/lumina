@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Minus, Square, Copy, X, Palette } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
+import luminaLogo from '../assets/lumina_3d.png';
 
 export const Titlebar: React.FC = () => {
   const [isMax, setIsMax] = useState(false);
@@ -21,12 +22,12 @@ export const Titlebar: React.FC = () => {
     <div className="h-10 w-full flex items-center justify-between px-3.5 glass-panel border-b border-white/[0.06] drag-region select-none z-50">
       {/* Brand Icon & Title */}
       <div className="flex items-center gap-2.5">
-        <div className="w-5 h-5 rounded-md bg-gradient-to-tr from-lumina-violet to-lumina-cyan p-[1px] shadow-sm shadow-lumina-cyan/30">
-          <div className="w-full h-full bg-[#0E0F17] rounded-[5px] flex items-center justify-center">
-            <span className="text-[10px] font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-lumina-cyan to-lumina-violet">
-              L
-            </span>
-          </div>
+        <div className="relative w-5 h-5 flex items-center justify-center">
+          <img 
+            src={luminaLogo} 
+            alt="Lumina" 
+            className="w-full h-full object-contain filter drop-shadow-[0_0_8px_rgba(0,242,254,0.6)]" 
+          />
         </div>
         <span className="text-xs font-semibold tracking-wide text-slate-200">
           Lumina

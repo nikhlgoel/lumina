@@ -22,6 +22,10 @@ import {
   FileCheck
 } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
+import luminaLogo from '../assets/lumina_3d.png';
+import torrent3d from '../assets/3d_torrent.png';
+import music3d from '../assets/3d_music.png';
+import download3d from '../assets/3d_download.png';
 
 export const MediaInspector: React.FC = () => {
   const {
@@ -71,22 +75,24 @@ export const MediaInspector: React.FC = () => {
                 className="w-full h-full object-cover"
               />
             ) : isTorrent ? (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-violet/20 via-black to-lumina-cyan/10 text-lumina-violet">
-                <Magnet className="w-12 h-12 stroke-[1.5] animate-pulse" />
-                <span className="text-[10px] font-mono mt-1 text-slate-400">P2P Swarm</span>
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-violet/20 via-black to-lumina-cyan/10 p-2">
+                <img src={torrent3d} alt="BitTorrent P2P Swarm" className="w-20 h-20 object-contain filter drop-shadow-[0_0_12px_rgba(157,78,221,0.5)]" />
+                <span className="text-[10px] font-mono mt-1 text-slate-300">P2P Swarm</span>
               </div>
             ) : isDirect ? (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-cyan/20 via-black to-lumina-emerald/10 text-lumina-cyan">
-                <Zap className="w-12 h-12 stroke-[1.5] animate-pulse" />
-                <span className="text-[10px] font-mono mt-1 text-slate-400">IDM Turbo</span>
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-cyan/20 via-black to-lumina-emerald/10 p-2">
+                <img src={download3d} alt="IDM Turbo" className="w-20 h-20 object-contain filter drop-shadow-[0_0_12px_rgba(0,242,254,0.5)]" />
+                <span className="text-[10px] font-mono mt-1 text-slate-300">IDM Turbo</span>
               </div>
             ) : isPlaylist ? (
-              <div className="w-full h-full flex items-center justify-center text-slate-600">
-                <ListMusic className="w-10 h-10 text-lumina-violet" />
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-violet/20 via-black to-lumina-cyan/10 p-2">
+                <img src={music3d} alt="Music Playlist" className="w-20 h-20 object-contain filter drop-shadow-[0_0_12px_rgba(157,78,221,0.5)]" />
+                <span className="text-[10px] font-mono mt-1 text-slate-300">Playlist Audio</span>
               </div>
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-600">
-                <Film className="w-8 h-8" />
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-cyan/20 via-black to-lumina-violet/10 p-2">
+                <img src={luminaLogo} alt="Lumina Media" className="w-16 h-16 object-contain filter drop-shadow-[0_0_12px_rgba(0,242,254,0.5)]" />
+                <span className="text-[10px] font-mono mt-1 text-slate-300">Lumina Media</span>
               </div>
             )}
 

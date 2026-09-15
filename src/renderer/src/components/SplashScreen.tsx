@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import luminaLogo from '../assets/lumina_3d.png';
 
 interface SplashScreenProps {
   onFinish: () => void;
@@ -48,37 +49,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       <div className="absolute w-96 h-96 rounded-full bg-gradient-to-tr from-lumina-violet/20 via-lumina-cyan/20 to-transparent blur-3xl pointer-events-none animate-pulse-slow" />
 
       <div className="relative z-10 flex flex-col items-center space-y-6">
-        {/* Animated Vector Logo */}
-        <div className="relative w-28 h-28 flex items-center justify-center">
-          <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-lumina-violet to-lumina-cyan blur-xl opacity-40 animate-pulse" />
-          
-          <svg className="w-24 h-24 relative" viewBox="0 0 512 512" fill="none">
-            <circle cx="256" cy="256" r="230" stroke="url(#glassRim)" strokeWidth="4" />
-            <polygon
-              points="256,96 390,173 390,327 256,404 122,327 122,173"
-              stroke="url(#prismGrad)"
-              strokeWidth="6"
-              strokeLinejoin="round"
-              className="animate-spin-slow origin-center opacity-90"
-            />
-            <path
-              d="M 256 96 C 330 140 370 200 350 280 C 335 340 280 370 220 350 C 170 330 160 270 190 220 C 215 180 260 180 280 210"
-              stroke="url(#prismGrad)"
-              strokeWidth="5"
-              strokeLinecap="round"
-            />
-            <circle cx="256" cy="256" r="10" fill="#00F2FE" />
-            <defs>
-              <linearGradient id="prismGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#9D4EDD" />
-                <stop offset="100%" stopColor="#00F2FE" />
-              </linearGradient>
-              <linearGradient id="glassRim" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.6" />
-                <stop offset="100%" stopColor="#00F2FE" stopOpacity="0.2" />
-              </linearGradient>
-            </defs>
-          </svg>
+        {/* 3D Crystal Prism Logo */}
+        <div className="relative w-32 h-32 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-lumina-violet via-lumina-cyan to-transparent blur-2xl opacity-50 animate-pulse" />
+          <img
+            src={luminaLogo}
+            alt="Lumina 3D Logo"
+            className="w-28 h-28 object-contain relative z-10 filter drop-shadow-[0_0_20px_rgba(0,242,254,0.6)] animate-pulse-slow"
+          />
         </div>
 
         {/* Branding Typography */}

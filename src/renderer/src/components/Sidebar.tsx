@@ -1,6 +1,7 @@
 import React from 'react';
 import { Download, Music2, FolderClosed, Settings2, HardDrive, Usb } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
+import luminaLogo from '../assets/lumina_3d.png';
 
 export const Sidebar: React.FC = () => {
   const { activeTab, setActiveTab, downloads, drives } = useLuminaStore();
@@ -15,6 +16,19 @@ export const Sidebar: React.FC = () => {
     <aside className="w-60 h-full flex flex-col justify-between p-3.5 glass-panel border-r border-white/[0.06] select-none z-20">
       {/* Navigation Buttons */}
       <div className="space-y-1.5">
+        {/* Brand Header */}
+        <div className="flex items-center gap-2.5 px-2 py-2 mb-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+          <img 
+            src={luminaLogo} 
+            alt="Lumina" 
+            className="w-7 h-7 object-contain filter drop-shadow-[0_0_10px_rgba(0,242,254,0.5)]" 
+          />
+          <div>
+            <div className="text-xs font-bold tracking-wider text-slate-100">LUMINA</div>
+            <div className="text-[9px] text-slate-400 font-medium">Local Media Workstation</div>
+          </div>
+        </div>
+
         <div className="px-2 py-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
           Menu
         </div>
