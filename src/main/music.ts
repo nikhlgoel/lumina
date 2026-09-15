@@ -32,7 +32,8 @@ export class MusicManager {
       '--dump-json',
       '--flat-playlist',
       '--no-warnings',
-      '--extractor-args', 'youtube:player_client=ios,web',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
     ];
 
     return new Promise((resolve) => {

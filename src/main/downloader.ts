@@ -63,7 +63,8 @@ export class DownloaderManager {
       '--dump-json',
       '--no-warnings',
       '--no-playlist',
-      '--extractor-args', 'youtube:player_client=ios,web',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
     ];
 
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
@@ -212,7 +213,8 @@ export class DownloaderManager {
       'LUMINA_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
       '--ffmpeg-location', ffmpeg,
       '-o', stagingTemplate,
-      '--extractor-args', 'youtube:player_client=ios,web',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
     ];
 
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
