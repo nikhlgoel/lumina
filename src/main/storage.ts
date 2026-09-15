@@ -59,7 +59,11 @@ export class StorageManager {
 
   public getPlaylistDownloadDirectory(playlistTitle: string): string {
     const settings = settingsManager.get();
-    const sanitizedTitle = playlistTitle.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Untitled_Playlist';
+    const rawClean = (typeof playlistTitle === 'string' ? playlistTitle : '')
+      .replace(/[\x00-\x1f\x7f\\/:*?"<>|]/g, '_')
+      .replace(/\.{2,}/g, '_')
+      .trim();
+    const sanitizedTitle = path.basename(rawClean).slice(0, 100) || 'Untitled_Playlist';
     let baseDir: string;
 
     if (settings.autoSaveToUsb) {
@@ -73,7 +77,11 @@ export class StorageManager {
       baseDir = path.join(settings.internalMusicPath, 'Playlists');
     }
 
-    const targetDir = path.join(baseDir, sanitizedTitle);
+    const targetDir = path.resolve(baseDir, sanitizedTitle);
+    if (!targetDir.startsWith(path.resolve(baseDir))) {
+      throw new Error('Invalid playlist directory path');
+    }
+
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }

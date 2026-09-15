@@ -1,13 +1,10 @@
-import { spawn, exec } from 'child_process';
-import util from 'util';
+import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import type { MusicTrack } from '../preload/types';
 import { settingsManager } from './settings';
 import { storageManager } from './storage';
-
-const execAsync = util.promisify(exec);
 
 export class MusicManager {
   private getYtDlpPath(): string {
@@ -24,16 +21,18 @@ export class MusicManager {
 
   public async searchMusic(query: string): Promise<MusicTrack[]> {
     const ytdlp = this.getYtDlpPath();
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return [];
+    if (typeof query !== 'string') return [];
+    const cleanQuery = query.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200);
+    if (!cleanQuery || cleanQuery.startsWith('-')) return [];
 
     const args = [
-      `ytsearch12:${cleanQuery}`,
       '--dump-json',
       '--flat-playlist',
       '--no-warnings',
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
+      '--',
+      `ytsearch12:${cleanQuery}`
     ];
 
     return new Promise((resolve) => {
@@ -74,15 +73,47 @@ export class MusicManager {
   }
 
   public async getStreamUrl(videoId: string): Promise<string> {
-    const ytdlp = this.getYtDlpPath();
-    const target = videoId.startsWith('http') ? videoId : `https://www.youtube.com/watch?v=${videoId}`;
-    try {
-      const { stdout } = await execAsync(`"${ytdlp}" -f bestaudio -g "${target}"`);
-      return stdout.trim().split('\n')[0] || '';
-    } catch (err) {
-      console.error('Failed to get direct audio stream URL:', err);
+    if (typeof videoId !== 'string') return '';
+    const cleanId = videoId.trim();
+    if (!cleanId || cleanId.startsWith('-')) return '';
+
+    let target: string;
+    if (cleanId.startsWith('http://') || cleanId.startsWith('https://')) {
+      try {
+        const parsed = new URL(cleanId);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+        target = parsed.href;
+      } catch {
+        return '';
+      }
+    } else if (/^[a-zA-Z0-9_-]{4,32}$/.test(cleanId)) {
+      target = `https://www.youtube.com/watch?v=${cleanId}`;
+    } else {
       return '';
     }
+
+    const ytdlp = this.getYtDlpPath();
+    return new Promise((resolve) => {
+      const proc = spawn(ytdlp, ['--no-warnings', '-f', 'bestaudio', '-g', '--', target]);
+      let stdout = '';
+
+      proc.stdout.on('data', (c) => {
+        stdout += c.toString();
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0 && stdout.trim()) {
+          resolve(stdout.trim().split('\n')[0]);
+        } else {
+          resolve('');
+        }
+      });
+
+      proc.on('error', (err) => {
+        console.error('Failed to get direct audio stream URL:', err);
+        resolve('');
+      });
+    });
   }
 
   public async getDownloadedMedia(): Promise<{ videos: string[]; music: string[] }> {

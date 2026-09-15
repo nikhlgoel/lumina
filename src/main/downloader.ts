@@ -124,16 +124,30 @@ export class DownloaderManager {
   }
 
   public async inspectUrl(url: string): Promise<MediaMetadata> {
-    const cleanUrl = url.trim();
+    if (typeof url !== 'string') {
+      throw new Error('Invalid URL format');
+    }
+    const cleanUrl = url.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    if (!cleanUrl || cleanUrl.startsWith('-') || cleanUrl.length > 4096) {
+      throw new Error('Malformed or unsupported URL parameter');
+    }
 
     // 1. Check for BitTorrent Magnet Link
     if (cleanUrl.startsWith('magnet:?')) {
+      if (!cleanUrl.toLowerCase().includes('xt=urn:btih:')) {
+        throw new Error('Invalid BitTorrent magnet link: missing infohash parameter');
+      }
       return this.inspectMagnet(cleanUrl);
     }
 
     // 2. Check for .torrent File (Local or URL)
     if (cleanUrl.endsWith('.torrent') || cleanUrl.includes('.torrent?')) {
       return await this.inspectTorrentFile(cleanUrl);
+    }
+
+    // Ensure remote URLs use safe protocols
+    if (!cleanUrl.startsWith('spotify:') && !cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      throw new Error('Unsupported URL protocol. Only HTTP, HTTPS, Magnet, and Spotify links are supported.');
     }
 
     // 3. Check for Direct Downloadable File (IDM Turbo Candidate)
@@ -208,10 +222,20 @@ export class DownloaderManager {
 
   private async inspectTorrentFile(filePath: string): Promise<MediaMetadata> {
     const aria2 = this.getAria2Path();
-    const fileName = path.basename(filePath);
+    let safePath = filePath;
+
+    if (!filePath.startsWith('http://') && !filePath.startsWith('https://')) {
+      const resolved = path.resolve(filePath);
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+        throw new Error('Torrent file not found or inaccessible');
+      }
+      safePath = resolved;
+    }
+
+    const fileName = path.basename(safePath);
 
     return new Promise((resolve) => {
-      const proc = spawn(aria2, ['-S', filePath]);
+      const proc = spawn(aria2, ['-S', '--', safePath]);
       let stdout = '';
       proc.stdout.on('data', (c) => (stdout += c.toString()));
       proc.on('close', () => {
@@ -411,7 +435,6 @@ export class DownloaderManager {
     const settings = settingsManager.get();
 
     const args = [
-      url,
       '--dump-single-json',
       '--flat-playlist',
       '--no-warnings',
@@ -422,6 +445,7 @@ export class DownloaderManager {
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
       args.push('--cookies-from-browser', settings.browserForCookies);
     }
+    args.push('--', url);
 
     return new Promise((resolve) => {
       const proc = spawn(ytdlp, args);
@@ -510,7 +534,6 @@ export class DownloaderManager {
     const settings = settingsManager.get();
 
     const args = [
-      url,
       '--dump-json',
       '--no-warnings',
       '--no-playlist',
@@ -521,6 +544,7 @@ export class DownloaderManager {
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
       args.push('--cookies-from-browser', settings.browserForCookies);
     }
+    args.push('--', url);
 
     return new Promise((resolve, reject) => {
       const proc = spawn(ytdlp, args);
@@ -646,7 +670,22 @@ export class DownloaderManager {
     ];
   }
 
+  private resolveSafeTargetDir(targetDir?: string, defaultDir?: string): string {
+    const fallback = defaultDir || storageManager.getActiveDownloadDirectory('video');
+    if (!targetDir || typeof targetDir !== 'string') return fallback;
+    const resolved = path.resolve(targetDir.trim());
+    const disallowed = ['/', '/bin', '/sbin', '/usr', '/etc', '/boot', '/root', '/sys', '/proc', '/dev', 'C:\\', 'C:\\Windows'];
+    if (disallowed.includes(resolved)) {
+      return fallback;
+    }
+    return resolved;
+  }
+
   public async startDownload(request: DownloadRequest): Promise<string> {
+    if (!request || typeof request !== 'object' || typeof request.url !== 'string') {
+      throw new Error('Invalid download request');
+    }
+
     // Branch 1: BitTorrent P2P Download
     if (request.isTorrent) {
       return this.startTorrentDownload(request);
@@ -665,7 +704,7 @@ export class DownloaderManager {
     // Branch 4: Single media stream download (with Turbo fragment acceleration)
     const taskId = request.id || `task_${Date.now()}`;
     const stagingDir = this.ensureStagingDirectory();
-    const finalDir = request.targetDir || storageManager.getActiveDownloadDirectory(request.mode);
+    const finalDir = this.resolveSafeTargetDir(request.targetDir, storageManager.getActiveDownloadDirectory(request.mode));
     const ytdlp = this.getYtDlpPath();
     const ffmpeg = this.getFfmpegPath();
     const settings = settingsManager.get();
@@ -678,7 +717,6 @@ export class DownloaderManager {
     }
 
     const args = [
-      downloadTarget,
       '--newline',
       '--continue',
       '--part',
@@ -722,6 +760,8 @@ export class DownloaderManager {
       args.push('-x', '--audio-format', request.audioFormat || 'mp3', '--audio-quality', '0');
       args.push('--embed-thumbnail', '--embed-metadata');
     }
+
+    args.push('--', downloadTarget);
 
     const initialProgress: DownloadProgress = {
       taskId,
@@ -825,8 +865,13 @@ export class DownloaderManager {
         }
 
         const stagedPath = path.join(stagingDir, match);
-        const cleanFileName = match.replace(`${taskId}_`, '');
-        const finalPath = path.join(finalDir, cleanFileName);
+        const rawFileName = match.replace(`${taskId}_`, '');
+        const cleanFileName = path.basename(rawFileName).replace(/[\x00-\x1f\x7f\\/:*?"<>|]/g, '_');
+        const finalPath = path.resolve(finalDir, cleanFileName);
+
+        if (!finalPath.startsWith(path.resolve(finalDir))) {
+          throw new Error('Security error: Path traversal detected in final destination');
+        }
 
         this.emitProgress({
           ...lastProgress,
