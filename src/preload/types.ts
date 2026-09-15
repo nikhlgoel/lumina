@@ -23,6 +23,15 @@ export interface SubtitleOption {
   isAuto: boolean;
 }
 
+export interface PlaylistTrack {
+  id: string;
+  title: string;
+  artist: string;
+  durationStr: string;
+  thumbnail?: string;
+  url?: string;
+}
+
 export interface MediaMetadata {
   id: string;
   url: string;
@@ -37,6 +46,11 @@ export interface MediaMetadata {
   formats: MediaFormat[];
   audioFormats: AudioFormatOption[];
   subtitles: SubtitleOption[];
+  isPlaylist?: boolean;
+  playlistType?: 'spotify' | 'youtube' | 'generic';
+  playlistTitle?: string;
+  trackCount?: number;
+  tracks?: PlaylistTrack[];
 }
 
 export interface DownloadRequest {
@@ -52,6 +66,9 @@ export interface DownloadRequest {
   subtitleLang?: string;
   embedSubtitles: boolean;
   targetDir?: string;
+  isPlaylist?: boolean;
+  playlistTitle?: string;
+  tracks?: PlaylistTrack[];
 }
 
 export interface DownloadProgress {
@@ -65,6 +82,9 @@ export interface DownloadProgress {
   stage: string;
   outputPath?: string;
   error?: string;
+  currentTrackIndex?: number;
+  totalTracks?: number;
+  currentTrackTitle?: string;
 }
 
 export interface StorageDrive {

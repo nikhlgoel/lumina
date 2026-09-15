@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Folder, Play, Film, Music, RefreshCw, HardDrive, ExternalLink } from 'lucide-react';
+import { Folder, Play, Film, Music, RefreshCw, HardDrive, ExternalLink, ListMusic } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
 
 export const LocalLibrary: React.FC = () => {
   const { settings } = useLuminaStore();
   const [media, setMedia] = useState<{ videos: string[]; music: string[] }>({ videos: [], music: [] });
-  const [filter, setFilter] = useState<'all' | 'video' | 'music'>('all');
+  const [filter, setFilter] = useState<'all' | 'video' | 'music' | 'playlist'>('all');
   const [search, setSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -34,14 +34,27 @@ export const LocalLibrary: React.FC = () => {
   };
 
   const allItems = [
-    ...media.videos.map((p) => ({ path: p, type: 'video' as const, name: p.split('/').pop() || p })),
-    ...media.music.map((p) => ({ path: p, type: 'music' as const, name: p.split('/').pop() || p }))
+    ...media.videos.map((p) => ({ 
+      path: p, 
+      type: 'video' as const, 
+      name: p.split('/').pop() || p,
+      isPlaylist: p.includes('/Playlists/')
+    })),
+    ...media.music.map((p) => ({ 
+      path: p, 
+      type: 'music' as const, 
+      name: p.split('/').pop() || p,
+      isPlaylist: p.includes('/Playlists/')
+    }))
   ].filter((item) => {
     if (filter === 'video' && item.type !== 'video') return false;
     if (filter === 'music' && item.type !== 'music') return false;
+    if (filter === 'playlist' && !item.isPlaylist) return false;
     if (search.trim() && !item.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+
+  const playlistCount = [...media.videos, ...media.music].filter(p => p.includes('/Playlists/')).length;
 
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300">
@@ -57,13 +70,27 @@ export const LocalLibrary: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => handleOpenDirectory(settings?.internalVideoPath || '')}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card text-xs text-slate-300 hover:text-white transition-colors"
           >
             <Folder className="w-3.5 h-3.5 text-lumina-cyan" />
-            <span>Open Videos Folder</span>
+            <span>Videos</span>
+          </button>
+          <button
+            onClick={() => handleOpenDirectory(settings?.internalMusicPath || '')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card text-xs text-slate-300 hover:text-white transition-colors"
+          >
+            <Music className="w-3.5 h-3.5 text-lumina-violet" />
+            <span>Music</span>
+          </button>
+          <button
+            onClick={() => handleOpenDirectory(`${settings?.internalMusicPath}/Playlists` || '')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card text-xs text-slate-300 hover:text-white transition-colors"
+          >
+            <ListMusic className="w-3.5 h-3.5 text-lumina-emerald" />
+            <span>Playlists</span>
           </button>
           <button
             onClick={loadMedia}
@@ -78,7 +105,7 @@ export const LocalLibrary: React.FC = () => {
       {/* Filter Tabs & Search */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-full sm:w-auto">
-          {(['all', 'video', 'music'] as const).map((tab) => (
+          {(['all', 'video', 'music', 'playlist'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setFilter(tab)}
@@ -88,7 +115,13 @@ export const LocalLibrary: React.FC = () => {
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {tab === 'all' ? `All (${media.videos.length + media.music.length})` : tab === 'video' ? `Videos (${media.videos.length})` : `Music (${media.music.length})`}
+              {tab === 'all' 
+                ? `All (${media.videos.length + media.music.length})` 
+                : tab === 'video' 
+                ? `Videos (${media.videos.length})` 
+                : tab === 'music'
+                ? `Music (${media.music.length})`
+                : `Playlists (${playlistCount})`}
             </button>
           ))}
         </div>
@@ -113,16 +146,33 @@ export const LocalLibrary: React.FC = () => {
               <div className="flex items-center gap-3 min-w-0">
                 <div
                   className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                    item.type === 'video' ? 'bg-lumina-cyan/15 text-lumina-cyan' : 'bg-lumina-violet/15 text-lumina-violet'
+                    item.isPlaylist
+                      ? 'bg-lumina-violet/20 text-lumina-violet border border-lumina-violet/30'
+                      : item.type === 'video' 
+                      ? 'bg-lumina-cyan/15 text-lumina-cyan' 
+                      : 'bg-lumina-violet/15 text-lumina-violet'
                   }`}
                 >
-                  {item.type === 'video' ? <Film className="w-4 h-4" /> : <Music className="w-4 h-4" />}
+                  {item.isPlaylist ? (
+                    <ListMusic className="w-4 h-4" />
+                  ) : item.type === 'video' ? (
+                    <Film className="w-4 h-4" />
+                  ) : (
+                    <Music className="w-4 h-4" />
+                  )}
                 </div>
 
                 <div className="min-w-0">
-                  <h4 className="text-xs font-semibold text-slate-200 truncate" title={item.name}>
-                    {item.name}
-                  </h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-semibold text-slate-200 truncate" title={item.name}>
+                      {item.name}
+                    </h4>
+                    {item.isPlaylist && (
+                      <span className="px-1.5 py-0.2 rounded bg-lumina-violet/20 text-lumina-violet font-mono text-[9px] font-bold shrink-0">
+                        Playlist
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-slate-500 truncate">{item.path}</p>
                 </div>
               </div>
@@ -154,7 +204,7 @@ export const LocalLibrary: React.FC = () => {
           <div className="space-y-1">
             <h4 className="text-sm font-semibold text-slate-300">No media found in library</h4>
             <p className="text-xs text-slate-500 max-w-sm">
-              Your downloaded movies, videos, and music will be automatically cataloged here.
+              Your downloaded movies, videos, music, and entire playlists will be automatically cataloged here.
             </p>
           </div>
         </div>

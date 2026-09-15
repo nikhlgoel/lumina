@@ -15,6 +15,7 @@ export const Omnibox: React.FC = () => {
           text &&
           (text.includes('youtube.com/') ||
             text.includes('youtu.be/') ||
+            text.includes('spotify.com/') ||
             text.includes('instagram.com/') ||
             text.includes('tiktok.com/') ||
             text.includes('x.com/') ||
@@ -72,7 +73,7 @@ export const Omnibox: React.FC = () => {
           type="text"
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
-          placeholder="Paste any video, movie, or song link (YouTube, Instagram, TikTok, etc.)..."
+          placeholder="Paste any link (Spotify playlist, YouTube Music, Instagram, TikTok, 8K Video)..."
           disabled={isInspecting}
           className="w-full pl-11 pr-32 py-3.5 rounded-2xl glass-input text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-lumina-cyan/50 focus:ring-2 focus:ring-lumina-cyan/20 transition-all font-sans"
         />
@@ -124,13 +125,24 @@ export const Omnibox: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                const url = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+                const url = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
                 setUrlInput(url);
                 inspectUrl(url);
               }}
-              className="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-lumina-cyan/15 hover:text-lumina-cyan transition-colors"
+              className="px-2 py-0.5 rounded-md bg-[#1DB954]/10 text-[#1DB954] hover:bg-[#1DB954]/25 transition-colors font-medium"
             >
-              Me at the zoo (19s)
+              🎵 Spotify Top Hits
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'https://music.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj';
+                setUrlInput(url);
+                inspectUrl(url);
+              }}
+              className="px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/25 transition-colors font-medium"
+            >
+              ▶️ YT Music Pop
             </button>
             <button
               type="button"
@@ -141,7 +153,7 @@ export const Omnibox: React.FC = () => {
               }}
               className="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-lumina-cyan/15 hover:text-lumina-cyan transition-colors"
             >
-              Rick Astley (4K Remaster)
+              Rick Astley (4K)
             </button>
           </div>
 

@@ -57,6 +57,29 @@ export class StorageManager {
     return mode === 'video' ? settings.internalVideoPath : settings.internalMusicPath;
   }
 
+  public getPlaylistDownloadDirectory(playlistTitle: string): string {
+    const settings = settingsManager.get();
+    const sanitizedTitle = playlistTitle.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Untitled_Playlist';
+    let baseDir: string;
+
+    if (settings.autoSaveToUsb) {
+      const usbDrive = this.cachedDrives.find(d => d.isRemovable);
+      if (usbDrive && usbDrive.mountpoint && fs.existsSync(usbDrive.mountpoint)) {
+        baseDir = path.join(usbDrive.mountpoint, settings.usbFolderName || 'LuminaMedia', 'Playlists');
+      } else {
+        baseDir = path.join(settings.internalMusicPath, 'Playlists');
+      }
+    } else {
+      baseDir = path.join(settings.internalMusicPath, 'Playlists');
+    }
+
+    const targetDir = path.join(baseDir, sanitizedTitle);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    return targetDir;
+  }
+
   private async getLinuxDrives(): Promise<StorageDrive[]> {
     const drives: StorageDrive[] = [];
     try {
@@ -196,11 +219,15 @@ export class StorageManager {
       const baseDir = path.join(mountpoint, settings.usbFolderName || 'LuminaMedia');
       const videoDir = path.join(baseDir, 'Videos');
       const musicDir = path.join(baseDir, 'Music');
+      const playlistDir = path.join(baseDir, 'Playlists');
       if (!fs.existsSync(videoDir)) {
         fs.mkdirSync(videoDir, { recursive: true });
       }
       if (!fs.existsSync(musicDir)) {
         fs.mkdirSync(musicDir, { recursive: true });
+      }
+      if (!fs.existsSync(playlistDir)) {
+        fs.mkdirSync(playlistDir, { recursive: true });
       }
     } catch (e) {
       console.warn(`Failed to auto-create LuminaMedia directory on ${mountpoint}:`, e);

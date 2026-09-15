@@ -1,6 +1,6 @@
 {
   "name": "lumina-media",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ultra-sleek universal media downloader and player",
   "main": "dist-electron/main/index.js",
   "author": "nikhlgoel",
@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "package:dir": "pnpm build && electron-builder --dir",
     "package:linux": "pnpm build && electron-builder --linux rpm --linux AppImage",
     "package:win": "pnpm build && electron-builder --win nsis"
   },

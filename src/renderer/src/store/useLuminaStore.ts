@@ -122,8 +122,10 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
     try {
       const metadata = await window.luminaAPI.inspectUrl(targetUrl);
       const defaultFormat = metadata.formats[0] || null;
+      const isAudioOnly = metadata.formats.length === 0;
       set({
         inspectedMedia: metadata,
+        downloadMode: isAudioOnly ? 'audio' : get().downloadMode,
         selectedFormat: defaultFormat,
         isInspecting: false,
         selectedSubtitleLang: metadata.subtitles[0]?.lang || 'en'
@@ -152,27 +154,36 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
     if (!inspectedMedia) return;
 
     const taskId = `task_${Date.now()}`;
+    const effectiveMode = inspectedMedia.formats.length === 0 ? 'audio' : downloadMode;
+
     const request: DownloadRequest = {
       id: taskId,
       url: inspectedMedia.url,
       title: inspectedMedia.title,
       thumbnail: inspectedMedia.thumbnail,
-      mode: downloadMode,
+      mode: effectiveMode,
       videoFormatId: selectedFormat?.formatId,
       resolution: selectedFormat?.resolution,
       audioFormat: selectedAudioFormat,
       includeSubtitles,
       subtitleLang: selectedSubtitleLang,
-      embedSubtitles
+      embedSubtitles,
+      isPlaylist: inspectedMedia.isPlaylist,
+      playlistTitle: inspectedMedia.playlistTitle || inspectedMedia.title,
+      tracks: inspectedMedia.tracks
     };
+
+    const modeLabel = inspectedMedia.isPlaylist
+      ? (inspectedMedia.playlistType === 'spotify' ? 'SPOTIFY PLAYLIST' : 'YT PLAYLIST')
+      : (effectiveMode === 'video' ? (selectedFormat?.resolution || 'Video') : selectedAudioFormat.toUpperCase());
 
     // Store metadata for the queue cards
     const newMap = new Map(get().activeTasksMetadata);
     newMap.set(taskId, {
-      title: inspectedMedia.title,
+      title: inspectedMedia.isPlaylist ? `[Playlist] ${inspectedMedia.title}` : inspectedMedia.title,
       thumbnail: inspectedMedia.thumbnail,
       uploader: inspectedMedia.uploader,
-      mode: downloadMode === 'video' ? (selectedFormat?.resolution || 'Video') : selectedAudioFormat.toUpperCase()
+      mode: modeLabel
     });
 
     set({ activeTasksMetadata: newMap });

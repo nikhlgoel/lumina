@@ -89,37 +89,53 @@ export class MusicManager {
     const settings = settingsManager.get();
     const drives = await storageManager.getDrives();
     
-    const searchDirsVideo = [settings.internalVideoPath];
-    const searchDirsMusic = [settings.internalMusicPath];
+    const searchDirsVideo = [
+      settings.internalVideoPath,
+      path.join(settings.internalVideoPath, 'Playlists')
+    ];
+    const searchDirsMusic = [
+      settings.internalMusicPath,
+      path.join(settings.internalMusicPath, 'Playlists')
+    ];
 
     for (const drive of drives) {
       if (drive.isRemovable && drive.mountpoint) {
-        searchDirsVideo.push(path.join(drive.mountpoint, settings.usbFolderName || 'LuminaMedia', 'Videos'));
-        searchDirsMusic.push(path.join(drive.mountpoint, settings.usbFolderName || 'LuminaMedia', 'Music'));
+        const baseUsb = path.join(drive.mountpoint, settings.usbFolderName || 'LuminaMedia');
+        searchDirsVideo.push(path.join(baseUsb, 'Videos'));
+        searchDirsVideo.push(path.join(baseUsb, 'Playlists'));
+        searchDirsMusic.push(path.join(baseUsb, 'Music'));
+        searchDirsMusic.push(path.join(baseUsb, 'Playlists'));
       }
     }
 
     const videos: string[] = [];
     const music: string[] = [];
 
-    const scan = (dirs: string[], targetList: string[], extensions: string[]) => {
-      for (const dir of dirs) {
-        if (fs.existsSync(dir)) {
-          try {
-            const files = fs.readdirSync(dir);
-            for (const f of files) {
-              const ext = path.extname(f).toLowerCase();
-              if (extensions.includes(ext)) {
-                targetList.push(path.join(dir, f));
-              }
+    const scan = (dir: string, targetList: string[], extensions: string[], depth = 0) => {
+      if (depth > 3 || !fs.existsSync(dir)) return;
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scan(fullPath, targetList, extensions, depth + 1);
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (extensions.includes(ext)) {
+              targetList.push(fullPath);
             }
-          } catch (e) {}
+          }
         }
-      }
+      } catch (e) {}
     };
 
-    scan(searchDirsVideo, videos, ['.mp4', '.mkv', '.webm', '.avi', '.mov']);
-    scan(searchDirsMusic, music, ['.mp3', '.flac', '.opus', '.m4a', '.wav', '.ogg']);
+    for (const dir of searchDirsVideo) {
+      scan(dir, videos, ['.mp4', '.mkv', '.webm', '.avi', '.mov']);
+    }
+
+    for (const dir of searchDirsMusic) {
+      scan(dir, music, ['.mp3', '.flac', '.opus', '.m4a', '.wav', '.ogg']);
+    }
 
     return { videos, music };
   }

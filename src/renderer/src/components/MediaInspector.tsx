@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Film, 
   Music, 
@@ -8,7 +8,13 @@ import {
   Clock, 
   User, 
   Eye, 
-  X 
+  X,
+  ListMusic,
+  FolderDown,
+  ChevronDown,
+  ChevronUp,
+  Disc3,
+  Usb
 } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
 
@@ -28,17 +34,30 @@ export const MediaInspector: React.FC = () => {
     embedSubtitles,
     setEmbedSubtitles,
     startDownload,
-    clearInspectedMedia
+    clearInspectedMedia,
+    drives,
+    settings
   } = useLuminaStore();
 
+  const [showTracklist, setShowTracklist] = useState(false);
+
   if (!inspectedMedia) return null;
+
+  const isPlaylist = Boolean(inspectedMedia.isPlaylist);
+  const isSpotify = inspectedMedia.playlistType === 'spotify' || inspectedMedia.url.includes('spotify.com');
+  const isYouTubePlaylist = inspectedMedia.playlistType === 'youtube' || (!isSpotify && isPlaylist);
+  const hasUsb = Boolean(settings?.autoSaveToUsb && drives.some(d => d.isRemovable));
+
+  const targetFolderName = (inspectedMedia.playlistTitle || inspectedMedia.title)
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .trim();
 
   return (
     <div className="w-full p-5 rounded-3xl glass-panel border border-white/[0.1] shadow-2xl shadow-black/40 space-y-5 animate-in fade-in slide-in-from-bottom-3 duration-300">
       {/* Top Header: Title, Thumbnail, Creator */}
       <div className="flex flex-col sm:flex-row gap-4 items-start justify-between">
-        <div className="flex gap-3.5 items-start">
-          <div className="relative w-36 sm:w-44 aspect-video rounded-xl overflow-hidden bg-black/50 border border-white/10 shrink-0">
+        <div className="flex gap-4 items-start min-w-0">
+          <div className={`relative ${isPlaylist ? 'w-32 sm:w-36 aspect-square' : 'w-36 sm:w-44 aspect-video'} rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink-0 shadow-lg`}>
             {inspectedMedia.thumbnail ? (
               <img
                 src={inspectedMedia.thumbnail}
@@ -47,25 +66,51 @@ export const MediaInspector: React.FC = () => {
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-slate-600">
-                <Film className="w-8 h-8" />
+                {isPlaylist ? <ListMusic className="w-10 h-10 text-lumina-violet" /> : <Film className="w-8 h-8" />}
               </div>
             )}
-            <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-medium text-white flex items-center gap-1">
+            <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-medium text-white flex items-center gap-1">
               <Clock className="w-2.5 h-2.5" />
               {inspectedMedia.durationStr}
             </div>
+            {isPlaylist && (
+              <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-md bg-lumina-violet/90 text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1 shadow-md">
+                <Disc3 className="w-2.5 h-2.5 animate-spin" />
+                Playlist
+              </div>
+            )}
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-2 min-w-0">
+            {isPlaylist && (
+              <div className="flex items-center gap-2">
+                {isSpotify ? (
+                  <span className="px-2.5 py-0.5 rounded-full bg-[#1DB954]/20 border border-[#1DB954]/40 text-[#1DB954] text-[10px] font-bold tracking-wide flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#1DB954] animate-pulse" />
+                    Spotify Lossless Audio Bridge
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-[10px] font-bold tracking-wide flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                    YouTube Music Playlist
+                  </span>
+                )}
+                <span className="text-[11px] font-mono text-slate-400">
+                  {inspectedMedia.trackCount} Tracks
+                </span>
+              </div>
+            )}
+
             <h3 className="text-sm sm:text-base font-bold text-slate-100 line-clamp-2 leading-snug">
               {inspectedMedia.title}
             </h3>
+
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
               <span className="flex items-center gap-1 text-slate-300 font-medium">
                 <User className="w-3 h-3 text-lumina-cyan" />
                 {inspectedMedia.uploader}
               </span>
-              {inspectedMedia.viewCount > 0 && (
+              {!isPlaylist && inspectedMedia.viewCount > 0 && (
                 <span className="flex items-center gap-1 text-[11px] text-slate-500">
                   <Eye className="w-3 h-3" />
                   {inspectedMedia.viewCount.toLocaleString()} views
@@ -82,42 +127,44 @@ export const MediaInspector: React.FC = () => {
 
         <button
           onClick={clearInspectedMedia}
-          className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+          className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition-colors shrink-0"
           title="Dismiss preview"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Mode Switcher Tabs */}
-      <div className="flex items-center gap-2 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-fit">
-        <button
-          onClick={() => setDownloadMode('video')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-            downloadMode === 'video'
-              ? 'bg-lumina-cyan text-black shadow-md shadow-lumina-cyan/30'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Film className="w-3.5 h-3.5" />
-          <span>Video & Audio</span>
-        </button>
+      {/* Mode Switcher Tabs (Shown for Video or YouTube Playlist) */}
+      {inspectedMedia.formats.length > 0 && (
+        <div className="flex items-center gap-2 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-fit">
+          <button
+            onClick={() => setDownloadMode('video')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              downloadMode === 'video'
+                ? 'bg-lumina-cyan text-black shadow-md shadow-lumina-cyan/30'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>Video & Audio</span>
+          </button>
 
-        <button
-          onClick={() => setDownloadMode('audio')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-            downloadMode === 'audio'
-              ? 'bg-lumina-violet text-white shadow-md shadow-lumina-violet/30'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Music className="w-3.5 h-3.5" />
-          <span>Audio Only (High-Res)</span>
-        </button>
-      </div>
+          <button
+            onClick={() => setDownloadMode('audio')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              downloadMode === 'audio'
+                ? 'bg-lumina-violet text-white shadow-md shadow-lumina-violet/30'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Music className="w-3.5 h-3.5" />
+            <span>Audio Only (High-Res)</span>
+          </button>
+        </div>
+      )}
 
       {/* Format Options Matrix */}
-      {downloadMode === 'video' ? (
+      {downloadMode === 'video' && inspectedMedia.formats.length > 0 ? (
         <div className="space-y-2">
           <label className="text-xs font-semibold text-slate-300">
             Available Video Resolutions:
@@ -159,9 +206,16 @@ export const MediaInspector: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-300">
-            Audio Extraction Format:
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-slate-300">
+              Audio Extraction Quality & Format:
+            </label>
+            {isPlaylist && (
+              <span className="text-[11px] text-lumina-violet font-mono font-medium">
+                Applied to all {inspectedMedia.trackCount} tracks
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
             {inspectedMedia.audioFormats.map((audioFmt) => {
               const isSelected = selectedAudioFormat === audioFmt.format;
@@ -194,8 +248,51 @@ export const MediaInspector: React.FC = () => {
         </div>
       )}
 
-      {/* Subtitles Drawer (Only for video mode) */}
-      {downloadMode === 'video' && inspectedMedia.subtitles.length > 0 && (
+      {/* Playlist Tracklist Drawer Accordion */}
+      {isPlaylist && inspectedMedia.tracks && inspectedMedia.tracks.length > 0 && (
+        <div className="p-3.5 rounded-2xl bg-black/40 border border-white/[0.06] space-y-2">
+          <button
+            onClick={() => setShowTracklist(!showTracklist)}
+            className="w-full flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <ListMusic className="w-4 h-4 text-lumina-violet" />
+              <span>Review Playlist Tracks ({inspectedMedia.tracks.length} Songs)</span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] text-slate-400">
+              <span>{showTracklist ? 'Hide List' : 'View Tracklist'}</span>
+              {showTracklist ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </div>
+          </button>
+
+          {showTracklist && (
+            <div className="max-h-56 overflow-y-auto space-y-1 pr-1 pt-2 border-t border-white/[0.04]">
+              {inspectedMedia.tracks.map((track, idx) => (
+                <div
+                  key={track.id || idx}
+                  className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] text-xs transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-5 text-center text-[10px] font-mono text-slate-500">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-200 truncate">{track.title}</div>
+                      <div className="text-[10px] text-slate-400 truncate">{track.artist}</div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400 shrink-0 pl-2">
+                    {track.durationStr}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Subtitles Drawer (Only for single video mode) */}
+      {!isPlaylist && downloadMode === 'video' && inspectedMedia.subtitles.length > 0 && (
         <div className="p-3.5 rounded-2xl bg-black/30 border border-white/[0.06] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -249,6 +346,21 @@ export const MediaInspector: React.FC = () => {
         </div>
       )}
 
+      {/* Target Destination Indicator */}
+      {isPlaylist && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
+          {hasUsb ? (
+            <Usb className="w-3.5 h-3.5 text-lumina-emerald shrink-0" />
+          ) : (
+            <FolderDown className="w-3.5 h-3.5 text-lumina-violet shrink-0" />
+          )}
+          <span className="truncate">
+            Target Folder: <span className="font-mono text-slate-200">Playlists/{targetFolderName}/</span>
+            {hasUsb && <span className="text-lumina-emerald ml-1.5 font-medium">(Auto-saving to USB)</span>}
+          </span>
+        </div>
+      )}
+
       {/* Start Download Action Button */}
       <div className="pt-2">
         <button
@@ -256,12 +368,27 @@ export const MediaInspector: React.FC = () => {
             await startDownload();
             clearInspectedMedia();
           }}
-          className="w-full py-3.5 rounded-2xl text-sm font-bold text-black glass-button-primary flex items-center justify-center gap-2 shadow-lg shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40 transition-all active:scale-[0.99]"
+          className={`w-full py-3.5 rounded-2xl text-sm font-bold text-black flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.99] ${
+            isPlaylist
+              ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald text-white hover:brightness-110 shadow-lumina-violet/25 hover:shadow-lumina-violet/40'
+              : 'glass-button-primary shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40'
+          }`}
         >
-          <Download className="w-4 h-4 stroke-[2.5]" />
-          <span>
-            Start Download ({downloadMode === 'video' ? selectedFormat?.resolution : selectedAudioFormat.toUpperCase()})
-          </span>
+          {isPlaylist ? (
+            <>
+              <FolderDown className="w-4 h-4 stroke-[2.5]" />
+              <span>
+                Download Entire Playlist ({inspectedMedia.trackCount} Tracks) as {selectedAudioFormat.toUpperCase()}
+              </span>
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4 stroke-[2.5]" />
+              <span>
+                Start Download ({downloadMode === 'video' ? selectedFormat?.resolution : selectedAudioFormat.toUpperCase()})
+              </span>
+            </>
+          )}
         </button>
       </div>
     </div>

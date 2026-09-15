@@ -2,13 +2,22 @@ import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import type { MediaMetadata, MediaFormat, AudioFormatOption, SubtitleOption, DownloadRequest, DownloadProgress } from '../preload/types';
+import type { 
+  MediaMetadata, 
+  MediaFormat, 
+  AudioFormatOption, 
+  SubtitleOption, 
+  DownloadRequest, 
+  DownloadProgress, 
+  PlaylistTrack 
+} from '../preload/types';
 import { settingsManager } from './settings';
 import { storageManager } from './storage';
 
 export class DownloaderManager {
   private activeProcesses = new Map<string, { proc: ChildProcess; request: DownloadRequest; progress: DownloadProgress }>();
   private progressListeners: ((progress: DownloadProgress) => void)[] = [];
+  private cancelledTasks = new Set<string>();
 
   constructor() {
     this.ensureStagingDirectory();
@@ -55,6 +64,234 @@ export class DownloaderManager {
   }
 
   public async inspectUrl(url: string): Promise<MediaMetadata> {
+    const cleanUrl = url.trim();
+
+    // 1. Check for Spotify Playlist / Album / Track
+    const spotifyMatch = cleanUrl.match(/(?:open\.spotify\.com\/|spotify:)(playlist|album|track)[/:]([a-zA-Z0-9]+)/);
+    if (spotifyMatch) {
+      const type = spotifyMatch[1] as 'playlist' | 'album' | 'track';
+      const id = spotifyMatch[2];
+      return await this.inspectSpotify(cleanUrl, type, id);
+    }
+
+    // 2. Check for YouTube / YouTube Music Playlist
+    const isYtPlaylist = (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) && 
+      (cleanUrl.includes('playlist?list=') || cleanUrl.includes('&list=') || cleanUrl.includes('?list='));
+    if (isYtPlaylist) {
+      try {
+        const playlistMeta = await this.inspectYouTubePlaylist(cleanUrl);
+        if (playlistMeta) {
+          return playlistMeta;
+        }
+      } catch (e) {
+        console.warn('YouTube playlist extraction failed, falling back to standard inspect:', e);
+      }
+    }
+
+    // 3. Fallback to standard single media inspection
+    return await this.inspectStandardMedia(cleanUrl);
+  }
+
+  private async inspectSpotify(url: string, type: 'playlist' | 'album' | 'track', id: string): Promise<MediaMetadata> {
+    const embedUrl = `https://open.spotify.com/embed/${type}/${id}`;
+    const response = await fetch(embedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Spotify server returned HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
+    if (!match) {
+      throw new Error('Unable to extract Spotify payload. Link may be private or restricted.');
+    }
+
+    const payload = JSON.parse(match[1]);
+    const entity = payload?.props?.pageProps?.state?.data?.entity;
+    if (!entity) {
+      throw new Error('Spotify entity data missing from payload');
+    }
+
+    // Resolve cover art from visuals or images
+    let coverArt = '';
+    const images = entity.visualIdentity?.image || entity.coverArt?.image || entity.images || [];
+    if (Array.isArray(images) && images.length > 0) {
+      coverArt = images[images.length - 1]?.url || images[0]?.url || '';
+    }
+
+    const audioFormats = this.getStandardAudioFormats(0);
+
+    if (type === 'track') {
+      const artists = Array.isArray(entity.artists) 
+        ? entity.artists.map((a: any) => a.name).join(', ') 
+        : (entity.subtitle || 'Spotify Artist');
+      const duration = Math.round((entity.duration || 0) / 1000);
+
+      return {
+        id,
+        url,
+        title: `${artists} - ${entity.title || entity.name || 'Untitled Track'}`,
+        thumbnail: coverArt,
+        duration,
+        durationStr: this.formatDuration(duration),
+        uploader: artists,
+        viewCount: 0,
+        isLive: false,
+        formats: [],
+        audioFormats,
+        subtitles: [],
+        isPlaylist: false
+      };
+    }
+
+    // Playlist or Album
+    const rawTracks = Array.isArray(entity.trackList) ? entity.trackList : [];
+    const tracks: PlaylistTrack[] = rawTracks.map((t: any, idx: number) => {
+      const artist = t.subtitle || (Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(', ') : 'Unknown Artist');
+      const durSec = Math.round((t.duration || 0) / 1000);
+      const trackThumb = t.visualIdentity?.image?.[0]?.url || coverArt;
+      return {
+        id: t.id || t.uid || `track_${idx + 1}`,
+        title: t.title || `Track ${idx + 1}`,
+        artist,
+        durationStr: this.formatDuration(durSec),
+        thumbnail: trackThumb,
+        url: `https://open.spotify.com/track/${t.id || t.uid || ''}`
+      };
+    });
+
+    const totalDurationMs = rawTracks.reduce((acc: number, t: any) => acc + (t.duration || 0), 0);
+    const totalDurationSec = Math.round(totalDurationMs / 1000);
+    const curator = entity.subtitle || entity.authors?.[0]?.name || (type === 'album' ? 'Spotify Album' : 'Spotify Curated');
+    const collectionTitle = entity.title || entity.name || (type === 'album' ? 'Spotify Album' : 'Spotify Playlist');
+
+    return {
+      id,
+      url,
+      title: collectionTitle,
+      thumbnail: coverArt,
+      duration: totalDurationSec,
+      durationStr: this.formatDuration(totalDurationSec),
+      uploader: curator,
+      viewCount: tracks.length,
+      isLive: false,
+      formats: [],
+      audioFormats,
+      subtitles: [],
+      isPlaylist: true,
+      playlistType: 'spotify',
+      playlistTitle: collectionTitle,
+      trackCount: tracks.length,
+      tracks
+    };
+  }
+
+  private async inspectYouTubePlaylist(url: string): Promise<MediaMetadata | null> {
+    const ytdlp = this.getYtDlpPath();
+    const settings = settingsManager.get();
+
+    const args = [
+      url,
+      '--dump-single-json',
+      '--flat-playlist',
+      '--no-warnings',
+      '--js-runtimes', 'node',
+      '--remote-components', 'ejs:github',
+    ];
+
+    if (settings.browserForCookies && settings.browserForCookies !== 'none') {
+      args.push('--cookies-from-browser', settings.browserForCookies);
+    }
+
+    return new Promise((resolve) => {
+      const proc = spawn(ytdlp, args);
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      proc.on('close', (code) => {
+        if (code !== 0 || !stdout.trim()) {
+          return resolve(null);
+        }
+
+        try {
+          const raw = JSON.parse(stdout);
+          if (!Array.isArray(raw.entries) || raw.entries.length === 0) {
+            return resolve(null);
+          }
+
+          const tracks: PlaylistTrack[] = raw.entries.map((entry: any, idx: number) => {
+            const entryTitle = entry.title || `Track ${idx + 1}`;
+            const entryArtist = entry.uploader || entry.channel || 'YouTube Artist';
+            const dur = entry.duration || 0;
+            const thumb = entry.thumbnails?.[0]?.url || (entry.id ? `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg` : '');
+            const trackUrl = entry.url || (entry.id ? `https://www.youtube.com/watch?v=${entry.id}` : undefined);
+            return {
+              id: entry.id || String(idx + 1),
+              title: entryTitle,
+              artist: entryArtist,
+              durationStr: this.formatDuration(dur),
+              thumbnail: thumb,
+              url: trackUrl
+            };
+          });
+
+          const coverArt = raw.thumbnails?.[raw.thumbnails.length - 1]?.url || tracks[0]?.thumbnail || '';
+          const playlistTitle = raw.title || 'YouTube Playlist';
+          const uploader = raw.uploader || raw.channel || 'YouTube Playlist';
+
+          const formats: MediaFormat[] = [
+            { formatId: 'bestvideo[height<=1080]+bestaudio/best', resolution: '1080p (FHD)', fps: 60, vcodec: 'H.264', acodec: 'AAC', filesize: 0, filesizeStr: 'HD Stream', ext: 'mp4', quality: '1080p • Full HD' },
+            { formatId: 'bestvideo[height<=2160]+bestaudio/best', resolution: '4K (2160p)', fps: 60, vcodec: 'VP9/AV1', acodec: 'AAC', filesize: 0, filesizeStr: 'Ultra HD', ext: 'mp4', quality: '4K • Ultra HD' },
+            { formatId: 'bestvideo[height<=720]+bestaudio/best', resolution: '720p (HD)', fps: 30, vcodec: 'H.264', acodec: 'AAC', filesize: 0, filesizeStr: 'Standard HD', ext: 'mp4', quality: '720p • HD' }
+          ];
+
+          const audioFormats = this.getStandardAudioFormats(0);
+
+          resolve({
+            id: raw.id || String(Date.now()),
+            url,
+            title: playlistTitle,
+            thumbnail: coverArt,
+            duration: 0,
+            durationStr: `${tracks.length} tracks`,
+            uploader,
+            viewCount: tracks.length,
+            isLive: false,
+            formats,
+            audioFormats,
+            subtitles: [],
+            isPlaylist: true,
+            playlistType: 'youtube',
+            playlistTitle,
+            trackCount: tracks.length,
+            tracks
+          });
+        } catch (e) {
+          resolve(null);
+        }
+      });
+
+      proc.on('error', () => {
+        resolve(null);
+      });
+    });
+  }
+
+  private async inspectStandardMedia(url: string): Promise<MediaMetadata> {
     const ytdlp = this.getYtDlpPath();
     const settings = settingsManager.get();
 
@@ -108,9 +345,6 @@ export class DownloaderManager {
     const rawFormats = Array.isArray(raw.formats) ? raw.formats : [];
     const formatsMap = new Map<string, MediaFormat>();
 
-    // Resolutions to look for
-    const targetHeights = [4320, 2160, 1440, 1080, 720, 480, 360];
-
     for (const f of rawFormats) {
       if (!f.vcodec || f.vcodec === 'none') continue;
       const height = f.height || 0;
@@ -152,16 +386,8 @@ export class DownloaderManager {
         return hB - hA;
       });
 
-    // Audio format options
-    const audioFormats: AudioFormatOption[] = [
-      { format: 'flac', label: 'FLAC Lossless', bitrate: 'Lossless (24-bit/48kHz)', approxSizeStr: this.formatBytes(raw.duration ? raw.duration * 120000 : 35000000) },
-      { format: 'mp3', label: 'MP3 High-Fidelity', bitrate: '320 kbps CBR', approxSizeStr: this.formatBytes(raw.duration ? (raw.duration * 320 * 1024) / 8 : 12000000) },
-      { format: 'opus', label: 'OPUS High-Res', bitrate: '160 kbps Native', approxSizeStr: this.formatBytes(raw.duration ? (raw.duration * 160 * 1024) / 8 : 7000000) },
-      { format: 'aac', label: 'AAC / M4A', bitrate: '256 kbps (Apple/Mobile)', approxSizeStr: this.formatBytes(raw.duration ? (raw.duration * 256 * 1024) / 8 : 9000000) },
-      { format: 'wav', label: 'WAV Studio PCM', bitrate: 'Uncompressed', approxSizeStr: this.formatBytes(raw.duration ? raw.duration * 176400 : 50000000) },
-    ];
+    const audioFormats = this.getStandardAudioFormats(raw.duration || 0);
 
-    // Subtitle parsing
     const subtitles: SubtitleOption[] = [];
     const subsObj = raw.subtitles || {};
     const autoSubsObj = raw.automatic_captions || {};
@@ -191,11 +417,28 @@ export class DownloaderManager {
       isLive: Boolean(raw.is_live),
       formats,
       audioFormats,
-      subtitles: subtitles.slice(0, 30) // Top 30 languages
+      subtitles: subtitles.slice(0, 30),
+      isPlaylist: false
     };
   }
 
+  private getStandardAudioFormats(durationSec: number): AudioFormatOption[] {
+    return [
+      { format: 'mp3', label: 'MP3 High-Fidelity', bitrate: '320 kbps CBR', approxSizeStr: durationSec ? this.formatBytes((durationSec * 320 * 1024) / 8) : '8-12 MB' },
+      { format: 'flac', label: 'FLAC Lossless', bitrate: 'Lossless (24-bit/48kHz)', approxSizeStr: durationSec ? this.formatBytes(durationSec * 120000) : '25-35 MB' },
+      { format: 'opus', label: 'OPUS High-Res', bitrate: '160 kbps Native', approxSizeStr: durationSec ? this.formatBytes((durationSec * 160 * 1024) / 8) : '5-7 MB' },
+      { format: 'aac', label: 'AAC / M4A', bitrate: '256 kbps (Apple/Mobile)', approxSizeStr: durationSec ? this.formatBytes((durationSec * 256 * 1024) / 8) : '7-9 MB' },
+      { format: 'wav', label: 'WAV Studio PCM', bitrate: 'Uncompressed', approxSizeStr: durationSec ? this.formatBytes(durationSec * 176400) : '40-50 MB' },
+    ];
+  }
+
   public async startDownload(request: DownloadRequest): Promise<string> {
+    // Branch 1: Entire Playlist / Album download into dedicated folder
+    if (request.isPlaylist) {
+      return this.startPlaylistDownload(request);
+    }
+
+    // Branch 2: Single media download
     const taskId = request.id || `task_${Date.now()}`;
     const stagingDir = this.ensureStagingDirectory();
     const finalDir = request.targetDir || storageManager.getActiveDownloadDirectory(request.mode);
@@ -203,16 +446,22 @@ export class DownloaderManager {
     const ffmpeg = this.getFfmpegPath();
     const settings = settingsManager.get();
 
-    // Staging file template
     const stagingTemplate = path.join(stagingDir, `${taskId}_%(title)s.%(ext)s`);
 
+    // Target query resolution (if Spotify track, convert to search query)
+    let downloadTarget = request.url;
+    if (downloadTarget.includes('open.spotify.com')) {
+      downloadTarget = `ytsearch1:${request.title} audio`.trim();
+    }
+
     const args = [
-      request.url,
+      downloadTarget,
       '--newline',
       '--progress-template',
       'LUMINA_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
       '--ffmpeg-location', ffmpeg,
       '-o', stagingTemplate,
+      '--no-playlist',
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
     ];
@@ -236,7 +485,6 @@ export class DownloaderManager {
         }
       }
     } else {
-      // Audio only mode
       args.push('-x', '--audio-format', request.audioFormat || 'mp3', '--audio-quality', '0');
       args.push('--embed-thumbnail', '--embed-metadata');
     }
@@ -249,10 +497,11 @@ export class DownloaderManager {
       eta: '--',
       downloadedBytes: 0,
       totalBytes: 0,
-      stage: 'Starting download...'
+      stage: 'Starting stream download...'
     };
 
     this.emitProgress(initialProgress);
+    this.cancelledTasks.delete(taskId);
 
     const proc = spawn(ytdlp, args);
     this.activeProcesses.set(taskId, { proc, request, progress: initialProgress });
@@ -311,6 +560,15 @@ export class DownloaderManager {
     proc.on('close', async (code) => {
       this.activeProcesses.delete(taskId);
 
+      if (this.cancelledTasks.has(taskId)) {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'cancelled',
+          stage: 'Cancelled by user'
+        });
+        return;
+      }
+
       if (code !== 0) {
         const errorProgress: DownloadProgress = {
           ...lastProgress,
@@ -322,7 +580,7 @@ export class DownloaderManager {
         return;
       }
 
-      // Locate output file in staging dir
+      // Move from staging area into final destination
       try {
         const files = fs.readdirSync(stagingDir);
         const match = files.find(f => f.startsWith(`${taskId}_`));
@@ -335,7 +593,6 @@ export class DownloaderManager {
         const cleanFileName = match.replace(`${taskId}_`, '');
         const finalPath = path.join(finalDir, cleanFileName);
 
-        // Emit transferring stage
         this.emitProgress({
           ...lastProgress,
           status: 'transferring',
@@ -343,12 +600,10 @@ export class DownloaderManager {
           stage: finalDir.includes('LuminaMedia') ? 'Transferring to USB Drive...' : 'Finalizing file...'
         });
 
-        // Ensure final directory exists
         if (!fs.existsSync(finalDir)) {
           fs.mkdirSync(finalDir, { recursive: true });
         }
 
-        // Copy / Move file atomically
         await fs.promises.copyFile(stagedPath, finalPath);
         await fs.promises.unlink(stagedPath);
 
@@ -378,7 +633,203 @@ export class DownloaderManager {
     return taskId;
   }
 
+  public async startPlaylistDownload(request: DownloadRequest): Promise<string> {
+    const taskId = request.id || `playlist_${Date.now()}`;
+    const playlistTitle = request.playlistTitle || request.title || 'Lumina_Playlist';
+    const finalDir = request.targetDir || storageManager.getPlaylistDownloadDirectory(playlistTitle);
+    const tracks = request.tracks || [];
+    const totalTracks = tracks.length;
+    const ytdlp = this.getYtDlpPath();
+    const ffmpeg = this.getFfmpegPath();
+    const settings = settingsManager.get();
+
+    const initialProgress: DownloadProgress = {
+      taskId,
+      status: 'downloading',
+      percent: 0,
+      speed: 'Initializing batch...',
+      eta: '--',
+      downloadedBytes: 0,
+      totalBytes: 0,
+      stage: `Queued ${totalTracks} tracks for playlist: ${playlistTitle}`,
+      outputPath: finalDir,
+      currentTrackIndex: 0,
+      totalTracks,
+      currentTrackTitle: ''
+    };
+
+    this.emitProgress(initialProgress);
+    this.cancelledTasks.delete(taskId);
+
+    // Asynchronously process the playlist tracks sequentially
+    (async () => {
+      let completedCount = 0;
+
+      for (let i = 0; i < totalTracks; i++) {
+        if (this.cancelledTasks.has(taskId)) {
+          this.emitProgress({
+            taskId,
+            status: 'cancelled',
+            percent: (completedCount / totalTracks) * 100,
+            speed: '0 KB/s',
+            eta: '0s',
+            downloadedBytes: 0,
+            totalBytes: 0,
+            stage: 'Playlist download cancelled by user',
+            outputPath: finalDir,
+            currentTrackIndex: i + 1,
+            totalTracks,
+            currentTrackTitle: tracks[i]?.title
+          });
+          return;
+        }
+
+        const track = tracks[i];
+        const trackNumber = i + 1;
+        const trackBaseProgress = (i / totalTracks) * 100;
+        const fullTrackTitle = track.artist ? `${track.artist} - ${track.title}` : track.title;
+
+        this.emitProgress({
+          taskId,
+          status: 'downloading',
+          percent: trackBaseProgress,
+          speed: 'Connecting...',
+          eta: '--',
+          downloadedBytes: 0,
+          totalBytes: 0,
+          stage: `[${trackNumber}/${totalTracks}] Downloading: ${fullTrackTitle}`,
+          outputPath: finalDir,
+          currentTrackIndex: trackNumber,
+          totalTracks,
+          currentTrackTitle: fullTrackTitle
+        });
+
+        const paddedIndex = String(trackNumber).padStart(2, '0');
+        const outputTemplate = path.join(finalDir, `${paddedIndex} - %(title)s.%(ext)s`);
+
+        let downloadTarget = track.url;
+        if (!downloadTarget || downloadTarget.includes('open.spotify.com')) {
+          downloadTarget = `ytsearch1:${track.artist || ''} ${track.title} audio`.trim();
+        }
+
+        const args = [
+          downloadTarget,
+          '--newline',
+          '--progress-template',
+          'LUMINA_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
+          '--ffmpeg-location', ffmpeg,
+          '-o', outputTemplate,
+          '--no-playlist',
+          '--js-runtimes', 'node',
+          '--remote-components', 'ejs:github',
+        ];
+
+        if (settings.browserForCookies && settings.browserForCookies !== 'none') {
+          args.push('--cookies-from-browser', settings.browserForCookies);
+        }
+
+        if (request.mode === 'video') {
+          if (request.videoFormatId) {
+            args.push('-f', `${request.videoFormatId}+bestaudio/best`);
+          } else {
+            args.push('-f', 'bestvideo+bestaudio/best');
+          }
+          args.push('--merge-output-format', 'mp4');
+        } else {
+          args.push('-x', '--audio-format', request.audioFormat || 'mp3', '--audio-quality', '0');
+          args.push('--embed-thumbnail', '--embed-metadata');
+        }
+
+        try {
+          await new Promise<void>((resolve) => {
+            const proc = spawn(ytdlp, args);
+            this.activeProcesses.set(taskId, { proc, request, progress: initialProgress });
+
+            proc.stdout.on('data', (chunk) => {
+              const lines = chunk.toString().split('\n');
+              for (const line of lines) {
+                if (line.includes('LUMINA_PROGRESS:')) {
+                  const rawTelemetry = line.replace('LUMINA_PROGRESS:', '').trim();
+                  const [pctStr, speedStr, etaStr, dlBytesStr, totalBytesStr] = rawTelemetry.split('|');
+                  const trackPct = parseFloat(pctStr?.replace('%', '')) || 0;
+                  const overallPercent = Math.min(99.9, ((i + trackPct / 100) / totalTracks) * 100);
+
+                  this.emitProgress({
+                    taskId,
+                    status: 'downloading',
+                    percent: overallPercent,
+                    speed: speedStr || 'Downloading...',
+                    eta: etaStr || '--',
+                    downloadedBytes: parseInt(dlBytesStr, 10) || 0,
+                    totalBytes: parseInt(totalBytesStr, 10) || 0,
+                    stage: `[${trackNumber}/${totalTracks}] Downloading: ${fullTrackTitle}`,
+                    outputPath: finalDir,
+                    currentTrackIndex: trackNumber,
+                    totalTracks,
+                    currentTrackTitle: fullTrackTitle
+                  });
+                }
+              }
+            });
+
+            proc.on('close', (code) => {
+              if (code === 0) {
+                completedCount++;
+              } else {
+                console.warn(`[Playlist Track ${trackNumber}] Exited with code ${code}`);
+              }
+              resolve();
+            });
+
+            proc.on('error', (err) => {
+              console.warn(`[Playlist Track ${trackNumber}] Process error:`, err);
+              resolve();
+            });
+          });
+        } catch (e) {
+          console.warn(`Error processing playlist track ${trackNumber}:`, e);
+        }
+      }
+
+      this.activeProcesses.delete(taskId);
+
+      if (this.cancelledTasks.has(taskId)) {
+        this.emitProgress({
+          taskId,
+          status: 'cancelled',
+          percent: (completedCount / totalTracks) * 100,
+          speed: '0 KB/s',
+          eta: '0s',
+          downloadedBytes: 0,
+          totalBytes: 0,
+          stage: 'Cancelled by user',
+          outputPath: finalDir,
+          currentTrackIndex: completedCount,
+          totalTracks
+        });
+      } else {
+        this.emitProgress({
+          taskId,
+          status: 'completed',
+          percent: 100,
+          speed: 'Done',
+          eta: '0s',
+          downloadedBytes: 0,
+          totalBytes: 0,
+          stage: `Downloaded ${completedCount} of ${totalTracks} tracks into: ${path.basename(finalDir)}`,
+          outputPath: finalDir,
+          currentTrackIndex: totalTracks,
+          totalTracks,
+          currentTrackTitle: 'All tracks completed'
+        });
+      }
+    })();
+
+    return taskId;
+  }
+
   public cancelDownload(taskId: string): boolean {
+    this.cancelledTasks.add(taskId);
     const active = this.activeProcesses.get(taskId);
     if (active) {
       try {

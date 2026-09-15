@@ -8,10 +8,11 @@ import {
   Layers, 
   Usb, 
   Film, 
-  Music 
+  Music,
+  ListMusic,
+  FolderOpen
 } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
-import type { DownloadProgress } from '@shared/types';
 
 export const DownloadQueue: React.FC = () => {
   const { downloads, cancelDownload, clearCompletedDownloads, activeTasksMetadata } = useLuminaStore();
@@ -67,6 +68,7 @@ export const DownloadQueue: React.FC = () => {
           const isError = item.status === 'error';
           const isTransferring = item.status === 'transferring';
           const isMuxing = item.status === 'muxing';
+          const isPlaylist = Boolean(item.totalTracks && item.totalTracks > 0);
 
           return (
             <div
@@ -79,6 +81,8 @@ export const DownloadQueue: React.FC = () => {
                   <div className="w-10 h-10 rounded-xl overflow-hidden bg-black/40 border border-white/10 shrink-0 flex items-center justify-center">
                     {meta?.thumbnail ? (
                       <img src={meta.thumbnail} alt="" className="w-full h-full object-cover" />
+                    ) : isPlaylist ? (
+                      <ListMusic className="w-5 h-5 text-lumina-violet" />
                     ) : meta?.mode?.includes('MP3') || meta?.mode?.includes('FLAC') ? (
                       <Music className="w-4 h-4 text-lumina-violet" />
                     ) : (
@@ -87,14 +91,27 @@ export const DownloadQueue: React.FC = () => {
                   </div>
 
                   <div className="min-w-0">
-                    <h4 className="text-xs font-semibold text-slate-100 truncate" title={meta?.title}>
-                      {meta?.title || 'Downloading Media...'}
-                    </h4>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-semibold text-slate-100 truncate" title={meta?.title}>
+                        {meta?.title || 'Downloading Media...'}
+                      </h4>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                       <span>{meta?.uploader || 'Media Stream'}</span>
                       {meta?.mode && (
-                        <span className="px-1.5 py-0.2 rounded bg-white/10 font-mono text-[9px] text-slate-300">
+                        <span className={`px-1.5 py-0.2 rounded font-mono text-[9px] ${
+                          meta.mode.includes('SPOTIFY') 
+                            ? 'bg-[#1DB954]/20 text-[#1DB954] font-bold' 
+                            : meta.mode.includes('YT PLAYLIST')
+                            ? 'bg-red-500/20 text-red-300 font-bold'
+                            : 'bg-white/10 text-slate-300'
+                        }`}>
                           {meta.mode}
+                        </span>
+                      )}
+                      {isPlaylist && item.currentTrackIndex !== undefined && (
+                        <span className="px-1.5 py-0.2 rounded bg-lumina-violet/20 text-lumina-violet font-mono text-[9px] font-bold">
+                          Track {item.currentTrackIndex} of {item.totalTracks}
                         </span>
                       )}
                     </div>
@@ -140,19 +157,22 @@ export const DownloadQueue: React.FC = () => {
 
                   {isDone && (
                     <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleOpenFile(item.outputPath)}
-                        className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
-                        title="Open file"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                      </button>
+                      {!isPlaylist && (
+                        <button
+                          onClick={() => handleOpenFile(item.outputPath)}
+                          className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
+                          title="Open file"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleOpenFolder(item.outputPath)}
-                        className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
-                        title="Show in folder"
+                        className="p-1.5 rounded-lg bg-lumina-cyan/20 hover:bg-lumina-cyan/30 text-lumina-cyan border border-lumina-cyan/30 transition-colors flex items-center gap-1 text-[11px] font-medium px-2"
+                        title={isPlaylist ? "Open Playlist Folder" : "Show in folder"}
                       >
-                        <Folder className="w-3.5 h-3.5" />
+                        {isPlaylist ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
+                        {isPlaylist && <span>Open Folder</span>}
                       </button>
                     </div>
                   )}
@@ -168,6 +188,8 @@ export const DownloadQueue: React.FC = () => {
                         ? 'bg-lumina-emerald'
                         : isError
                         ? 'bg-red-500'
+                        : isPlaylist
+                        ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald'
                         : 'bg-gradient-to-r from-lumina-violet to-lumina-cyan'
                     }`}
                     style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }}
@@ -180,8 +202,8 @@ export const DownloadQueue: React.FC = () => {
 
                 {/* Metrics Line */}
                 <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                  <span>{item.stage}</span>
-                  <div className="flex items-center gap-3">
+                  <span className="truncate max-w-[60%]">{item.stage}</span>
+                  <div className="flex items-center gap-3 shrink-0">
                     {!isDone && !isError && (
                       <>
                         <span>{item.speed}</span>
