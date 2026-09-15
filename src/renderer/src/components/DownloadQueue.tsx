@@ -10,7 +10,9 @@ import {
   Film, 
   Music,
   ListMusic,
-  FolderOpen
+  FolderOpen,
+  Magnet,
+  Zap
 } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
 
@@ -26,7 +28,7 @@ export const DownloadQueue: React.FC = () => {
         <div className="space-y-1">
           <h4 className="text-sm font-semibold text-slate-300">No active downloads</h4>
           <p className="text-xs text-slate-500 max-w-sm">
-            Paste a link above or search for music in the Music Hub to start downloading.
+            Paste a link, magnet, or load a .torrent file to download at maximum speed.
           </p>
         </div>
       </div>
@@ -69,6 +71,8 @@ export const DownloadQueue: React.FC = () => {
           const isTransferring = item.status === 'transferring';
           const isMuxing = item.status === 'muxing';
           const isPlaylist = Boolean(item.totalTracks && item.totalTracks > 0);
+          const isTorrent = meta?.mode === 'BITTORRENT' || item.taskId.startsWith('torrent_');
+          const isDirect = meta?.mode?.includes('IDM TURBO') || item.taskId.startsWith('direct_');
 
           return (
             <div
@@ -81,6 +85,10 @@ export const DownloadQueue: React.FC = () => {
                   <div className="w-10 h-10 rounded-xl overflow-hidden bg-black/40 border border-white/10 shrink-0 flex items-center justify-center">
                     {meta?.thumbnail ? (
                       <img src={meta.thumbnail} alt="" className="w-full h-full object-cover" />
+                    ) : isTorrent ? (
+                      <Magnet className="w-5 h-5 text-lumina-violet animate-pulse" />
+                    ) : isDirect ? (
+                      <Zap className="w-5 h-5 text-lumina-cyan animate-pulse" />
                     ) : isPlaylist ? (
                       <ListMusic className="w-5 h-5 text-lumina-violet" />
                     ) : meta?.mode?.includes('MP3') || meta?.mode?.includes('FLAC') ? (
@@ -100,7 +108,11 @@ export const DownloadQueue: React.FC = () => {
                       <span>{meta?.uploader || 'Media Stream'}</span>
                       {meta?.mode && (
                         <span className={`px-1.5 py-0.2 rounded font-mono text-[9px] ${
-                          meta.mode.includes('SPOTIFY') 
+                          isTorrent
+                            ? 'bg-lumina-violet/20 text-lumina-violet font-bold'
+                            : isDirect
+                            ? 'bg-lumina-cyan/20 text-lumina-cyan font-bold'
+                            : meta.mode.includes('SPOTIFY') 
                             ? 'bg-[#1DB954]/20 text-[#1DB954] font-bold' 
                             : meta.mode.includes('YT PLAYLIST')
                             ? 'bg-red-500/20 text-red-300 font-bold'
@@ -112,6 +124,21 @@ export const DownloadQueue: React.FC = () => {
                       {isPlaylist && item.currentTrackIndex !== undefined && (
                         <span className="px-1.5 py-0.2 rounded bg-lumina-violet/20 text-lumina-violet font-mono text-[9px] font-bold">
                           Track {item.currentTrackIndex} of {item.totalTracks}
+                        </span>
+                      )}
+                      {item.peers !== undefined && item.peers > 0 && (
+                        <span className="px-1.5 py-0.2 rounded bg-lumina-violet/15 text-lumina-violet font-mono text-[9px]">
+                          {item.peers} peers
+                        </span>
+                      )}
+                      {item.seeders !== undefined && item.seeders > 0 && (
+                        <span className="px-1.5 py-0.2 rounded bg-lumina-emerald/15 text-lumina-emerald font-mono text-[9px]">
+                          {item.seeders} seeds
+                        </span>
+                      )}
+                      {item.connections !== undefined && item.connections > 1 && !isTorrent && (
+                        <span className="px-1.5 py-0.2 rounded bg-lumina-cyan/15 text-lumina-cyan font-mono text-[9px]">
+                          {item.connections} parallel streams
                         </span>
                       )}
                     </div>
@@ -139,6 +166,16 @@ export const DownloadQueue: React.FC = () => {
                     <span className="px-2.5 py-1 rounded-full bg-lumina-amber/15 text-lumina-amber border border-lumina-amber/30 text-[10px] font-semibold animate-pulse">
                       Muxing with FFmpeg
                     </span>
+                  ) : isTorrent ? (
+                    <span className="px-2.5 py-1 rounded-full bg-lumina-violet/15 text-lumina-violet border border-lumina-violet/30 text-[10px] font-semibold flex items-center gap-1">
+                      <Magnet className="w-3 h-3 animate-spin" />
+                      P2P Swarm
+                    </span>
+                  ) : isDirect ? (
+                    <span className="px-2.5 py-1 rounded-full bg-lumina-cyan/15 text-lumina-cyan border border-lumina-cyan/30 text-[10px] font-semibold flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      IDM Turbo
+                    </span>
                   ) : (
                     <span className="px-2.5 py-1 rounded-full bg-lumina-cyan/15 text-lumina-cyan border border-lumina-cyan/30 text-[10px] font-semibold">
                       Downloading
@@ -157,7 +194,7 @@ export const DownloadQueue: React.FC = () => {
 
                   {isDone && (
                     <div className="flex items-center gap-1">
-                      {!isPlaylist && (
+                      {!isPlaylist && !isTorrent && (
                         <button
                           onClick={() => handleOpenFile(item.outputPath)}
                           className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
@@ -169,10 +206,10 @@ export const DownloadQueue: React.FC = () => {
                       <button
                         onClick={() => handleOpenFolder(item.outputPath)}
                         className="p-1.5 rounded-lg bg-lumina-cyan/20 hover:bg-lumina-cyan/30 text-lumina-cyan border border-lumina-cyan/30 transition-colors flex items-center gap-1 text-[11px] font-medium px-2"
-                        title={isPlaylist ? "Open Playlist Folder" : "Show in folder"}
+                        title="Show in folder"
                       >
-                        {isPlaylist ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
-                        {isPlaylist && <span>Open Folder</span>}
+                        {isPlaylist || isTorrent ? <FolderOpen className="w-3.5 h-3.5" /> : <Folder className="w-3.5 h-3.5" />}
+                        {(isPlaylist || isTorrent) && <span>Open Folder</span>}
                       </button>
                     </div>
                   )}
@@ -188,6 +225,10 @@ export const DownloadQueue: React.FC = () => {
                         ? 'bg-lumina-emerald'
                         : isError
                         ? 'bg-red-500'
+                        : isTorrent
+                        ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald'
+                        : isDirect
+                        ? 'bg-gradient-to-r from-lumina-cyan via-lumina-emerald to-lumina-cyan'
                         : isPlaylist
                         ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald'
                         : 'bg-gradient-to-r from-lumina-violet to-lumina-cyan'

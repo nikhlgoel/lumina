@@ -273,7 +273,7 @@ export const SettingsModal: React.FC = () => {
 
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs text-slate-300">
-                <span>Max Concurrent Downloads:</span>
+                <span>Max Concurrent Tasks:</span>
                 <span className="font-mono text-lumina-cyan">{settings.maxConcurrentDownloads} tasks</span>
               </div>
               <input
@@ -285,8 +285,79 @@ export const SettingsModal: React.FC = () => {
                 className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-lumina-cyan"
               />
               <p className="text-[10px] text-slate-500">
-                Keeping concurrency at 2-3 avoids platform IP rate limits and maximizes single-file speed.
+                Keeping concurrent tasks at 2-3 avoids IP rate limits and maximizes total bandwidth.
               </p>
+            </div>
+
+            {/* IDM Turbo Acceleration */}
+            <div className="pt-2 space-y-3 border-t border-white/[0.06]">
+              <div className="p-4 rounded-2xl bg-black/30 border border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <span className="text-lumina-cyan font-bold">IDM Turbo Multi-Connection</span>
+                    <span className="px-1.5 py-0.2 rounded bg-lumina-cyan/20 text-lumina-cyan text-[9px] font-mono font-bold">16x SPEED</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 max-w-md">
+                    Splits downloads into concurrent TCP chunks and streams 16 parallel fragments simultaneously, replicating Internet Download Manager (IDM) wire speeds.
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.enableTurboMode}
+                    onChange={(e) => handleUpdate({ enableTurboMode: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-lumina-cyan"></div>
+                </label>
+              </div>
+
+              {settings.enableTurboMode && (
+                <div className="space-y-1.5 pl-1">
+                  <div className="flex justify-between text-xs text-slate-300">
+                    <span>Turbo Parallel Connections per Download:</span>
+                    <span className="font-mono text-lumina-cyan">{settings.turboConnections || 16} Connections</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="4"
+                    max="32"
+                    step="4"
+                    value={settings.turboConnections || 16}
+                    onChange={(e) => handleUpdate({ turboConnections: parseInt(e.target.value, 10) })}
+                    className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-lumina-cyan"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                    <span>4 Streams</span>
+                    <span>16 Streams (Recommended)</span>
+                    <span>32 Streams (Extreme)</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* BitTorrent Swarm Engine */}
+            <div className="pt-2 space-y-3 border-t border-white/[0.06]">
+              <div className="p-4 rounded-2xl bg-black/30 border border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <span className="text-lumina-violet font-bold">BitTorrent P2P Engine</span>
+                    <span className="px-1.5 py-0.2 rounded bg-lumina-violet/20 text-lumina-violet text-[9px] font-mono font-bold">SWARM ACCELERATED</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 max-w-md">
+                    High-speed peer-to-peer downloading with 16 pre-configured tier-1 public trackers, DHT, PEX, and falloc storage allocation.
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.enableBitTorrent}
+                    onChange={(e) => handleUpdate({ enableBitTorrent: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-lumina-violet"></div>
+                </label>
+              </div>
             </div>
           </div>
         )}

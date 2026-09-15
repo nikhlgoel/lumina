@@ -14,6 +14,25 @@ import type {
 import { settingsManager } from './settings';
 import { storageManager } from './storage';
 
+export const PREDEFINED_HIGH_SPEED_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.tracker.cl:1337/announce',
+  'udp://opentracker.i2p.rocks:6969/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'udp://tracker.coppersurfer.tk:6969/announce',
+  'udp://tracker.moeking.me:6969/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://uploads.gamecoast.net:5544/announce',
+  'udp://p4p.arenabg.com:1337/announce',
+  'http://tracker.openbittorrent.com:80/announce',
+  'https://tracker.tamersunion.org:443/announce'
+];
+
 export class DownloaderManager {
   private activeProcesses = new Map<string, { proc: ChildProcess; request: DownloadRequest; progress: DownloadProgress }>();
   private progressListeners: ((progress: DownloadProgress) => void)[] = [];
@@ -55,6 +74,13 @@ export class DownloaderManager {
     return 'ffmpeg';
   }
 
+  private getAria2Path(): string {
+    if (fs.existsSync('/usr/bin/aria2c')) {
+      return '/usr/bin/aria2c';
+    }
+    return 'aria2c';
+  }
+
   private ensureStagingDirectory(): string {
     const staging = path.join(os.tmpdir(), 'lumina_staging');
     if (!fs.existsSync(staging)) {
@@ -66,7 +92,27 @@ export class DownloaderManager {
   public async inspectUrl(url: string): Promise<MediaMetadata> {
     const cleanUrl = url.trim();
 
-    // 1. Check for Spotify Playlist / Album / Track
+    // 1. Check for BitTorrent Magnet Link
+    if (cleanUrl.startsWith('magnet:?')) {
+      return this.inspectMagnet(cleanUrl);
+    }
+
+    // 2. Check for .torrent File (Local or URL)
+    if (cleanUrl.endsWith('.torrent') || cleanUrl.includes('.torrent?')) {
+      return await this.inspectTorrentFile(cleanUrl);
+    }
+
+    // 3. Check for Direct Downloadable File (IDM Turbo Candidate)
+    const isDirectFile = cleanUrl.match(/^https?:\/\/.*\.(mp4|mkv|webm|avi|mov|mp3|flac|wav|zip|tar|gz|iso|exe|bin|AppImage)(\?.*)?$/i);
+    if (isDirectFile) {
+      try {
+        return await this.inspectDirectFile(cleanUrl);
+      } catch (e) {
+        console.warn('Direct file inspect fallback to media stream inspect:', e);
+      }
+    }
+
+    // 4. Check for Spotify Playlist / Album / Track
     const spotifyMatch = cleanUrl.match(/(?:open\.spotify\.com\/|spotify:)(playlist|album|track)[/:]([a-zA-Z0-9]+)/);
     if (spotifyMatch) {
       const type = spotifyMatch[1] as 'playlist' | 'album' | 'track';
@@ -74,7 +120,7 @@ export class DownloaderManager {
       return await this.inspectSpotify(cleanUrl, type, id);
     }
 
-    // 2. Check for YouTube / YouTube Music Playlist
+    // 5. Check for YouTube / YouTube Music Playlist
     const isYtPlaylist = (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) && 
       (cleanUrl.includes('playlist?list=') || cleanUrl.includes('&list=') || cleanUrl.includes('?list='));
     if (isYtPlaylist) {
@@ -88,8 +134,143 @@ export class DownloaderManager {
       }
     }
 
-    // 3. Fallback to standard single media inspection
+    // 6. Fallback to standard single media inspection
     return await this.inspectStandardMedia(cleanUrl);
+  }
+
+  private inspectMagnet(magnetUri: string): MediaMetadata {
+    const cleanUri = magnetUri.trim();
+    const params = new URLSearchParams(cleanUri.replace(/^magnet:\?/, ''));
+    const xt = params.get('xt') || '';
+    const dn = params.get('dn') || '';
+    const infoHash = xt.replace(/^urn:btih:/i, '') || `bt_${Date.now()}`;
+    const title = dn ? decodeURIComponent(dn) : `BitTorrent_${infoHash.slice(0, 8)}`;
+    const rawTrackers = params.getAll('tr');
+    const allTrackers = Array.from(new Set([...rawTrackers, ...PREDEFINED_HIGH_SPEED_TRACKERS]));
+
+    return {
+      id: infoHash,
+      url: cleanUri,
+      title,
+      thumbnail: '',
+      duration: 0,
+      durationStr: 'BitTorrent Swarm',
+      uploader: 'P2P Swarm Network',
+      viewCount: 0,
+      isLive: false,
+      formats: [],
+      audioFormats: [],
+      subtitles: [],
+      isTorrent: true,
+      torrentInfo: {
+        infoHash,
+        name: title,
+        totalLengthStr: 'Swarm Sized',
+        trackersCount: allTrackers.length,
+        files: []
+      }
+    };
+  }
+
+  private async inspectTorrentFile(filePath: string): Promise<MediaMetadata> {
+    const aria2 = this.getAria2Path();
+    const fileName = path.basename(filePath);
+
+    return new Promise((resolve) => {
+      const proc = spawn(aria2, ['-S', filePath]);
+      let stdout = '';
+      proc.stdout.on('data', (c) => (stdout += c.toString()));
+      proc.on('close', () => {
+        const lines = stdout.split('\n');
+        const files: string[] = [];
+        for (const line of lines) {
+          const fileMatch = line.match(/^\s*\d+\|\s*(.+)/);
+          if (fileMatch) files.push(fileMatch[1].trim());
+        }
+        
+        const title = files[0] || fileName.replace(/\.torrent$/i, '');
+
+        resolve({
+          id: `torrent_${Date.now()}`,
+          url: filePath,
+          title,
+          thumbnail: '',
+          duration: 0,
+          durationStr: `${files.length || 1} File(s)`,
+          uploader: 'BitTorrent Metafile',
+          viewCount: files.length,
+          isLive: false,
+          formats: [],
+          audioFormats: [],
+          subtitles: [],
+          isTorrent: true,
+          torrentInfo: {
+            infoHash: '',
+            name: title,
+            totalLengthStr: `${files.length || 1} File(s)`,
+            trackersCount: PREDEFINED_HIGH_SPEED_TRACKERS.length,
+            files: files.slice(0, 20)
+          }
+        });
+      });
+
+      proc.on('error', () => {
+        resolve({
+          id: `torrent_${Date.now()}`,
+          url: filePath,
+          title: fileName,
+          thumbnail: '',
+          duration: 0,
+          durationStr: 'Torrent File',
+          uploader: 'BitTorrent Metafile',
+          viewCount: 0,
+          isLive: false,
+          formats: [],
+          audioFormats: [],
+          subtitles: [],
+          isTorrent: true
+        });
+      });
+    });
+  }
+
+  private async inspectDirectFile(url: string): Promise<MediaMetadata> {
+    const parsed = new URL(url);
+    const rawPath = parsed.pathname;
+    const fileName = decodeURIComponent(rawPath.split('/').pop() || 'download.bin');
+    
+    let size = 0;
+    let acceptRanges = true;
+    try {
+      const res = await fetch(url, { method: 'HEAD' });
+      const cl = res.headers.get('content-length');
+      if (cl) size = parseInt(cl, 10);
+      const ar = res.headers.get('accept-ranges');
+      acceptRanges = ar === 'bytes' || !ar;
+    } catch (e) {}
+
+    const sizeStr = this.formatBytes(size);
+
+    return {
+      id: `direct_${Date.now()}`,
+      url,
+      title: fileName,
+      thumbnail: '',
+      duration: 0,
+      durationStr: sizeStr,
+      uploader: parsed.hostname,
+      viewCount: 0,
+      isLive: false,
+      formats: [],
+      audioFormats: [],
+      subtitles: [],
+      isDirectFile: true,
+      directFileInfo: {
+        filename: fileName,
+        sizeStr,
+        acceptRanges
+      }
+    };
   }
 
   private async inspectSpotify(url: string, type: 'playlist' | 'album' | 'track', id: string): Promise<MediaMetadata> {
@@ -118,7 +299,6 @@ export class DownloaderManager {
       throw new Error('Spotify entity data missing from payload');
     }
 
-    // Resolve cover art from visuals or images
     let coverArt = '';
     const images = entity.visualIdentity?.image || entity.coverArt?.image || entity.images || [];
     if (Array.isArray(images) && images.length > 0) {
@@ -433,12 +613,22 @@ export class DownloaderManager {
   }
 
   public async startDownload(request: DownloadRequest): Promise<string> {
-    // Branch 1: Entire Playlist / Album download into dedicated folder
+    // Branch 1: BitTorrent P2P Download
+    if (request.isTorrent) {
+      return this.startTorrentDownload(request);
+    }
+
+    // Branch 2: Direct File Turbo Download (IDM-style 16 parallel connections)
+    if (request.isDirectFile) {
+      return this.startDirectFileDownload(request);
+    }
+
+    // Branch 3: Entire Playlist / Album download into dedicated folder
     if (request.isPlaylist) {
       return this.startPlaylistDownload(request);
     }
 
-    // Branch 2: Single media download
+    // Branch 4: Single media stream download (with Turbo fragment acceleration)
     const taskId = request.id || `task_${Date.now()}`;
     const stagingDir = this.ensureStagingDirectory();
     const finalDir = request.targetDir || storageManager.getActiveDownloadDirectory(request.mode);
@@ -448,7 +638,6 @@ export class DownloaderManager {
 
     const stagingTemplate = path.join(stagingDir, `${taskId}_%(title)s.%(ext)s`);
 
-    // Target query resolution (if Spotify track, convert to search query)
     let downloadTarget = request.url;
     if (downloadTarget.includes('open.spotify.com')) {
       downloadTarget = `ytsearch1:${request.title} audio`.trim();
@@ -465,6 +654,15 @@ export class DownloaderManager {
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
     ];
+
+    // IDM Turbo Acceleration (16 concurrent fragments)
+    if (settings.enableTurboMode) {
+      args.push('-N', String(settings.turboConnections || 16));
+    }
+
+    if (settings.speedLimit > 0) {
+      args.push('--limit-rate', `${settings.speedLimit}K`);
+    }
 
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
       args.push('--cookies-from-browser', settings.browserForCookies);
@@ -497,7 +695,7 @@ export class DownloaderManager {
       eta: '--',
       downloadedBytes: 0,
       totalBytes: 0,
-      stage: 'Starting stream download...'
+      stage: 'Starting turbo stream download...'
     };
 
     this.emitProgress(initialProgress);
@@ -523,7 +721,7 @@ export class DownloaderManager {
           const downloadedBytes = parseInt(dlBytesStr, 10) || lastProgress.downloadedBytes;
           const totalBytes = parseInt(totalBytesStr, 10) || lastProgress.totalBytes;
 
-          let stage = 'Downloading streams...';
+          let stage = settings.enableTurboMode ? 'Turbo Multi-Fragment Downloading...' : 'Downloading streams...';
           if (percent >= 99) {
             stage = 'Multiplexing with FFmpeg...';
           }
@@ -536,7 +734,8 @@ export class DownloaderManager {
             eta,
             downloadedBytes,
             totalBytes,
-            stage
+            stage,
+            connections: settings.enableTurboMode ? (settings.turboConnections || 16) : 1
           };
 
           this.emitProgress(lastProgress);
@@ -626,6 +825,237 @@ export class DownloaderManager {
           status: 'error',
           stage: 'Transfer failed',
           error: err?.message || 'Failed to move completed file'
+        });
+      }
+    });
+
+    return taskId;
+  }
+
+  public async startTorrentDownload(request: DownloadRequest): Promise<string> {
+    const taskId = request.id || `torrent_${Date.now()}`;
+    const finalDir = request.targetDir || storageManager.getTorrentDownloadDirectory();
+    const aria2 = this.getAria2Path();
+    const settings = settingsManager.get();
+
+    const trackerArgs = PREDEFINED_HIGH_SPEED_TRACKERS.join(',');
+
+    const args = [
+      request.url,
+      '--enable-dht=true',
+      '--dht-listen-port=6881-6999',
+      '--enable-peer-exchange=true',
+      '--bt-enable-lpd=true',
+      '--bt-max-peers=120',
+      `--bt-tracker=${trackerArgs}`,
+      '--bt-request-peer-speed-limit=0',
+      '--file-allocation=falloc',
+      '--summary-interval=1',
+      '--seed-time=0',
+      '--allow-overwrite=true',
+      '-d', finalDir
+    ];
+
+    if (settings.speedLimit > 0) {
+      args.push(`--max-download-limit=${settings.speedLimit}K`);
+    }
+
+    const initialProgress: DownloadProgress = {
+      taskId,
+      status: 'downloading',
+      percent: 0,
+      speed: 'Connecting to P2P Swarm...',
+      eta: '--',
+      downloadedBytes: 0,
+      totalBytes: 0,
+      stage: 'Connecting to high-speed BitTorrent swarm & trackers...',
+      outputPath: finalDir,
+      peers: 0,
+      seeders: 0
+    };
+
+    this.emitProgress(initialProgress);
+    this.cancelledTasks.delete(taskId);
+
+    const proc = spawn(aria2, args);
+    this.activeProcesses.set(taskId, { proc, request, progress: initialProgress });
+
+    let lastProgress = initialProgress;
+
+    proc.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      const lines = text.split(/[\r\n]+/);
+
+      for (const line of lines) {
+        const match = line.match(/\[#\w+\s+([^\/]+)\/([^\(]+)\((\d+)%\)\s+CN:(\d+)(?:\s+SD:(\d+))?\s+DL:([^\s\]]+)(?:\s+ETA:([^\]]+))?\]/);
+        if (match) {
+          const downloadedStr = match[1];
+          const totalStr = match[2];
+          const percent = parseInt(match[3], 10) || 0;
+          const connections = parseInt(match[4], 10) || 0;
+          const seeders = match[5] ? parseInt(match[5], 10) : 0;
+          const speed = `${match[6]}/s`;
+          const eta = match[7] || '--';
+
+          lastProgress = {
+            taskId,
+            status: percent >= 100 ? 'completed' : 'downloading',
+            percent,
+            speed,
+            eta,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            stage: `BitTorrent Swarm (${connections} peers${seeders ? `, ${seeders} seeds` : ''}) • ${downloadedStr}/${totalStr}`,
+            outputPath: finalDir,
+            peers: connections,
+            seeders,
+            connections
+          };
+
+          this.emitProgress(lastProgress);
+        }
+      }
+    });
+
+    proc.on('close', (code) => {
+      this.activeProcesses.delete(taskId);
+
+      if (this.cancelledTasks.has(taskId)) {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'cancelled',
+          stage: 'Torrent download cancelled by user'
+        });
+        return;
+      }
+
+      if (code === 0) {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'completed',
+          percent: 100,
+          speed: 'Done',
+          eta: '0s',
+          stage: 'Torrent download completed successfully',
+          outputPath: finalDir
+        });
+      } else {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'error',
+          stage: 'Torrent transfer failed',
+          error: `aria2c exited with code ${code}`
+        });
+      }
+    });
+
+    return taskId;
+  }
+
+  public async startDirectFileDownload(request: DownloadRequest): Promise<string> {
+    const taskId = request.id || `direct_${Date.now()}`;
+    const finalDir = request.targetDir || storageManager.getActiveDownloadDirectory('video');
+    const aria2 = this.getAria2Path();
+    const settings = settingsManager.get();
+    const connections = request.turboConnections || settings.turboConnections || 16;
+
+    const args = [
+      request.url,
+      '-s', String(connections),
+      '-x', String(connections),
+      '-j', String(connections),
+      '-k', '1M',
+      '--min-split-size=1M',
+      '--summary-interval=1',
+      '--allow-overwrite=true',
+      '-d', finalDir
+    ];
+
+    if (settings.speedLimit > 0) {
+      args.push(`--max-download-limit=${settings.speedLimit}K`);
+    }
+
+    const initialProgress: DownloadProgress = {
+      taskId,
+      status: 'downloading',
+      percent: 0,
+      speed: `Allocating ${connections} turbo connections...`,
+      eta: '--',
+      downloadedBytes: 0,
+      totalBytes: 0,
+      stage: `IDM Turbo Multi-Connection (${connections} parallel streams)...`,
+      outputPath: finalDir,
+      connections
+    };
+
+    this.emitProgress(initialProgress);
+    this.cancelledTasks.delete(taskId);
+
+    const proc = spawn(aria2, args);
+    this.activeProcesses.set(taskId, { proc, request, progress: initialProgress });
+
+    let lastProgress = initialProgress;
+
+    proc.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      const lines = text.split(/[\r\n]+/);
+
+      for (const line of lines) {
+        const match = line.match(/\[#\w+\s+([^\/]+)\/([^\(]+)\((\d+)%\)\s+CN:(\d+)(?:\s+SD:(\d+))?\s+DL:([^\s\]]+)(?:\s+ETA:([^\]]+))?\]/);
+        if (match) {
+          const downloadedStr = match[1];
+          const totalStr = match[2];
+          const percent = parseInt(match[3], 10) || 0;
+          const activeConn = parseInt(match[4], 10) || connections;
+          const speed = `${match[6]}/s`;
+          const eta = match[7] || '--';
+
+          lastProgress = {
+            taskId,
+            status: percent >= 100 ? 'completed' : 'downloading',
+            percent,
+            speed,
+            eta,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            stage: `IDM Turbo (${activeConn} streams) • ${downloadedStr}/${totalStr}`,
+            outputPath: finalDir,
+            connections: activeConn
+          };
+
+          this.emitProgress(lastProgress);
+        }
+      }
+    });
+
+    proc.on('close', (code) => {
+      this.activeProcesses.delete(taskId);
+
+      if (this.cancelledTasks.has(taskId)) {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'cancelled',
+          stage: 'Download cancelled by user'
+        });
+        return;
+      }
+
+      if (code === 0) {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'completed',
+          percent: 100,
+          speed: 'Done',
+          eta: '0s',
+          stage: 'Turbo download completed successfully',
+          outputPath: finalDir
+        });
+      } else {
+        this.emitProgress({
+          ...lastProgress,
+          status: 'error',
+          stage: 'Download failed',
+          error: `aria2c exited with code ${code}`
         });
       }
     });
@@ -724,6 +1154,11 @@ export class DownloaderManager {
           '--remote-components', 'ejs:github',
         ];
 
+        // Turbo Multi-Fragment acceleration
+        if (settings.enableTurboMode) {
+          args.push('-N', String(settings.turboConnections || 16));
+        }
+
         if (settings.browserForCookies && settings.browserForCookies !== 'none') {
           args.push('--cookies-from-browser', settings.browserForCookies);
         }
@@ -766,7 +1201,8 @@ export class DownloaderManager {
                     outputPath: finalDir,
                     currentTrackIndex: trackNumber,
                     totalTracks,
-                    currentTrackTitle: fullTrackTitle
+                    currentTrackTitle: fullTrackTitle,
+                    connections: settings.enableTurboMode ? (settings.turboConnections || 16) : 1
                   });
                 }
               }

@@ -36,6 +36,7 @@ interface LuminaState {
   setSelectedSubtitleLang: (lang: string) => void;
   setEmbedSubtitles: (embed: boolean) => void;
   clearInspectedMedia: () => void;
+  selectTorrentFile: () => Promise<void>;
 
   // Downloads Queue
   downloads: DownloadProgress[];
@@ -146,15 +147,29 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
   setEmbedSubtitles: (embed) => set({ embedSubtitles: embed }),
   clearInspectedMedia: () => set({ inspectedMedia: null, urlInput: '', inspectError: null }),
 
+  selectTorrentFile: async () => {
+    try {
+      const filePath = await window.luminaAPI?.selectTorrentFile?.();
+      if (filePath) {
+        set({ urlInput: filePath });
+        await get().inspectUrl(filePath);
+      }
+    } catch (e) {
+      console.warn('Failed to select torrent file:', e);
+    }
+  },
+
   downloads: [],
   activeTasksMetadata: new Map(),
 
   startDownload: async () => {
-    const { inspectedMedia, downloadMode, selectedFormat, selectedAudioFormat, includeSubtitles, selectedSubtitleLang, embedSubtitles } = get();
+    const { inspectedMedia, downloadMode, selectedFormat, selectedAudioFormat, includeSubtitles, selectedSubtitleLang, embedSubtitles, settings } = get();
     if (!inspectedMedia) return;
 
-    const taskId = `task_${Date.now()}`;
-    const effectiveMode = inspectedMedia.formats.length === 0 ? 'audio' : downloadMode;
+    const isTorrent = Boolean(inspectedMedia.isTorrent);
+    const isDirect = Boolean(inspectedMedia.isDirectFile);
+    const taskId = isTorrent ? `torrent_${Date.now()}` : isDirect ? `direct_${Date.now()}` : `task_${Date.now()}`;
+    const effectiveMode = (inspectedMedia.formats.length === 0 || isTorrent || isDirect) ? 'audio' : downloadMode;
 
     const request: DownloadRequest = {
       id: taskId,
@@ -170,19 +185,35 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
       embedSubtitles,
       isPlaylist: inspectedMedia.isPlaylist,
       playlistTitle: inspectedMedia.playlistTitle || inspectedMedia.title,
-      tracks: inspectedMedia.tracks
+      tracks: inspectedMedia.tracks,
+      isTorrent,
+      isDirectFile: isDirect,
+      turboConnections: settings?.turboConnections || 16
     };
 
-    const modeLabel = inspectedMedia.isPlaylist
-      ? (inspectedMedia.playlistType === 'spotify' ? 'SPOTIFY PLAYLIST' : 'YT PLAYLIST')
-      : (effectiveMode === 'video' ? (selectedFormat?.resolution || 'Video') : selectedAudioFormat.toUpperCase());
+    let modeLabel = '';
+    if (isTorrent) {
+      modeLabel = 'BITTORRENT';
+    } else if (isDirect) {
+      modeLabel = `IDM TURBO (${settings?.turboConnections || 16}x)`;
+    } else if (inspectedMedia.isPlaylist) {
+      modeLabel = inspectedMedia.playlistType === 'spotify' ? 'SPOTIFY PLAYLIST' : 'YT PLAYLIST';
+    } else {
+      modeLabel = effectiveMode === 'video' ? (selectedFormat?.resolution || 'Video') : selectedAudioFormat.toUpperCase();
+    }
 
     // Store metadata for the queue cards
     const newMap = new Map(get().activeTasksMetadata);
     newMap.set(taskId, {
-      title: inspectedMedia.isPlaylist ? `[Playlist] ${inspectedMedia.title}` : inspectedMedia.title,
+      title: isTorrent 
+        ? `[Torrent] ${inspectedMedia.title}` 
+        : isDirect 
+        ? `[Turbo File] ${inspectedMedia.title}` 
+        : inspectedMedia.isPlaylist 
+        ? `[Playlist] ${inspectedMedia.title}` 
+        : inspectedMedia.title,
       thumbnail: inspectedMedia.thumbnail,
-      uploader: inspectedMedia.uploader,
+      uploader: isTorrent ? 'BitTorrent Swarm' : isDirect ? 'Direct Server' : inspectedMedia.uploader,
       mode: modeLabel
     });
 

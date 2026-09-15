@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('luminaAPI', {
   openFile: (filePath: string) => ipcRenderer.invoke('shell:open-file', filePath),
   openDirectory: (filePath: string) => ipcRenderer.invoke('shell:open-directory', filePath),
   selectDirectory: () => ipcRenderer.invoke('shell:select-directory'),
+  selectTorrentFile: () => ipcRenderer.invoke('shell:select-torrent'),
   
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   maximizeWindow: () => ipcRenderer.send('window:maximize'),

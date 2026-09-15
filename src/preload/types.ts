@@ -51,6 +51,20 @@ export interface MediaMetadata {
   playlistTitle?: string;
   trackCount?: number;
   tracks?: PlaylistTrack[];
+  isTorrent?: boolean;
+  torrentInfo?: {
+    infoHash: string;
+    name: string;
+    totalLengthStr?: string;
+    trackersCount: number;
+    files?: string[];
+  };
+  isDirectFile?: boolean;
+  directFileInfo?: {
+    filename: string;
+    sizeStr: string;
+    acceptRanges: boolean;
+  };
 }
 
 export interface DownloadRequest {
@@ -69,6 +83,12 @@ export interface DownloadRequest {
   isPlaylist?: boolean;
   playlistTitle?: string;
   tracks?: PlaylistTrack[];
+  isTorrent?: boolean;
+  torrentType?: 'magnet' | 'torrent_file';
+  magnetUri?: string;
+  torrentPath?: string;
+  isDirectFile?: boolean;
+  turboConnections?: number;
 }
 
 export interface DownloadProgress {
@@ -85,6 +105,9 @@ export interface DownloadProgress {
   currentTrackIndex?: number;
   totalTracks?: number;
   currentTrackTitle?: string;
+  peers?: number;
+  seeders?: number;
+  connections?: number;
 }
 
 export interface StorageDrive {
@@ -121,6 +144,9 @@ export interface LuminaSettings {
   maxConcurrentDownloads: number;
   speedLimit: number;
   browserForCookies: 'none' | 'firefox' | 'chrome' | 'brave' | 'edge';
+  turboConnections: number;
+  enableTurboMode: boolean;
+  enableBitTorrent: boolean;
 }
 
 export interface LuminaAPI {
@@ -151,6 +177,7 @@ export interface LuminaAPI {
   openFile: (filePath: string) => Promise<void>;
   openDirectory: (filePath: string) => Promise<void>;
   selectDirectory: () => Promise<string | null>;
+  selectTorrentFile: () => Promise<string | null>;
   
   // Window Controls
   minimizeWindow: () => void;

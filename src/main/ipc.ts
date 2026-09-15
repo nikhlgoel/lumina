@@ -66,6 +66,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return null;
   });
 
+  ipcMain.handle('shell:select-torrent', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select .torrent File',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Torrent Files', extensions: ['torrent'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0];
+    }
+    return null;
+  });
+
   // Window Controls
   ipcMain.on('window:minimize', () => {
     mainWindow.minimize();

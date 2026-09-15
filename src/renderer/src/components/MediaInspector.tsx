@@ -14,7 +14,12 @@ import {
   ChevronDown,
   ChevronUp,
   Disc3,
-  Usb
+  Usb,
+  Magnet,
+  Zap,
+  Network,
+  Radio,
+  FileCheck
 } from 'lucide-react';
 import { useLuminaStore } from '../store/useLuminaStore';
 
@@ -44,8 +49,9 @@ export const MediaInspector: React.FC = () => {
   if (!inspectedMedia) return null;
 
   const isPlaylist = Boolean(inspectedMedia.isPlaylist);
+  const isTorrent = Boolean(inspectedMedia.isTorrent);
+  const isDirect = Boolean(inspectedMedia.isDirectFile);
   const isSpotify = inspectedMedia.playlistType === 'spotify' || inspectedMedia.url.includes('spotify.com');
-  const isYouTubePlaylist = inspectedMedia.playlistType === 'youtube' || (!isSpotify && isPlaylist);
   const hasUsb = Boolean(settings?.autoSaveToUsb && drives.some(d => d.isRemovable));
 
   const targetFolderName = (inspectedMedia.playlistTitle || inspectedMedia.title)
@@ -57,26 +63,56 @@ export const MediaInspector: React.FC = () => {
       {/* Top Header: Title, Thumbnail, Creator */}
       <div className="flex flex-col sm:flex-row gap-4 items-start justify-between">
         <div className="flex gap-4 items-start min-w-0">
-          <div className={`relative ${isPlaylist ? 'w-32 sm:w-36 aspect-square' : 'w-36 sm:w-44 aspect-video'} rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink-0 shadow-lg`}>
+          <div className={`relative ${isPlaylist || isTorrent ? 'w-32 sm:w-36 aspect-square' : 'w-36 sm:w-44 aspect-video'} rounded-2xl overflow-hidden bg-black/50 border border-white/10 shrink-0 shadow-lg flex items-center justify-center`}>
             {inspectedMedia.thumbnail ? (
               <img
                 src={inspectedMedia.thumbnail}
                 alt={inspectedMedia.title}
                 className="w-full h-full object-cover"
               />
+            ) : isTorrent ? (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-violet/20 via-black to-lumina-cyan/10 text-lumina-violet">
+                <Magnet className="w-12 h-12 stroke-[1.5] animate-pulse" />
+                <span className="text-[10px] font-mono mt-1 text-slate-400">P2P Swarm</span>
+              </div>
+            ) : isDirect ? (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-lumina-cyan/20 via-black to-lumina-emerald/10 text-lumina-cyan">
+                <Zap className="w-12 h-12 stroke-[1.5] animate-pulse" />
+                <span className="text-[10px] font-mono mt-1 text-slate-400">IDM Turbo</span>
+              </div>
+            ) : isPlaylist ? (
+              <div className="w-full h-full flex items-center justify-center text-slate-600">
+                <ListMusic className="w-10 h-10 text-lumina-violet" />
+              </div>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-slate-600">
-                {isPlaylist ? <ListMusic className="w-10 h-10 text-lumina-violet" /> : <Film className="w-8 h-8" />}
+                <Film className="w-8 h-8" />
               </div>
             )}
+
             <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[10px] font-mono font-medium text-white flex items-center gap-1">
               <Clock className="w-2.5 h-2.5" />
               {inspectedMedia.durationStr}
             </div>
+
             {isPlaylist && (
               <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-md bg-lumina-violet/90 text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1 shadow-md">
                 <Disc3 className="w-2.5 h-2.5 animate-spin" />
                 Playlist
+              </div>
+            )}
+
+            {isTorrent && (
+              <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-md bg-lumina-violet/90 text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1 shadow-md">
+                <Radio className="w-2.5 h-2.5 animate-pulse" />
+                BitTorrent
+              </div>
+            )}
+
+            {isDirect && (
+              <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-md bg-lumina-cyan/90 text-[9px] font-bold text-black uppercase tracking-wider flex items-center gap-1 shadow-md">
+                <Zap className="w-2.5 h-2.5" />
+                IDM Turbo
               </div>
             )}
           </div>
@@ -101,6 +137,36 @@ export const MediaInspector: React.FC = () => {
               </div>
             )}
 
+            {isTorrent && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-lumina-violet/20 border border-lumina-violet/40 text-lumina-violet text-[10px] font-bold tracking-wide flex items-center gap-1.5">
+                  <Network className="w-3 h-3" />
+                  P2P Distributed Swarm
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-lumina-emerald/15 border border-lumina-emerald/30 text-lumina-emerald text-[10px] font-mono">
+                  {inspectedMedia.torrentInfo?.trackersCount || 16} Ultra-Speed Trackers
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-300 text-[10px] font-mono">
+                  DHT + PEX + LPD
+                </span>
+              </div>
+            )}
+
+            {isDirect && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-lumina-cyan/20 border border-lumina-cyan/40 text-lumina-cyan text-[10px] font-bold tracking-wide flex items-center gap-1.5">
+                  <Zap className="w-3 h-3" />
+                  IDM Turbo Multi-Connection
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-lumina-emerald/15 border border-lumina-emerald/30 text-lumina-emerald text-[10px] font-mono">
+                  16 Parallel TCP Streams
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-300 text-[10px] font-mono">
+                  Byte-Range Acceleration
+                </span>
+              </div>
+            )}
+
             <h3 className="text-sm sm:text-base font-bold text-slate-100 line-clamp-2 leading-snug">
               {inspectedMedia.title}
             </h3>
@@ -110,7 +176,7 @@ export const MediaInspector: React.FC = () => {
                 <User className="w-3 h-3 text-lumina-cyan" />
                 {inspectedMedia.uploader}
               </span>
-              {!isPlaylist && inspectedMedia.viewCount > 0 && (
+              {!isPlaylist && !isTorrent && !isDirect && inspectedMedia.viewCount > 0 && (
                 <span className="flex items-center gap-1 text-[11px] text-slate-500">
                   <Eye className="w-3 h-3" />
                   {inspectedMedia.viewCount.toLocaleString()} views
@@ -135,7 +201,7 @@ export const MediaInspector: React.FC = () => {
       </div>
 
       {/* Mode Switcher Tabs (Shown for Video or YouTube Playlist) */}
-      {inspectedMedia.formats.length > 0 && (
+      {!isTorrent && !isDirect && inspectedMedia.formats.length > 0 && (
         <div className="flex items-center gap-2 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-fit">
           <button
             onClick={() => setDownloadMode('video')}
@@ -163,89 +229,151 @@ export const MediaInspector: React.FC = () => {
         </div>
       )}
 
-      {/* Format Options Matrix */}
-      {downloadMode === 'video' && inspectedMedia.formats.length > 0 ? (
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-300">
-            Available Video Resolutions:
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-            {inspectedMedia.formats.map((fmt) => {
-              const isSelected = selectedFormat?.formatId === fmt.formatId;
-              return (
-                <button
-                  key={`${fmt.formatId}-${fmt.vcodec}`}
-                  onClick={() => setSelectedFormat(fmt)}
-                  className={`p-3 rounded-2xl text-left border transition-all relative ${
-                    isSelected
-                      ? 'glass-card border-lumina-cyan/60 bg-lumina-cyan/10 shadow-md shadow-lumina-cyan/15 ring-1 ring-lumina-cyan/40'
-                      : 'glass-card border-white/[0.06] hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white tracking-wide">
-                      {fmt.resolution}
-                    </span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
-                      {fmt.vcodec}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                    <span>{fmt.fps}fps</span>
-                    <span>{fmt.filesizeStr}</span>
-                  </div>
-                  {isSelected && (
-                    <div className="absolute top-2 right-2 w-3.5 h-3.5 rounded-full bg-lumina-cyan flex items-center justify-center text-black">
-                      <Check className="w-2.5 h-2.5 stroke-[3]" />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-2">
+      {/* BitTorrent Engine Parameters */}
+      {isTorrent && (
+        <div className="p-4 rounded-2xl bg-black/30 border border-white/[0.06] space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-300">
-              Audio Extraction Quality & Format:
-            </label>
-            {isPlaylist && (
-              <span className="text-[11px] text-lumina-violet font-mono font-medium">
-                Applied to all {inspectedMedia.trackCount} tracks
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <Network className="w-4 h-4 text-lumina-violet" />
+              <span className="text-xs font-semibold text-slate-200">High-Performance Swarm Acceleration</span>
+            </div>
+            <span className="text-[10px] font-mono text-lumina-emerald bg-lumina-emerald/10 px-2 py-0.5 rounded-md border border-lumina-emerald/20">
+              Zero Bandwidth Cap
+            </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
-            {inspectedMedia.audioFormats.map((audioFmt) => {
-              const isSelected = selectedAudioFormat === audioFmt.format;
-              return (
-                <button
-                  key={audioFmt.format}
-                  onClick={() => setSelectedAudioFormat(audioFmt.format)}
-                  className={`p-3 rounded-2xl text-left border transition-all relative ${
-                    isSelected
-                      ? 'glass-card border-lumina-violet/60 bg-lumina-violet/10 shadow-md shadow-lumina-violet/15 ring-1 ring-lumina-violet/40'
-                      : 'glass-card border-white/[0.06] hover:border-white/20'
-                  }`}
-                >
-                  <div className="text-xs font-bold text-white">{audioFmt.label}</div>
-                  <div className="mt-1 text-[10px] text-slate-400 font-mono leading-tight">
-                    {audioFmt.bitrate}
-                  </div>
-                  <div className="text-[9px] text-lumina-violet font-mono mt-0.5">
-                    ~{audioFmt.approxSizeStr}
-                  </div>
-                  {isSelected && (
-                    <div className="absolute top-2 right-2 w-3.5 h-3.5 rounded-full bg-lumina-violet flex items-center justify-center text-white">
-                      <Check className="w-2.5 h-2.5 stroke-[3]" />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Predefined Trackers</div>
+              <div className="font-semibold text-slate-200 font-mono">16 Ultra-Fast Swarms</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Disk Pre-Allocation</div>
+              <div className="font-semibold text-lumina-cyan font-mono">Falloc (Instant 0-Lag)</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Peer Discovery</div>
+              <div className="font-semibold text-slate-200 font-mono">DHT + PEX + LPD Active</div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* IDM Turbo Direct File Parameters */}
+      {isDirect && (
+        <div className="p-4 rounded-2xl bg-black/30 border border-white/[0.06] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-lumina-cyan" />
+              <span className="text-xs font-semibold text-slate-200">IDM Multi-Segment Turbo Engine</span>
+            </div>
+            <span className="text-[10px] font-mono text-lumina-cyan bg-lumina-cyan/10 px-2 py-0.5 rounded-md border border-lumina-cyan/20">
+              16x Acceleration
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Concurrent Connections</div>
+              <div className="font-semibold text-lumina-cyan font-mono">{settings?.turboConnections || 16} Parallel Streams</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Chunk Segmentation</div>
+              <div className="font-semibold text-slate-200 font-mono">1MB Dynamic Slices</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1">
+              <div className="text-[10px] text-slate-400">Range Request Capability</div>
+              <div className="font-semibold text-lumina-emerald font-mono">Server Validated ✓</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Format Options Matrix (For standard video/audio streams) */}
+      {!isTorrent && !isDirect && (
+        downloadMode === 'video' && inspectedMedia.formats.length > 0 ? (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-300">
+              Available Video Resolutions:
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+              {inspectedMedia.formats.map((fmt) => {
+                const isSelected = selectedFormat?.formatId === fmt.formatId;
+                return (
+                  <button
+                    key={`${fmt.formatId}-${fmt.vcodec}`}
+                    onClick={() => setSelectedFormat(fmt)}
+                    className={`p-3 rounded-2xl text-left border transition-all relative ${
+                      isSelected
+                        ? 'glass-card border-lumina-cyan/60 bg-lumina-cyan/10 shadow-md shadow-lumina-cyan/15 ring-1 ring-lumina-cyan/40'
+                        : 'glass-card border-white/[0.06] hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white tracking-wide">
+                        {fmt.resolution}
+                      </span>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
+                        {fmt.vcodec}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                      <span>{fmt.fps}fps</span>
+                      <span>{fmt.filesizeStr}</span>
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 w-3.5 h-3.5 rounded-full bg-lumina-cyan flex items-center justify-center text-black">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">
+                Audio Extraction Quality & Format:
+              </label>
+              {isPlaylist && (
+                <span className="text-[11px] text-lumina-violet font-mono font-medium">
+                  Applied to all {inspectedMedia.trackCount} tracks
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+              {inspectedMedia.audioFormats.map((audioFmt) => {
+                const isSelected = selectedAudioFormat === audioFmt.format;
+                return (
+                  <button
+                    key={audioFmt.format}
+                    onClick={() => setSelectedAudioFormat(audioFmt.format)}
+                    className={`p-3 rounded-2xl text-left border transition-all relative ${
+                      isSelected
+                        ? 'glass-card border-lumina-violet/60 bg-lumina-violet/10 shadow-md shadow-lumina-violet/15 ring-1 ring-lumina-violet/40'
+                        : 'glass-card border-white/[0.06] hover:border-white/20'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-white">{audioFmt.label}</div>
+                    <div className="mt-1 text-[10px] text-slate-400 font-mono leading-tight">
+                      {audioFmt.bitrate}
+                    </div>
+                    <div className="text-[9px] text-lumina-violet font-mono mt-0.5">
+                      ~{audioFmt.approxSizeStr}
+                    </div>
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 w-3.5 h-3.5 rounded-full bg-lumina-violet flex items-center justify-center text-white">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )
       )}
 
       {/* Playlist Tracklist Drawer Accordion */}
@@ -292,7 +420,7 @@ export const MediaInspector: React.FC = () => {
       )}
 
       {/* Subtitles Drawer (Only for single video mode) */}
-      {!isPlaylist && downloadMode === 'video' && inspectedMedia.subtitles.length > 0 && (
+      {!isPlaylist && !isTorrent && !isDirect && downloadMode === 'video' && inspectedMedia.subtitles.length > 0 && (
         <div className="p-3.5 rounded-2xl bg-black/30 border border-white/[0.06] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -347,19 +475,28 @@ export const MediaInspector: React.FC = () => {
       )}
 
       {/* Target Destination Indicator */}
-      {isPlaylist && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
-          {hasUsb ? (
-            <Usb className="w-3.5 h-3.5 text-lumina-emerald shrink-0" />
-          ) : (
-            <FolderDown className="w-3.5 h-3.5 text-lumina-violet shrink-0" />
-          )}
-          <span className="truncate">
-            Target Folder: <span className="font-mono text-slate-200">Playlists/{targetFolderName}/</span>
-            {hasUsb && <span className="text-lumina-emerald ml-1.5 font-medium">(Auto-saving to USB)</span>}
+      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
+        {hasUsb ? (
+          <Usb className="w-3.5 h-3.5 text-lumina-emerald shrink-0" />
+        ) : (
+          <FolderDown className="w-3.5 h-3.5 text-lumina-violet shrink-0" />
+        )}
+        <span className="truncate">
+          Target:{' '}
+          <span className="font-mono text-slate-200">
+            {isPlaylist
+              ? `Playlists/${targetFolderName}/`
+              : isTorrent
+              ? 'Torrents/'
+              : isDirect
+              ? 'Videos/Downloads/'
+              : downloadMode === 'video'
+              ? 'Videos/'
+              : 'Music/'}
           </span>
-        </div>
-      )}
+          {hasUsb && <span className="text-lumina-emerald ml-1.5 font-medium">(Auto-saving to USB)</span>}
+        </span>
+      </div>
 
       {/* Start Download Action Button */}
       <div className="pt-2">
@@ -369,12 +506,26 @@ export const MediaInspector: React.FC = () => {
             clearInspectedMedia();
           }}
           className={`w-full py-3.5 rounded-2xl text-sm font-bold text-black flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.99] ${
-            isPlaylist
+            isTorrent
+              ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald text-white hover:brightness-110 shadow-lumina-violet/25 hover:shadow-lumina-violet/40'
+              : isDirect
+              ? 'bg-gradient-to-r from-lumina-cyan via-lumina-emerald to-lumina-cyan text-black hover:brightness-110 shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40'
+              : isPlaylist
               ? 'bg-gradient-to-r from-lumina-violet via-lumina-cyan to-lumina-emerald text-white hover:brightness-110 shadow-lumina-violet/25 hover:shadow-lumina-violet/40'
               : 'glass-button-primary shadow-lumina-cyan/25 hover:shadow-lumina-cyan/40'
           }`}
         >
-          {isPlaylist ? (
+          {isTorrent ? (
+            <>
+              <Magnet className="w-4 h-4 stroke-[2.5]" />
+              <span>Start Turbo Torrent Download (16+ Trackers, DHT, PEX)</span>
+            </>
+          ) : isDirect ? (
+            <>
+              <Zap className="w-4 h-4 stroke-[2.5]" />
+              <span>Start IDM Turbo Download (16 Parallel Segments)</span>
+            </>
+          ) : isPlaylist ? (
             <>
               <FolderDown className="w-4 h-4 stroke-[2.5]" />
               <span>

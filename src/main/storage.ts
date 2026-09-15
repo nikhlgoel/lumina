@@ -80,6 +80,27 @@ export class StorageManager {
     return targetDir;
   }
 
+  public getTorrentDownloadDirectory(): string {
+    const settings = settingsManager.get();
+    let targetDir: string;
+
+    if (settings.autoSaveToUsb) {
+      const usbDrive = this.cachedDrives.find(d => d.isRemovable);
+      if (usbDrive && usbDrive.mountpoint && fs.existsSync(usbDrive.mountpoint)) {
+        targetDir = path.join(usbDrive.mountpoint, settings.usbFolderName || 'LuminaMedia', 'Torrents');
+      } else {
+        targetDir = path.join(path.dirname(settings.internalVideoPath), 'Torrents');
+      }
+    } else {
+      targetDir = path.join(path.dirname(settings.internalVideoPath), 'Torrents');
+    }
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    return targetDir;
+  }
+
   private async getLinuxDrives(): Promise<StorageDrive[]> {
     const drives: StorageDrive[] = [];
     try {
@@ -220,6 +241,7 @@ export class StorageManager {
       const videoDir = path.join(baseDir, 'Videos');
       const musicDir = path.join(baseDir, 'Music');
       const playlistDir = path.join(baseDir, 'Playlists');
+      const torrentDir = path.join(baseDir, 'Torrents');
       if (!fs.existsSync(videoDir)) {
         fs.mkdirSync(videoDir, { recursive: true });
       }
@@ -228,6 +250,9 @@ export class StorageManager {
       }
       if (!fs.existsSync(playlistDir)) {
         fs.mkdirSync(playlistDir, { recursive: true });
+      }
+      if (!fs.existsSync(torrentDir)) {
+        fs.mkdirSync(torrentDir, { recursive: true });
       }
     } catch (e) {
       console.warn(`Failed to auto-create LuminaMedia directory on ${mountpoint}:`, e);

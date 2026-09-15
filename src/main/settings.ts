@@ -18,7 +18,10 @@ const DEFAULT_SETTINGS: LuminaSettings = {
   internalMusicPath: path.join(os.homedir(), 'Music', 'Lumina'),
   maxConcurrentDownloads: 2,
   speedLimit: 0,
-  browserForCookies: 'none'
+  browserForCookies: 'none',
+  turboConnections: 16,
+  enableTurboMode: true,
+  enableBitTorrent: true
 };
 
 export class SettingsManager {
