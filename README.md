@@ -1,7 +1,7 @@
-# Lumina Media Workstation
+# Lumina
 
-> **Ultra-Sleek, Hardware-Accelerated Universal Media Harvester & Player**  
-> Built for **Fedora 44 (Linux)** with seamless cross-platform targeting for **Windows 11/10** and **macOS**.
+> **Ultra-Sleek Universal Media Downloader & Player**  
+> Download 8K/4K videos, extract lossless audio, save to USB drives, and enjoy your media locally. Built for **Fedora 44 (Linux)**, **Windows 11/10**, and **macOS**.
 
 ---
 

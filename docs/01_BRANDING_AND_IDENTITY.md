@@ -1,7 +1,7 @@
-# Lumina Media Workstation — Brand Identity & Visual Design Specification
+# Lumina — Brand Identity & Visual Design Specification
 
 ## 1. Executive Summary & Vision
-**Lumina Media Workstation** is an uncompromising, hardware-accelerated universal desktop media harvester and player designed for modern workstations. Built initially for **Fedora 44 (Linux)** with seamless cross-platform targeting for **Windows 11/10** and **macOS**, Lumina bridges the gap between raw CLI power (`yt-dlp` and `ffmpeg`) and an ultra-modern, glassmorphic GUI with fluid 120fps motion design.
+**Lumina** is an ultra-sleek, consumer-focused universal desktop media application designed for people who love having their favorite videos, movies, and music stored locally. Built initially for **Fedora 44 (Linux)** with seamless cross-platform targeting for **Windows 11/10** and **macOS**, Lumina bridges the gap between raw media extraction power (`yt-dlp` and `ffmpeg`) and an effortless, modern minimal glassmorphic interface with fluid 120fps motion design.
 
 ---
 
