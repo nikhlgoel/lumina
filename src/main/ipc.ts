@@ -4,6 +4,7 @@ import fs from 'fs';
 import { downloaderManager } from './downloader';
 import { storageManager } from './storage';
 import { musicManager } from './music';
+import { lyricsManager } from './lyrics';
 import { settingsManager } from './settings';
 import type { DownloadRequest, LuminaSettings } from '../preload/types';
 
@@ -42,6 +43,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('music:stream-url', async (_, videoId: unknown) => {
     if (typeof videoId !== 'string') return '';
     return await musicManager.getStreamUrl(videoId);
+  });
+
+  ipcMain.handle('lyrics:get', async (_, query: unknown) => {
+    if (!query || typeof query !== 'object') return null;
+    const q = query as { title?: unknown; artist?: unknown; duration?: unknown };
+    if (typeof q.title !== 'string' || !q.title.trim() || q.title.length > 500) {
+      return null;
+    }
+    const artist = typeof q.artist === 'string' ? q.artist.slice(0, 300) : undefined;
+    const duration = typeof q.duration === 'number' && !isNaN(q.duration) ? q.duration : undefined;
+    return await lyricsManager.getLyrics({
+      title: q.title.trim(),
+      artist,
+      duration
+    });
   });
 
   // Local Media Library

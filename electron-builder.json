@@ -36,8 +36,25 @@
     "artifactName": "Lumina-${version}-${arch}.AppImage"
   },
   "win": {
-    "target": ["nsis"],
-    "icon": "assets/icons/icon.ico"
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "assets/icons/icon.ico",
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Lumina",
+    "installerIcon": "assets/icons/icon.ico",
+    "uninstallerIcon": "assets/icons/icon.ico",
+    "artifactName": "Lumina-Setup-${version}-windows-x64.exe"
   },
   "mac": {
     "target": ["dmg"],

@@ -7,7 +7,8 @@ import type {
   DownloadProgress, 
   StorageDrive, 
   LuminaSettings, 
-  MusicTrack 
+  MusicTrack,
+  LyricsData 
 } from '@shared/types';
 
 interface LuminaState {
@@ -61,6 +62,13 @@ interface LuminaState {
   volume: number;
   currentTime: number;
   duration: number;
+  seekTarget: number | null;
+
+  // Lyrics State & Actions
+  isLyricsOpen: boolean;
+  lyricsData: LyricsData | null;
+  isLoadingLyrics: boolean;
+  lyricsError: string | null;
 
   setMusicQuery: (q: string) => void;
   searchMusic: (query: string) => Promise<void>;
@@ -68,6 +76,11 @@ interface LuminaState {
   togglePlayPause: () => void;
   setVolume: (vol: number) => void;
   seekTime: (time: number) => void;
+  clearSeekTarget: () => void;
+  updatePlaybackTime: (currentTime: number, duration: number) => void;
+  toggleLyrics: () => void;
+  setLyricsOpen: (open: boolean) => void;
+  fetchLyrics: (customQuery?: { title?: string; artist?: string }) => Promise<void>;
   quickDownloadTrack: (track: MusicTrack, format: 'flac' | 'mp3' | 'opus' | 'aac' | 'wav') => Promise<void>;
 
   // Settings
@@ -278,6 +291,12 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
   volume: 0.85,
   currentTime: 0,
   duration: 0,
+  seekTarget: null,
+
+  isLyricsOpen: false,
+  lyricsData: null,
+  isLoadingLyrics: false,
+  lyricsError: null,
 
   setMusicQuery: (q) => set({ musicQuery: q }),
   searchMusic: async (query) => {
@@ -293,7 +312,16 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
   },
 
   playTrack: async (track) => {
-    set({ currentPlayingTrack: track, isPlaying: true });
+    set({ 
+      currentPlayingTrack: track, 
+      isPlaying: true, 
+      lyricsData: null, 
+      lyricsError: null 
+    });
+    
+    // Auto-fetch lyrics for the active track
+    get().fetchLyrics({ title: track.title, artist: track.artist });
+
     try {
       const streamUrl = await window.luminaAPI.getStreamUrl(track.url);
       set({ audioStreamUrl: streamUrl });
@@ -304,7 +332,50 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
 
   togglePlayPause: () => set((state) => ({ isPlaying: !state.isPlaying })),
   setVolume: (volume) => set({ volume }),
-  seekTime: (currentTime) => set({ currentTime }),
+  seekTime: (target) => set({ seekTarget: target, currentTime: target }),
+  clearSeekTarget: () => set({ seekTarget: null }),
+  updatePlaybackTime: (currentTime, duration) => set({ currentTime, duration }),
+
+  toggleLyrics: () => {
+    const next = !get().isLyricsOpen;
+    set({ isLyricsOpen: next });
+    if (next && !get().lyricsData && get().currentPlayingTrack) {
+      get().fetchLyrics();
+    }
+  },
+
+  setLyricsOpen: (open) => {
+    set({ isLyricsOpen: open });
+    if (open && !get().lyricsData && get().currentPlayingTrack) {
+      get().fetchLyrics();
+    }
+  },
+
+  fetchLyrics: async (customQuery) => {
+    const track = get().currentPlayingTrack;
+    const title = customQuery?.title || track?.title;
+    const artist = customQuery?.artist || track?.artist;
+    if (!title) return;
+
+    set({ isLoadingLyrics: true, lyricsError: null });
+    try {
+      const data = await window.luminaAPI.getLyrics({
+        title,
+        artist,
+        duration: get().duration
+      });
+      set({
+        lyricsData: data,
+        isLoadingLyrics: false,
+        lyricsError: data ? null : 'No lyrics found for this track'
+      });
+    } catch (e: any) {
+      set({
+        isLoadingLyrics: false,
+        lyricsError: e?.message || 'Failed to fetch lyrics'
+      });
+    }
+  },
 
   quickDownloadTrack: async (track, format) => {
     const taskId = `music_${Date.now()}`;

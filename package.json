@@ -1,6 +1,6 @@
 {
   "name": "lumina-media",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Ultra-sleek universal media downloader and player",
   "main": "dist-electron/main/index.js",
   "author": {

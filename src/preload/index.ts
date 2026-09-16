@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('luminaAPI', {
   
   searchMusic: (query: string) => ipcRenderer.invoke('music:search', query),
   getStreamUrl: (videoId: string) => ipcRenderer.invoke('music:stream-url', videoId),
+  getLyrics: (query: { title: string; artist?: string; duration?: number }) => ipcRenderer.invoke('lyrics:get', query),
   
   getDownloadedMedia: () => ipcRenderer.invoke('library:get-media'),
   

@@ -21,3 +21,9 @@ pnpm-debug.log*
 temp/
 cache/
 *.tmp
+
+# Android build artifacts
+android_app/build/
+android_app/.dart_tool/
+android_app/android/.gradle/
+android_app/android/local.properties

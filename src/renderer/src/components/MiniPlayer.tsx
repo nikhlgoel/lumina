@@ -1,9 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Volume2, VolumeX, Music, SkipForward, SkipBack } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Music, SkipForward, SkipBack, Mic2 } from 'lucide-react';
+import clsx from 'clsx';
 import { useLuminaStore } from '../store/useLuminaStore';
 
 export const MiniPlayer: React.FC = () => {
-  const { currentPlayingTrack, isPlaying, togglePlayPause, audioStreamUrl, volume, setVolume } = useLuminaStore();
+  const { 
+    currentPlayingTrack, 
+    isPlaying, 
+    togglePlayPause, 
+    audioStreamUrl, 
+    volume, 
+    setVolume,
+    seekTarget,
+    clearSeekTarget,
+    updatePlaybackTime,
+    toggleLyrics,
+    isLyricsOpen
+  } = useLuminaStore();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -40,6 +53,15 @@ export const MiniPlayer: React.FC = () => {
     if (!audio) return;
     audio.volume = isMuted ? 0 : volume;
   }, [volume, isMuted]);
+
+  // Handle external seek requests (e.g. clicking a lyric line)
+  useEffect(() => {
+    if (seekTarget !== null && audioRef.current) {
+      audioRef.current.currentTime = seekTarget;
+      setCurrentTime(seekTarget);
+      clearSeekTarget();
+    }
+  }, [seekTarget, clearSeekTarget]);
 
   // Connect Web Audio API Analyser
   const setupAudioContext = () => {
@@ -107,8 +129,11 @@ export const MiniPlayer: React.FC = () => {
 
   const handleTimeUpdate = () => {
     if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      setDuration(audioRef.current.duration || 0);
+      const cur = audioRef.current.currentTime;
+      const dur = audioRef.current.duration || 0;
+      setCurrentTime(cur);
+      setDuration(dur);
+      updatePlaybackTime(cur, dur);
     }
   };
 
@@ -117,6 +142,7 @@ export const MiniPlayer: React.FC = () => {
     setCurrentTime(target);
     if (audioRef.current) {
       audioRef.current.currentTime = target;
+      updatePlaybackTime(target, duration);
     }
   };
 
@@ -190,14 +216,29 @@ export const MiniPlayer: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Waveform visualizer & Volume */}
-      <div className="flex items-center justify-end gap-3 w-1/4 min-w-[180px]">
+      {/* Right: Waveform visualizer, Lyrics Button & Volume */}
+      <div className="flex items-center justify-end gap-3 w-1/4 min-w-[210px]">
+        {/* Lyrics Button */}
+        <button
+          onClick={toggleLyrics}
+          title="Toggle Lyrics (L)"
+          className={clsx(
+            "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 border",
+            isLyricsOpen 
+              ? "bg-lumina-cyan/20 text-lumina-cyan border-lumina-cyan/50 shadow-lumina-cyan/20"
+              : "text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10"
+          )}
+        >
+          <Mic2 className={clsx("w-3.5 h-3.5", isLyricsOpen && "animate-pulse text-lumina-cyan")} />
+          <span className="text-[11px] font-medium">Lyrics</span>
+        </button>
+
         {/* Spectrum Waveform Canvas */}
         <canvas
           ref={canvasRef}
-          width={70}
-          height={24}
-          className="rounded opacity-80"
+          width={65}
+          height={22}
+          className="rounded opacity-80 shrink-0"
         />
 
         <div className="flex items-center gap-2">

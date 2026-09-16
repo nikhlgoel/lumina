@@ -131,6 +131,21 @@ export interface MusicTrack {
   album?: string;
 }
 
+export interface LyricLine {
+  time: number;
+  text: string;
+}
+
+export interface LyricsData {
+  trackName: string;
+  artistName: string;
+  plainLyrics?: string;
+  syncedLyrics?: string;
+  lines: LyricLine[];
+  isSynced: boolean;
+  source: string;
+}
+
 export interface LuminaSettings {
   theme: 'onyx' | 'cyber' | 'arctic' | 'teal';
   ambientShader: boolean;
@@ -165,6 +180,7 @@ export interface LuminaAPI {
   // Music Discovery & Streaming
   searchMusic: (query: string) => Promise<MusicTrack[]>;
   getStreamUrl: (videoId: string) => Promise<string>;
+  getLyrics: (query: { title: string; artist?: string; duration?: number }) => Promise<LyricsData | null>;
   
   // Local Media Library
   getDownloadedMedia: () => Promise<{ videos: string[]; music: string[] }>;
