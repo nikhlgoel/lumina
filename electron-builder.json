@@ -15,7 +15,25 @@
     "category": "AudioVideo",
     "icon": "assets/icons",
     "synopsis": "Ultra-sleek universal media downloader and player",
-    "description": "Download 8K/4K videos, extract lossless audio, save to USB drives, and enjoy your media locally."
+    "description": "Download 8K/4K videos, extract lossless audio, stream music, manage torrents, and save media to USB drives — all from one beautiful interface.",
+    "desktop": {
+      "Name": "Lumina",
+      "Comment": "Universal Media Downloader & Player",
+      "Categories": "AudioVideo;Audio;Video;Network;FileTransfer;",
+      "Keywords": "download;video;music;torrent;youtube;spotify;media;",
+      "StartupWMClass": "lumina-media",
+      "MimeType": "application/x-bittorrent;x-scheme-handler/magnet;"
+    },
+    "mimeTypes": [
+      "application/x-bittorrent",
+      "x-scheme-handler/magnet"
+    ]
+  },
+  "rpm": {
+    "fpm": ["--rpm-rpmbuild-define", "_build_id_links none"]
+  },
+  "appImage": {
+    "artifactName": "Lumina-${version}-${arch}.AppImage"
   },
   "win": {
     "target": ["nsis"],
