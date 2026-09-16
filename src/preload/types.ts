@@ -147,7 +147,8 @@ export interface LyricsData {
 }
 
 export interface LuminaSettings {
-  theme: 'onyx' | 'cyber' | 'arctic' | 'teal';
+  theme: 'onyx' | 'cyber' | 'arctic' | 'teal' | 'sunset' | 'amethyst';
+  colorMode: 'dark' | 'light';
   ambientShader: boolean;
   blurIntensity: number;
   defaultVideoRes: string;
@@ -157,11 +158,13 @@ export interface LuminaSettings {
   internalVideoPath: string;
   internalMusicPath: string;
   maxConcurrentDownloads: number;
+  batchConcurrency: number;
   speedLimit: number;
   browserForCookies: 'none' | 'firefox' | 'chrome' | 'brave' | 'edge';
   turboConnections: number;
   enableTurboMode: boolean;
   enableBitTorrent: boolean;
+  anonymizeRequests: boolean;
 }
 
 export interface LuminaAPI {

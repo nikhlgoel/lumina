@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: [
     "./src/renderer/index.html",
     "./src/renderer/src/**/*.{js,ts,jsx,tsx}",
@@ -9,15 +10,22 @@ module.exports = {
       colors: {
         lumina: {
           dark: '#08090D',
+          light: '#F8FAFC',
           card: '#10121A',
+          cardLight: '#FFFFFF',
           elevated: '#171A26',
+          elevatedLight: '#F1F5F9',
           input: '#1C2030',
+          inputLight: '#E2E8F0',
           border: 'rgba(255, 255, 255, 0.08)',
+          borderLight: 'rgba(0, 0, 0, 0.08)',
           cyan: '#00F2FE',
           violet: '#9D4EDD',
           magenta: '#F72585',
           emerald: '#00F5A0',
           amber: '#FFB703',
+          sunset: '#FF6B6B',
+          amethyst: '#845EC2',
         }
       },
       fontFamily: {

@@ -88,6 +88,8 @@ interface LuminaState {
   loadSettings: () => Promise<void>;
   saveSettings: (newSettings: Partial<LuminaSettings>) => Promise<void>;
   cycleTheme: () => Promise<void>;
+  toggleColorMode: () => Promise<void>;
+  applyThemeToDom: () => void;
 
   // App Initializer
   initialize: () => void;
@@ -407,6 +409,7 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
     try {
       const s = await window.luminaAPI.getSettings();
       set({ settings: s });
+      get().applyThemeToDom();
     } catch (e) {}
   },
 
@@ -414,14 +417,41 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
     try {
       const updated = await window.luminaAPI.saveSettings(newSettings);
       set({ settings: updated });
+      get().applyThemeToDom();
     } catch (e) {}
   },
 
   cycleTheme: async () => {
     const current = get().settings?.theme || 'onyx';
-    const themes: ('onyx' | 'cyber' | 'arctic' | 'teal')[] = ['onyx', 'cyber', 'arctic', 'teal'];
+    const themes: ('onyx' | 'cyber' | 'arctic' | 'teal' | 'sunset' | 'amethyst')[] = [
+      'onyx', 'cyber', 'arctic', 'teal', 'sunset', 'amethyst'
+    ];
     const next = themes[(themes.indexOf(current) + 1) % themes.length];
     await get().saveSettings({ theme: next });
+  },
+
+  toggleColorMode: async () => {
+    const current = get().settings?.colorMode || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    await get().saveSettings({ colorMode: next });
+  },
+
+  applyThemeToDom: () => {
+    const s = get().settings;
+    const mode = s?.colorMode || 'dark';
+    const theme = s?.theme || 'onyx';
+    const root = document.documentElement;
+
+    if (mode === 'dark') {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    } else {
+      root.classList.remove('dark');
+      root.classList.add('light');
+    }
+
+    root.setAttribute('data-theme', theme);
+    root.setAttribute('data-color-mode', mode);
   },
 
   initialize: () => {

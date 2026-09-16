@@ -67,10 +67,66 @@ export const PREDEFINED_HIGH_SPEED_TRACKERS = [
   'http://tracker.bt4g.com:2095/announce'
 ];
 
+export const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+export function sanitizeUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let url = rawUrl.replace(/[\x00-\x1f\x7f]/g, '').trim();
+
+  // If magnet link or local path or spotify URI, preserve as-is
+  if (url.startsWith('magnet:?') || url.startsWith('spotify:')) {
+    return url;
+  }
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return url;
+  }
+
+  try {
+    const parsed = new URL(url);
+
+    // List of tracking & telemetry parameters to strip
+    const trackingParams = [
+      'si', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'igshid', 'mc_cid', 'mc_eid', '_ga', 'yclid',
+      'ref', 'ref_src', 'feature', 'app', 'spm', 'from', 'source', 'share_id',
+      'is_copy_url', 'sub_confirmation'
+    ];
+
+    for (const param of trackingParams) {
+      parsed.searchParams.delete(param);
+    }
+
+    const keysToDelete: string[] = [];
+    parsed.searchParams.forEach((_, key) => {
+      if (key.startsWith('utm_') || key.startsWith('spm_') || key.startsWith('ga_')) {
+        keysToDelete.push(key);
+      }
+    });
+    for (const key of keysToDelete) {
+      parsed.searchParams.delete(key);
+    }
+
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export class DownloaderManager {
   private activeProcesses = new Map<string, { proc: ChildProcess; request: DownloadRequest; progress: DownloadProgress }>();
+  private activeChildProcesses = new Map<string, Set<ChildProcess>>();
   private progressListeners: ((progress: DownloadProgress) => void)[] = [];
   private cancelledTasks = new Set<string>();
+
+  private registerChildProcess(taskId: string, proc: ChildProcess) {
+    if (!this.activeChildProcesses.has(taskId)) {
+      this.activeChildProcesses.set(taskId, new Set());
+    }
+    this.activeChildProcesses.get(taskId)!.add(proc);
+    proc.on('close', () => {
+      this.activeChildProcesses.get(taskId)?.delete(proc);
+    });
+  }
 
   constructor() {
     this.ensureStagingDirectory();
@@ -127,7 +183,7 @@ export class DownloaderManager {
     if (typeof url !== 'string') {
       throw new Error('Invalid URL format');
     }
-    const cleanUrl = url.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    const cleanUrl = sanitizeUrl(url);
     if (!cleanUrl || cleanUrl.startsWith('-') || cleanUrl.length > 4096) {
       throw new Error('Malformed or unsupported URL parameter');
     }
@@ -151,7 +207,7 @@ export class DownloaderManager {
     }
 
     // 3. Check for Direct Downloadable File (IDM Turbo Candidate)
-    const isDirectFile = cleanUrl.match(/^https?:\/\/.*\.(mp4|mkv|webm|avi|mov|mp3|flac|wav|zip|tar|gz|iso|exe|bin|AppImage)(\?.*)?$/i);
+    const isDirectFile = cleanUrl.match(/^https?:\/\/.*\/[^/?#]+\.(mp4|mkv|webm|avi|mov|mp3|flac|wav|zip|tar|gz|iso|exe|bin|AppImage|7z|rar)(\?.*)?$/i);
     if (isDirectFile) {
       try {
         return await this.inspectDirectFile(cleanUrl);
@@ -295,16 +351,32 @@ export class DownloaderManager {
   private async inspectDirectFile(url: string): Promise<MediaMetadata> {
     const parsed = new URL(url);
     const rawPath = parsed.pathname;
-    const fileName = decodeURIComponent(rawPath.split('/').pop() || 'download.bin');
+    let fileName = decodeURIComponent(rawPath.split('/').pop() || 'download.bin');
     
     let size = 0;
     let acceptRanges = true;
     try {
-      const res = await fetch(url, { method: 'HEAD' });
+      const res = await fetch(url, { 
+        method: 'HEAD',
+        headers: {
+          'User-Agent': BROWSER_USER_AGENT,
+          'Accept': '*/*',
+          'DNT': '1',
+          'Sec-GPC': '1'
+        }
+      });
       const cl = res.headers.get('content-length');
       if (cl) size = parseInt(cl, 10);
       const ar = res.headers.get('accept-ranges');
       acceptRanges = ar === 'bytes' || !ar;
+
+      const cd = res.headers.get('content-disposition');
+      if (cd) {
+        const cdMatch = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+        if (cdMatch && cdMatch[1]) {
+          fileName = decodeURIComponent(cdMatch[1]);
+        }
+      }
     } catch (e) {}
 
     const sizeStr = this.formatBytes(size);
@@ -440,6 +512,11 @@ export class DownloaderManager {
       '--no-warnings',
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
+      '--user-agent', BROWSER_USER_AGENT,
+      '--extractor-args', 'youtube:player_client=android,web',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Sec-GPC:1',
     ];
 
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
@@ -539,6 +616,11 @@ export class DownloaderManager {
       '--no-playlist',
       '--js-runtimes', 'node',
       '--remote-components', 'ejs:github',
+      '--user-agent', BROWSER_USER_AGENT,
+      '--extractor-args', 'youtube:player_client=android,web',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Sec-GPC:1',
     ];
 
     if (settings.browserForCookies && settings.browserForCookies !== 'none') {
@@ -686,6 +768,16 @@ export class DownloaderManager {
       throw new Error('Invalid download request');
     }
 
+    request.url = sanitizeUrl(request.url);
+
+    // Auto-detect direct file archives/executables if not already flagged
+    if (!request.isTorrent && !request.isPlaylist && !request.isDirectFile) {
+      const isDirect = request.url.match(/^https?:\/\/.*\/[^/?#]+\.(zip|rar|7z|tar|gz|iso|exe|bin|AppImage)(\?.*)?$/i);
+      if (isDirect) {
+        request.isDirectFile = true;
+      }
+    }
+
     // Branch 1: BitTorrent P2P Download
     if (request.isTorrent) {
       return this.startTorrentDownload(request);
@@ -732,6 +824,16 @@ export class DownloaderManager {
     // IDM Turbo Acceleration (16 concurrent fragments)
     if (settings.enableTurboMode) {
       args.push('-N', String(settings.turboConnections || 16));
+    }
+
+    if (settings.anonymizeRequests) {
+      args.push(
+        '--user-agent', BROWSER_USER_AGENT,
+        '--extractor-args', 'youtube:player_client=android,web',
+        '--add-header', 'Accept-Language:en-US,en;q=0.9',
+        '--add-header', 'DNT:1',
+        '--add-header', 'Sec-GPC:1'
+      );
     }
 
     if (settings.speedLimit > 0) {
@@ -930,11 +1032,15 @@ export class DownloaderManager {
       '--bt-max-peers=200',
       `--bt-tracker=${trackerArgs}`,
       '--bt-request-peer-speed-limit=0',
-      '--file-allocation=falloc',
+      '--bt-require-crypto=true',
+      '--bt-min-crypto-level=arc4',
+      '--follow-torrent=mem',
+      '--peer-id-prefix=-qB4650-',
+      '--user-agent=qBittorrent/4.6.5',
+      '--file-allocation=none',
       '--continue=true',
       '--check-integrity=true',
       '--bt-hash-check-seed=true',
-      '--bt-save-metadata=true',
       '--disk-cache=64M',
       '--summary-interval=1',
       '--seed-time=0',
@@ -1055,13 +1161,21 @@ export class DownloaderManager {
       '--continue=true',
       '--auto-file-renaming=false',
       '--conditional-get=true',
-      '--file-allocation=falloc',
+      '--file-allocation=none',
       '--disk-cache=64M',
       '--timeout=60',
       '--max-tries=10',
       '--retry-wait=3',
       '--summary-interval=1',
       '--allow-overwrite=true',
+      `--user-agent=${BROWSER_USER_AGENT}`,
+      '--header=Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      '--header=Accept-Language: en-US,en;q=0.9',
+      '--header=DNT: 1',
+      '--header=Sec-GPC: 1',
+      '--header=Sec-Fetch-Dest: document',
+      '--header=Sec-Fetch-Mode: navigate',
+      '--header=Sec-Fetch-Site: cross-site',
       '-d', finalDir
     ];
 
@@ -1185,143 +1299,156 @@ export class DownloaderManager {
     this.emitProgress(initialProgress);
     this.cancelledTasks.delete(taskId);
 
-    // Asynchronously process the playlist tracks sequentially
+    // Asynchronously process the playlist tracks with parallel concurrent workers
     (async () => {
       let completedCount = 0;
+      let nextTrackIndex = 0;
+      const concurrency = Math.max(1, Math.min(settings.batchConcurrency || 3, totalTracks));
+      const trackProgressMap = new Map<number, number>();
+      const trackSpeedMap = new Map<number, string>();
+      const activeTrackTitles = new Map<number, string>();
 
-      for (let i = 0; i < totalTracks; i++) {
-        if (this.cancelledTasks.has(taskId)) {
-          this.emitProgress({
-            taskId,
-            status: 'cancelled',
-            percent: (completedCount / totalTracks) * 100,
-            speed: '0 KB/s',
-            eta: '0s',
-            downloadedBytes: 0,
-            totalBytes: 0,
-            stage: 'Playlist download cancelled by user',
-            outputPath: finalDir,
-            currentTrackIndex: i + 1,
-            totalTracks,
-            currentTrackTitle: tracks[i]?.title
-          });
-          return;
-        }
+      const runWorker = async (workerId: number) => {
+        while (nextTrackIndex < totalTracks) {
+          if (this.cancelledTasks.has(taskId)) return;
 
-        const track = tracks[i];
-        const trackNumber = i + 1;
-        const trackBaseProgress = (i / totalTracks) * 100;
-        const fullTrackTitle = track.artist ? `${track.artist} - ${track.title}` : track.title;
+          const i = nextTrackIndex++;
+          const track = tracks[i];
+          const trackNumber = i + 1;
+          const fullTrackTitle = track.artist ? `${track.artist} - ${track.title}` : track.title;
+          activeTrackTitles.set(workerId, fullTrackTitle);
 
-        this.emitProgress({
-          taskId,
-          status: 'downloading',
-          percent: trackBaseProgress,
-          speed: 'Connecting...',
-          eta: '--',
-          downloadedBytes: 0,
-          totalBytes: 0,
-          stage: `[${trackNumber}/${totalTracks}] Downloading: ${fullTrackTitle}`,
-          outputPath: finalDir,
-          currentTrackIndex: trackNumber,
-          totalTracks,
-          currentTrackTitle: fullTrackTitle
-        });
+          const paddedIndex = String(trackNumber).padStart(2, '0');
+          const outputTemplate = path.join(finalDir, `${paddedIndex} - %(title)s.%(ext)s`);
 
-        const paddedIndex = String(trackNumber).padStart(2, '0');
-        const outputTemplate = path.join(finalDir, `${paddedIndex} - %(title)s.%(ext)s`);
-
-        let downloadTarget = track.url;
-        if (!downloadTarget || downloadTarget.includes('open.spotify.com')) {
-          downloadTarget = `ytsearch1:${track.artist || ''} ${track.title} audio`.trim();
-        }
-
-        const args = [
-          downloadTarget,
-          '--newline',
-          '--progress-template',
-          'LUMINA_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
-          '--ffmpeg-location', ffmpeg,
-          '-o', outputTemplate,
-          '--no-playlist',
-          '--js-runtimes', 'node',
-          '--remote-components', 'ejs:github',
-        ];
-
-        // Turbo Multi-Fragment acceleration
-        if (settings.enableTurboMode) {
-          args.push('-N', String(settings.turboConnections || 16));
-        }
-
-        if (settings.browserForCookies && settings.browserForCookies !== 'none') {
-          args.push('--cookies-from-browser', settings.browserForCookies);
-        }
-
-        if (request.mode === 'video') {
-          if (request.videoFormatId) {
-            args.push('-f', `${request.videoFormatId}+bestaudio/best`);
-          } else {
-            args.push('-f', 'bestvideo+bestaudio/best');
+          let downloadTarget = track.url;
+          if (!downloadTarget || downloadTarget.includes('open.spotify.com')) {
+            downloadTarget = `ytsearch1:${track.artist || ''} ${track.title} audio`.trim();
           }
-          args.push('--merge-output-format', 'mp4');
-        } else {
-          args.push('-x', '--audio-format', request.audioFormat || 'mp3', '--audio-quality', '0');
-          args.push('--embed-thumbnail', '--embed-metadata');
-        }
 
-        try {
-          await new Promise<void>((resolve) => {
-            const proc = spawn(ytdlp, args);
-            this.activeProcesses.set(taskId, { proc, request, progress: initialProgress });
+          const args = [
+            downloadTarget,
+            '--newline',
+            '--progress-template',
+            'LUMINA_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s',
+            '--ffmpeg-location', ffmpeg,
+            '-o', outputTemplate,
+            '--no-playlist',
+            '--js-runtimes', 'node',
+            '--remote-components', 'ejs:github',
+          ];
 
-            proc.stdout.on('data', (chunk) => {
-              const lines = chunk.toString().split('\n');
-              for (const line of lines) {
-                if (line.includes('LUMINA_PROGRESS:')) {
-                  const rawTelemetry = line.replace('LUMINA_PROGRESS:', '').trim();
-                  const [pctStr, speedStr, etaStr, dlBytesStr, totalBytesStr] = rawTelemetry.split('|');
-                  const trackPct = parseFloat(pctStr?.replace('%', '')) || 0;
-                  const overallPercent = Math.min(99.9, ((i + trackPct / 100) / totalTracks) * 100);
+          // Turbo Multi-Fragment acceleration
+          if (settings.enableTurboMode) {
+            args.push('-N', '4');
+          }
 
-                  this.emitProgress({
-                    taskId,
-                    status: 'downloading',
-                    percent: overallPercent,
-                    speed: speedStr || 'Downloading...',
-                    eta: etaStr || '--',
-                    downloadedBytes: parseInt(dlBytesStr, 10) || 0,
-                    totalBytes: parseInt(totalBytesStr, 10) || 0,
-                    stage: `[${trackNumber}/${totalTracks}] Downloading: ${fullTrackTitle}`,
-                    outputPath: finalDir,
-                    currentTrackIndex: trackNumber,
-                    totalTracks,
-                    currentTrackTitle: fullTrackTitle,
-                    connections: settings.enableTurboMode ? (settings.turboConnections || 16) : 1
-                  });
+          if (settings.anonymizeRequests) {
+            args.push(
+              '--user-agent', BROWSER_USER_AGENT,
+              '--extractor-args', 'youtube:player_client=android,web',
+              '--add-header', 'Accept-Language:en-US,en;q=0.9',
+              '--add-header', 'DNT:1',
+              '--add-header', 'Sec-GPC:1'
+            );
+          }
+
+          if (settings.browserForCookies && settings.browserForCookies !== 'none') {
+            args.push('--cookies-from-browser', settings.browserForCookies);
+          }
+
+          if (request.mode === 'video') {
+            if (request.videoFormatId) {
+              args.push('-f', `${request.videoFormatId}+bestaudio/best`);
+            } else {
+              args.push('-f', 'bestvideo+bestaudio/best');
+            }
+            args.push('--merge-output-format', 'mp4');
+          } else {
+            args.push('-x', '--audio-format', request.audioFormat || 'mp3', '--audio-quality', '0');
+            args.push('--embed-thumbnail', '--embed-metadata');
+          }
+
+          try {
+            await new Promise<void>((resolve) => {
+              if (this.cancelledTasks.has(taskId)) {
+                return resolve();
+              }
+
+              const proc = spawn(ytdlp, args);
+              this.registerChildProcess(taskId, proc);
+
+              proc.stdout.on('data', (chunk) => {
+                const lines = chunk.toString().split('\n');
+                for (const line of lines) {
+                  if (line.includes('LUMINA_PROGRESS:')) {
+                    const rawTelemetry = line.replace('LUMINA_PROGRESS:', '').trim();
+                    const [pctStr, speedStr, etaStr, dlBytesStr, totalBytesStr] = rawTelemetry.split('|');
+                    const trackPct = parseFloat(pctStr?.replace('%', '')) || 0;
+
+                    trackProgressMap.set(i, trackPct);
+                    if (speedStr) trackSpeedMap.set(i, speedStr);
+
+                    let sumPct = 0;
+                    for (let j = 0; j < totalTracks; j++) {
+                      sumPct += (trackProgressMap.get(j) || 0);
+                    }
+                    const overallPercent = Math.min(99.9, Math.max(0, sumPct / totalTracks));
+
+                    const speeds = Array.from(trackSpeedMap.values()).filter(Boolean);
+                    const currentSpeed = speeds.length > 0 ? speeds[speeds.length - 1] : 'Turbo Accelerating...';
+                    const activeTitlesList = Array.from(activeTrackTitles.values()).slice(0, 2).join(', ');
+
+                    this.emitProgress({
+                      taskId,
+                      status: 'downloading',
+                      percent: overallPercent,
+                      speed: currentSpeed,
+                      eta: etaStr || '--',
+                      downloadedBytes: parseInt(dlBytesStr, 10) || 0,
+                      totalBytes: parseInt(totalBytesStr, 10) || 0,
+                      stage: `[${completedCount + 1}/${totalTracks}] Parallel (${concurrency}x): ${activeTitlesList}`,
+                      outputPath: finalDir,
+                      currentTrackIndex: completedCount + 1,
+                      totalTracks,
+                      currentTrackTitle: fullTrackTitle,
+                      connections: concurrency * 4
+                    });
+                  }
                 }
-              }
-            });
+              });
 
-            proc.on('close', (code) => {
-              if (code === 0) {
-                completedCount++;
-              } else {
-                console.warn(`[Playlist Track ${trackNumber}] Exited with code ${code}`);
-              }
-              resolve();
-            });
+              proc.on('close', (code) => {
+                trackProgressMap.set(i, 100);
+                trackSpeedMap.delete(i);
+                activeTrackTitles.delete(workerId);
+                if (code === 0) {
+                  completedCount++;
+                } else {
+                  console.warn(`[Playlist Track ${trackNumber}] Exited with code ${code}`);
+                }
+                resolve();
+              });
 
-            proc.on('error', (err) => {
-              console.warn(`[Playlist Track ${trackNumber}] Process error:`, err);
-              resolve();
+              proc.on('error', (err) => {
+                console.warn(`[Playlist Track ${trackNumber}] Process error:`, err);
+                trackProgressMap.set(i, 100);
+                trackSpeedMap.delete(i);
+                activeTrackTitles.delete(workerId);
+                resolve();
+              });
             });
-          });
-        } catch (e) {
-          console.warn(`Error processing playlist track ${trackNumber}:`, e);
+          } catch (e) {
+            console.warn(`Error processing playlist track ${trackNumber}:`, e);
+          }
         }
-      }
+      };
+
+      const workers = Array.from({ length: concurrency }, (_, idx) => runWorker(idx));
+      await Promise.all(workers);
 
       this.activeProcesses.delete(taskId);
+      this.activeChildProcesses.delete(taskId);
 
       if (this.cancelledTasks.has(taskId)) {
         this.emitProgress({
@@ -1360,20 +1487,40 @@ export class DownloaderManager {
 
   public cancelDownload(taskId: string): boolean {
     this.cancelledTasks.add(taskId);
+    let killed = false;
+
     const active = this.activeProcesses.get(taskId);
     if (active) {
       try {
         active.proc.kill('SIGKILL');
         this.activeProcesses.delete(taskId);
-        this.emitProgress({
-          ...active.progress,
-          status: 'cancelled',
-          stage: 'Cancelled by user'
-        });
-        return true;
-      } catch (e) {
-        return false;
+        killed = true;
+      } catch (e) {}
+    }
+
+    const subProcs = this.activeChildProcesses.get(taskId);
+    if (subProcs) {
+      for (const p of subProcs) {
+        try {
+          p.kill('SIGKILL');
+          killed = true;
+        } catch {}
       }
+      this.activeChildProcesses.delete(taskId);
+    }
+
+    if (killed || active) {
+      this.emitProgress({
+        taskId,
+        status: 'cancelled',
+        percent: active?.progress.percent || 0,
+        speed: '0 KB/s',
+        eta: '0s',
+        downloadedBytes: 0,
+        totalBytes: 0,
+        stage: 'Cancelled by user'
+      });
+      return true;
     }
     return false;
   }

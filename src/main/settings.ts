@@ -8,6 +8,7 @@ const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
 
 const DEFAULT_SETTINGS: LuminaSettings = {
   theme: 'onyx',
+  colorMode: 'dark',
   ambientShader: true,
   blurIntensity: 20,
   defaultVideoRes: 'max',
@@ -17,11 +18,13 @@ const DEFAULT_SETTINGS: LuminaSettings = {
   internalVideoPath: path.join(os.homedir(), 'Videos', 'Lumina'),
   internalMusicPath: path.join(os.homedir(), 'Music', 'Lumina'),
   maxConcurrentDownloads: 2,
+  batchConcurrency: 3,
   speedLimit: 0,
   browserForCookies: 'none',
   turboConnections: 16,
   enableTurboMode: true,
-  enableBitTorrent: true
+  enableBitTorrent: true,
+  anonymizeRequests: true
 };
 
 export class SettingsManager {

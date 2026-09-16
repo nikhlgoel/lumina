@@ -73,7 +73,7 @@ export const App: React.FC = () => {
   }, [initialize, inspectUrl, clearInspectedMedia, togglePlayPause, currentPlayingTrack, setUrlInput, isLyricsOpen, setLyricsOpen, toggleLyrics]);
 
   return (
-    <div className="relative w-screen h-screen flex flex-col bg-lumina-dark text-slate-100 overflow-hidden font-sans">
+    <div className="app-container relative w-screen h-screen flex flex-col bg-lumina-dark text-slate-100 overflow-hidden font-sans transition-colors duration-300">
       {/* Dynamic Ambient Background Canvas */}
       <AmbientCanvas />
 
