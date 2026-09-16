@@ -12,6 +12,7 @@ import { LocalLibrary } from './components/LocalLibrary';
 import { SettingsModal } from './components/SettingsModal';
 import { SplashScreen } from './components/SplashScreen';
 import { LyricsView } from './components/LyricsView';
+import { BottomNavBar } from './components/BottomNavBar';
 import { useLuminaStore } from './store/useLuminaStore';
 
 export const App: React.FC = () => {
@@ -89,10 +90,10 @@ export const App: React.FC = () => {
         {/* Left Navigation Sidebar */}
         <Sidebar />
 
-        {/* Dynamic Center Stage */}
-        <main className="flex-1 h-full overflow-y-auto p-6 space-y-6">
+        {/* Dynamic Center Stage (Mobile-first responsive padding) */}
+        <main className="flex-1 h-full overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
           {activeTab === 'downloader' && (
-            <div className="max-w-5xl mx-auto space-y-6">
+            <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
               {/* Omnibox / Link input */}
               <Omnibox />
 
@@ -132,6 +133,9 @@ export const App: React.FC = () => {
 
       {/* Persistent Docked Audio Player */}
       <MiniPlayer />
+
+      {/* Mobile Bottom Navigation Bar */}
+      <BottomNavBar />
     </div>
   );
 };

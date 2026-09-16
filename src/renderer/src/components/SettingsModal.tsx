@@ -36,6 +36,9 @@ export const SettingsModal: React.FC = () => {
     }
   };
 
+  const isAndroid = typeof window !== 'undefined' && 
+    (/Android/i.test(navigator.userAgent) || Boolean((window as any).LuminaAndroidBridge) || Boolean(window.luminaAPI?.isAndroid));
+
   const THEMES = [
     { id: 'onyx', name: 'Onyx Dark', desc: 'Obsidian & Neon Cyan', dot1: '#00F2FE', dot2: '#9D4EDD' },
     { id: 'cyber', name: 'Cyberpunk', desc: 'Neon Yellow & Magenta', dot1: '#FFE600', dot2: '#F72585' },
@@ -67,8 +70,8 @@ export const SettingsModal: React.FC = () => {
         )}
       </div>
 
-      {/* Sub-Tab Navigation */}
-      <div className="flex flex-wrap items-center gap-2 p-1 rounded-2xl bg-black/40 border border-white/[0.06] w-fit">
+      {/* Sub-Tab Navigation (Touch & Mobile friendly horizontal scrolling) */}
+      <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-black/40 border border-white/[0.06] w-full overflow-x-auto no-scrollbar scroll-smooth">
         {[
           { id: 'general' as const, label: 'Theme & Appearance', icon: Sparkles },
           { id: 'performance' as const, label: 'Speed & Turbo', icon: Cpu },
@@ -82,7 +85,7 @@ export const SettingsModal: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveSubTab(tab.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
                 isSelected
                   ? 'bg-white/10 text-white border border-white/20'
                   : 'text-slate-400 hover:text-slate-200'
@@ -96,7 +99,7 @@ export const SettingsModal: React.FC = () => {
       </div>
 
       {/* Settings Card */}
-      <div className="p-5 rounded-3xl glass-panel border border-white/[0.08] space-y-6">
+      <div className="p-4 sm:p-5 rounded-3xl glass-panel border border-white/[0.08] space-y-6">
         {/* Panel: Theme & Appearance */}
         {activeSubTab === 'general' && (
           <div className="space-y-5">
@@ -114,7 +117,7 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Dark Mode Option */}
                 <button
                   onClick={() => handleUpdate({ colorMode: 'dark' })}
@@ -412,16 +415,18 @@ export const SettingsModal: React.FC = () => {
                     <input
                       type="text"
                       readOnly
-                      value={settings.internalVideoPath}
+                      value={isAndroid ? '/storage/emulated/0/Movies/Lumina' : settings.internalVideoPath}
                       className="w-full px-3 py-2 rounded-xl glass-input text-[11px] text-slate-400 select-all"
                     />
-                    <button
-                      onClick={() => handleSelectFolder('internalVideoPath')}
-                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold flex items-center gap-1.5"
-                    >
-                      <Folder className="w-3.5 h-3.5" />
-                      Browse
-                    </button>
+                    {!isAndroid && (
+                      <button
+                        onClick={() => handleSelectFolder('internalVideoPath')}
+                        className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold flex items-center gap-1.5"
+                      >
+                        <Folder className="w-3.5 h-3.5" />
+                        Browse
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -431,16 +436,18 @@ export const SettingsModal: React.FC = () => {
                     <input
                       type="text"
                       readOnly
-                      value={settings.internalMusicPath}
+                      value={isAndroid ? '/storage/emulated/0/Music/Lumina' : settings.internalMusicPath}
                       className="w-full px-3 py-2 rounded-xl glass-input text-[11px] text-slate-400 select-all"
                     />
-                    <button
-                      onClick={() => handleSelectFolder('internalMusicPath')}
-                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold flex items-center gap-1.5"
-                    >
-                      <Folder className="w-3.5 h-3.5" />
-                      Browse
-                    </button>
+                    {!isAndroid && (
+                      <button
+                        onClick={() => handleSelectFolder('internalMusicPath')}
+                        className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold flex items-center gap-1.5"
+                      >
+                        <Folder className="w-3.5 h-3.5" />
+                        Browse
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

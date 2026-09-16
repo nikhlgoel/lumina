@@ -96,8 +96,11 @@ export const MusicHub: React.FC = () => {
               key={track.id}
               className="group relative p-3 rounded-2xl glass-card border border-white/[0.06] hover:border-lumina-violet/40 transition-all space-y-2.5 hover:shadow-xl hover:shadow-lumina-violet/10"
             >
-              {/* Thumbnail with Hover Overlay */}
-              <div className="relative aspect-square rounded-xl overflow-hidden bg-black/40 border border-white/10">
+              {/* Thumbnail with Hover & Tap Play */}
+              <div 
+                onClick={() => playTrack(track)}
+                className="relative aspect-square rounded-xl overflow-hidden bg-black/40 border border-white/10 cursor-pointer"
+              >
                 <img
                   src={track.thumbnail}
                   alt={track.title}
@@ -106,14 +109,20 @@ export const MusicHub: React.FC = () => {
 
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   <button
-                    onClick={() => playTrack(track)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playTrack(track);
+                    }}
                     className="w-10 h-10 rounded-full bg-lumina-violet text-white flex items-center justify-center shadow-lg shadow-lumina-violet/50 hover:scale-110 active:scale-95 transition-all"
                     title="Play track"
                   >
                     <Play className="w-4 h-4 fill-current ml-0.5" />
                   </button>
                   <button
-                    onClick={() => setSelectedTrackForDl(selectedTrackForDl?.id === track.id ? null : track)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTrackForDl(selectedTrackForDl?.id === track.id ? null : track);
+                    }}
                     className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-white/30 hover:scale-110 active:scale-95 transition-all"
                     title="Download options"
                   >
@@ -132,6 +141,23 @@ export const MusicHub: React.FC = () => {
                   {track.title}
                 </h4>
                 <p className="text-[11px] text-slate-400 truncate">{track.artist}</p>
+              </div>
+
+              {/* Mobile Quick Action Row */}
+              <div className="flex sm:hidden items-center justify-between pt-1 border-t border-white/[0.04]">
+                <button
+                  onClick={() => playTrack(track)}
+                  className="px-2 py-1 rounded-lg bg-lumina-violet/20 text-lumina-violet text-[10px] font-semibold flex items-center gap-1 active:scale-95"
+                >
+                  <Play className="w-3 h-3 fill-current" /> Play
+                </button>
+                <button
+                  onClick={() => setSelectedTrackForDl(selectedTrackForDl?.id === track.id ? null : track)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white active:scale-95"
+                  title="Download"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Format selection popover for download */}

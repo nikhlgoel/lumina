@@ -253,6 +253,9 @@ export interface LuminaAPI {
   closeWindow: () => void;
   isMaximized: () => Promise<boolean>;
   
+  // Platform Flags
+  isAndroid?: boolean;
+
   // Listeners
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void;
   onDrivesChanged: (callback: (drives: StorageDrive[]) => void) => () => void;

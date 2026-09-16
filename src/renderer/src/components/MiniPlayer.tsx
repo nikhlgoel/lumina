@@ -154,7 +154,7 @@ export const MiniPlayer: React.FC = () => {
   };
 
   return (
-    <div className="h-16 w-full glass-panel border-t border-white/[0.08] px-4 flex items-center justify-between z-30 select-none shadow-2xl">
+    <div className="h-16 w-full glass-panel border-t border-white/[0.08] px-3 sm:px-4 flex items-center justify-between z-30 select-none shadow-2xl shrink-0">
       <audio
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
@@ -163,13 +163,13 @@ export const MiniPlayer: React.FC = () => {
       />
 
       {/* Left: Track Details */}
-      <div className="flex items-center gap-3 w-1/4 min-w-[180px]">
-        <div className="w-10 h-10 rounded-xl overflow-hidden bg-black/40 border border-white/10 shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 flex-1 sm:w-1/4 sm:min-w-[180px] min-w-0 pr-2">
+        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden bg-black/40 border border-white/10 shrink-0">
           {currentPlayingTrack.thumbnail ? (
             <img src={currentPlayingTrack.thumbnail} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-lumina-violet">
-              <Music className="w-5 h-5" />
+              <Music className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           )}
         </div>
@@ -183,8 +183,8 @@ export const MiniPlayer: React.FC = () => {
         </div>
       </div>
 
-      {/* Center: Controls, Scrubber & Waveform */}
-      <div className="flex flex-col items-center justify-center gap-1 flex-1 max-w-xl px-4">
+      {/* Center: Controls, Scrubber & Waveform (Desktop & Tablet) */}
+      <div className="hidden sm:flex flex-col items-center justify-center gap-1 flex-1 max-w-xl px-4">
         <div className="flex items-center gap-4">
           <button className="text-slate-400 hover:text-white transition-colors">
             <SkipBack className="w-4 h-4" />
@@ -216,32 +216,42 @@ export const MiniPlayer: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Waveform visualizer, Lyrics Button & Volume */}
-      <div className="flex items-center justify-end gap-3 w-1/4 min-w-[210px]">
+      {/* Right: Mobile Controls + Lyrics Button + Volume */}
+      <div className="flex items-center justify-end gap-2 sm:gap-3 shrink-0 sm:w-1/4 sm:min-w-[210px]">
+        {/* Mobile-only Play/Pause button */}
+        <button
+          onClick={togglePlayPause}
+          className="sm:hidden w-8 h-8 rounded-full bg-white text-black flex items-center justify-center active:scale-95 transition-all shadow-md shadow-white/20"
+          title="Play/Pause"
+        >
+          {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+        </button>
+
         {/* Lyrics Button */}
         <button
           onClick={toggleLyrics}
           title="Toggle Lyrics (L)"
           className={clsx(
-            "px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 border",
+            "px-2 sm:px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 border",
             isLyricsOpen 
               ? "bg-lumina-cyan/20 text-lumina-cyan border-lumina-cyan/50 shadow-lumina-cyan/20"
               : "text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10"
           )}
         >
           <Mic2 className={clsx("w-3.5 h-3.5", isLyricsOpen && "animate-pulse text-lumina-cyan")} />
-          <span className="text-[11px] font-medium">Lyrics</span>
+          <span className="text-[11px] font-medium hidden xs:inline">Lyrics</span>
         </button>
 
-        {/* Spectrum Waveform Canvas */}
+        {/* Spectrum Waveform Canvas (Desktop & Tablet) */}
         <canvas
           ref={canvasRef}
           width={65}
           height={22}
-          className="rounded opacity-80 shrink-0"
+          className="rounded opacity-80 shrink-0 hidden md:block"
         />
 
-        <div className="flex items-center gap-2">
+        {/* Volume Controls (Desktop & Tablet) */}
+        <div className="hidden lg:flex items-center gap-2">
           <button
             onClick={() => setIsMuted(!isMuted)}
             className="text-slate-400 hover:text-white transition-colors"

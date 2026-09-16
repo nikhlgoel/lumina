@@ -17,6 +17,9 @@ interface LuminaState {
   // Navigation
   activeTab: 'downloader' | 'music' | 'library' | 'settings';
   setActiveTab: (tab: 'downloader' | 'music' | 'library' | 'settings') => void;
+  isMobileMenuOpen: boolean;
+  setMobileMenuOpen: (open: boolean) => void;
+  toggleMobileMenu: () => void;
 
   // Ingestion & Inspector
   urlInput: string;
@@ -125,7 +128,10 @@ function playCompletionChime() {
 
 export const useLuminaStore = create<LuminaState>((set, get) => ({
   activeTab: 'downloader',
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  setActiveTab: (tab) => set({ activeTab: tab, isMobileMenuOpen: false }),
+  isMobileMenuOpen: false,
+  setMobileMenuOpen: (open) => set({ isMobileMenuOpen: open }),
+  toggleMobileMenu: () => set((state) => ({ isMobileMenuOpen: !state.isMobileMenuOpen })),
 
   urlInput: '',
   isInspecting: false,

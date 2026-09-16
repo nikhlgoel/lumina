@@ -104,12 +104,12 @@ export const LocalLibrary: React.FC = () => {
 
       {/* Filter Tabs & Search */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-full sm:w-auto">
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.06] w-full sm:w-auto overflow-x-auto no-scrollbar scroll-smooth">
           {(['all', 'video', 'music', 'playlist'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setFilter(tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize whitespace-nowrap shrink-0 transition-all ${
                 filter === tab
                   ? 'bg-white/10 text-white border border-white/20'
                   : 'text-slate-400 hover:text-slate-200'
