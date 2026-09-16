@@ -160,6 +160,17 @@ export interface RepackPart {
   streamUrl?: string;
 }
 
+export interface RepackMirror {
+  hostName: string;
+  parts: RepackPart[];
+  totalPartsExpected: number;
+  partsDiscoveredCount: number;
+  missingParts: number[];
+  isComplete: boolean;
+  totalSizeBytes: number;
+  totalSizeStr: string;
+}
+
 export interface RepackPackage {
   id: string;
   title: string;
@@ -171,6 +182,9 @@ export interface RepackPackage {
   totalSizeStr: string;
   parts: RepackPart[];
   standaloneFiles: RepackPart[];
+  selectiveDlcFiles: RepackPart[];
+  mirrors: RepackMirror[];
+  selectedMirrorHost?: string;
   detectedHost: string;
   hasPlayableMedia: boolean;
 }

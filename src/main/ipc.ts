@@ -38,7 +38,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (typeof url !== 'string' || !url.trim()) {
       throw new Error('Invalid URL provided');
     }
-    const part = await repackCrawler.probeAndResolveUrl(url.trim());
+    const parts = await repackCrawler.probeAndResolveUrl(url.trim());
+    const part = parts[0];
+    if (!part) {
+      throw new Error('Could not resolve direct link');
+    }
     return {
       directUrl: part.directUrl || part.rawUrl,
       filename: part.filename,
