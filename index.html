@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lumina 2.0 — Universal Media & Multi-Part Repack Suite</title>
+  <meta name="description" content="Lumina 2.0 is a free and open-source universal media downloader, player, and multi-part repack suite with zero server overhead and 100% client-driven acceleration." />
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            lumina: {
+              dark: '#060709',
+              card: '#0e1118',
+              cyan: '#00f2fe',
+              violet: '#9d4edd',
+              pink: '#f72585',
+              emerald: '#10b981',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons via CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #060709;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 242, 254, 0.5);
+    }
+
+    /* Ambient Radial Glows */
+    .hero-glow {
+      background: radial-gradient(circle, rgba(0, 242, 254, 0.15) 0%, rgba(157, 78, 221, 0.12) 40%, transparent 70%);
+    }
+
+    /* Glass Panels */
+    .glass-nav {
+      background: rgba(10, 12, 18, 0.75);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card {
+      background: rgba(16, 20, 30, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card:hover {
+      border-color: rgba(0, 242, 254, 0.3);
+      box-shadow: 0 10px 40px -10px rgba(0, 242, 254, 0.15);
+    }
+
+    /* 3D Tilt Card Base */
+    .tilt-card {
+      transform-style: preserve-3d;
+      transition: transform 0.15s ease-out, border-color 0.2s;
+    }
+  </style>
+</head>
+
+<body class="bg-lumina-dark text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-black overflow-x-hidden">
+
+  <!-- TOP NAVIGATION BAR WITH INTERACTIVE HOVER MENU -->
+  <header class="fixed top-0 left-0 right-0 z-50 glass-nav">
+    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      
+      <!-- Brand Logo -->
+      <a href="#" class="flex items-center gap-3 group">
+        <div class="relative w-10 h-10 rounded-xl bg-gradient-to-tr from-lumina-violet via-lumina-cyan to-white/40 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
+          <img src="./assets/lumina_3d.png" alt="Lumina" class="w-full h-full object-contain filter drop-shadow" />
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xl font-extrabold tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-cyan-400">
+            LUMINA
+          </span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-black tracking-widest bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+            2.0
+          </span>
+        </div>
+      </a>
+
+      <!-- Desktop Nav Links -->
+      <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
+        <a href="#features" class="hover:text-cyan-400 transition-colors">Features</a>
+        <a href="#repack-crawler" class="hover:text-cyan-400 transition-colors">Repack Engine</a>
+        <a href="#transparency" class="hover:text-pink-400 transition-colors">What It Can't Do</a>
+        <a href="#platforms" class="hover:text-cyan-400 transition-colors">Platforms</a>
+        <a href="#faq" class="hover:text-cyan-400 transition-colors">FAQ</a>
+      </nav>
+
+      <!-- Interactive Hover Download Dropdown -->
+      <div class="relative group">
+        <button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-300 text-black font-extrabold text-xs tracking-wider uppercase shadow-lg shadow-cyan-400/20 hover:shadow-cyan-400/40 hover:scale-105 transition-all">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          <span>Get Lumina 2.0</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 group-hover:rotate-180 transition-transform"></i>
+        </button>
+
+        <!-- Dropdown Menu -->
+        <div class="absolute right-0 mt-2 w-72 p-2 rounded-2xl glass-card border border-white/10 shadow-2xl opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto transition-all duration-200">
+          <div class="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-white/5">
+            Cross-Platform Installers
+          </div>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/10 transition-colors group/item">
+            <div class="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+              <i data-lucide="monitor" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white group-hover/item:text-cyan-300">Windows 11 / 10</div>
+              <div class="text-[10px] text-slate-400">64-bit NSIS Setup (.exe)</div>
+            </div>
+          </a>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/10 transition-colors group/item">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+              <i data-lucide="terminal" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white group-hover/item:text-cyan-300">Linux (Universal)</div>
+              <div class="text-[10px] text-slate-400">Standalone AppImage (.AppImage)</div>
+            </div>
+          </a>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/10 transition-colors group/item">
+            <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center">
+              <i data-lucide="smartphone" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white group-hover/item:text-cyan-300">Android 11+ Phone</div>
+              <div class="text-[10px] text-slate-400">Universal ARM64 / x86 (.apk)</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO SECTION WITH 3D TILT EFFECT -->
+  <section class="relative min-h-screen pt-36 pb-20 flex flex-col justify-center items-center overflow-hidden">
+    <!-- Ambient Background Radial Blurs -->
+    <div class="absolute top-1/4 w-[800px] h-[800px] hero-glow blur-[120px] pointer-events-none rounded-full"></div>
+    <div class="absolute -bottom-20 right-10 w-[500px] h-[500px] bg-lumina-violet/10 blur-[100px] pointer-events-none rounded-full"></div>
+
+    <div class="max-w-6xl mx-auto px-6 relative z-10 flex flex-col items-center text-center">
+      
+      <!-- Top Pill Tag -->
+      <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-xs font-medium text-slate-300 mb-8 backdrop-blur-md">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+        <span>Version 2.0 Major Upgrade • 100% Free & Open Source</span>
+        <span class="text-slate-500">•</span>
+        <span class="text-cyan-300">Zero Server Footprint</span>
+      </div>
+
+      <!-- Main Headline -->
+      <h1 class="text-4xl sm:text-6xl md:text-7xl font-black tracking-tight leading-[1.1] max-w-4xl">
+        The Universal Media, Audio &amp;
+        <span class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-sky-300 to-purple-400">
+          Multi-Part Repack Suite
+        </span>
+      </h1>
+
+      <!-- Subtitle -->
+      <p class="mt-6 text-base sm:text-lg md:text-xl text-slate-400 max-w-2xl leading-relaxed">
+        Paste a single video, full playlist, BitTorrent magnet, or 100+ raw split game repacks. Lumina strips away 100% of the web junk and downloads pure binaries at maximum network throughput.
+      </p>
+
+      <!-- Action Buttons -->
+      <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+        <a href="#platforms" class="flex items-center gap-2.5 px-8 py-4 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-300 to-purple-400 text-black font-extrabold text-sm tracking-wide shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/50 hover:scale-105 transition-all">
+          <i data-lucide="download-cloud" class="w-5 h-5"></i>
+          <span>Download Free for Your OS</span>
+        </a>
+        <a href="https://github.com/nikhlgoel/lumina" target="_blank" class="flex items-center gap-2 px-6 py-4 rounded-2xl glass-card text-slate-200 font-semibold text-sm hover:text-white hover:bg-white/10 transition-all">
+          <i data-lucide="github" class="w-5 h-5"></i>
+          <span>View GitHub Source</span>
+        </a>
+      </div>
+
+      <!-- 3D Interactive Repack Studio Mockup Card (Parallax Tilt) -->
+      <div id="tiltCard" class="mt-16 w-full max-w-4xl tilt-card glass-card rounded-3xl p-6 sm:p-8 text-left border border-white/10 shadow-2xl relative">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-white/10">
+          <div class="flex items-center gap-4">
+            <div class="w-14 h-14 rounded-2xl bg-cyan-500/20 border border-cyan-400/30 p-2.5 flex items-center justify-center">
+              <img src="./assets/3d_download.png" alt="IDM Turbo" class="w-10 h-10 object-contain drop-shadow" />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300">Pixeldrain Mirror</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">100% Sequence Verified</span>
+              </div>
+              <h3 class="text-lg font-bold text-white mt-1 font-mono">Cyberpunk 2077 [FitGirl Repack]</h3>
+            </div>
+          </div>
+          <div class="text-right sm:block">
+            <div class="text-xs text-slate-400">Total Chunks: <strong class="text-white">50 Parts</strong></div>
+            <div class="text-xs text-slate-400">Size: <strong class="text-cyan-300 font-mono">42.8 GB</strong></div>
+          </div>
+        </div>
+
+        <!-- Sample Chunks Display -->
+        <div class="mt-4 space-y-2 font-mono text-xs">
+          <div class="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-slate-300 truncate">
+              <i data-lucide="archive" class="w-4 h-4 text-cyan-400 shrink-0"></i>
+              <span class="truncate">Cyberpunk_2077.part01.rar</span>
+            </div>
+            <div class="flex items-center gap-3 shrink-0">
+              <span class="text-slate-400">500 MB</span>
+              <span class="text-emerald-400 font-semibold">Ready (16 Streams)</span>
+            </div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-slate-300 truncate">
+              <i data-lucide="archive" class="w-4 h-4 text-cyan-400 shrink-0"></i>
+              <span class="truncate">Cyberpunk_2077.part02.rar</span>
+            </div>
+            <div class="flex items-center gap-3 shrink-0">
+              <span class="text-slate-400">500 MB</span>
+              <span class="text-emerald-400 font-semibold">Ready (16 Streams)</span>
+            </div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-between text-pink-300">
+            <div class="flex items-center gap-2 truncate">
+              <i data-lucide="sparkles" class="w-4 h-4 text-pink-400 shrink-0"></i>
+              <span class="truncate">fg-optional-soundtrack.bin (Selective DLC)</span>
+            </div>
+            <span class="text-xs">Optional Audio • 240 MB</span>
+          </div>
+        </div>
+
+        <div class="mt-5 pt-4 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
+            <span>Zero-Junk Guarantee: 0 web scripts or HTML pages captured.</span>
+          </div>
+          <div class="text-cyan-300 font-bold">1-Click IDM Turbo Acceleration</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- THE FRUSTRATION: WHY CONVENTIONAL TOOLS FAIL -->
+  <section id="repack-crawler" class="py-24 border-t border-white/5 relative">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center max-w-3xl mx-auto">
+        <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-widest">The FitGirl &amp; Multi-Host Problem</h2>
+        <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Why Other Download Managers Fail So Terribly</p>
+        <p class="mt-4 text-slate-400 text-sm sm:text-base">
+          When you try to copy links from FitGirl Repacks, DODI, or SteamUnlocked into standard download tools, they ingest hundreds of useless files: tracking scripts, Disqus comment threads, CSS stylesheets, cloudflare challenge loops, and broken HTML mirrors.
+        </p>
+      </div>
+
+      <div class="mt-14 grid grid-cols-1 md:grid-cols-2 gap-8">
+        <!-- Conventional Tools -->
+        <div class="glass-card rounded-3xl p-8 border-red-500/20 bg-red-500/[0.03]">
+          <div class="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center mb-6">
+            <i data-lucide="x-circle" class="w-6 h-6"></i>
+          </div>
+          <h3 class="text-xl font-bold text-white">Other Download Managers</h3>
+          <ul class="mt-5 space-y-3.5 text-sm text-slate-300">
+            <li class="flex items-start gap-3">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-1 shrink-0"></i>
+              <span>Grabs 400+ garbage items: WordPress stylesheets, analytics, favicons, and ad iframes.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-1 shrink-0"></i>
+              <span>Downloads 5 KB HTML pages instead of the real file when given Mediafire or MultiUp links.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-1 shrink-0"></i>
+              <span>Mixes all 5 mirror hosts together in one giant chaotic list of 200 duplicate chunks.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-1 shrink-0"></i>
+              <span>No missing-part detection: you discover part 18 is missing only after extracting 40 GB.</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Lumina 2.0 Solution -->
+        <div class="glass-card rounded-3xl p-8 border-cyan-400/30 bg-cyan-500/[0.03]">
+          <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-6">
+            <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+          </div>
+          <h3 class="text-xl font-bold text-white">Lumina 2.0 Repack Crawler</h3>
+          <ul class="mt-5 space-y-3.5 text-sm text-slate-300">
+            <li class="flex items-start gap-3">
+              <i data-lucide="check" class="w-4 h-4 text-cyan-400 mt-1 shrink-0"></i>
+              <span><strong>100% Binary Filtering:</strong> Discards every single script, CSS, tracking beacon, and ad.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="check" class="w-4 h-4 text-cyan-400 mt-1 shrink-0"></i>
+              <span><strong>Deep Direct Unwrapping:</strong> Extracts direct binary payload URLs from Mediafire, Pixeldrain, and MultiUp.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="check" class="w-4 h-4 text-cyan-400 mt-1 shrink-0"></i>
+              <span><strong>Intelligent Mirror Grouping:</strong> Organizes links into clear mirror sets (Pixeldrain vs. 1Fichier) with 1-click selection.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="check" class="w-4 h-4 text-cyan-400 mt-1 shrink-0"></i>
+              <span><strong>Sequence Verification:</strong> Instantly warns if any intermediate part (e.g. #14) is missing before you start downloading.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES GRID -->
+  <section id="features" class="py-24 border-t border-white/5 bg-lumina-card/30">
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center max-w-3xl mx-auto">
+        <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-widest">Architected for Speed &amp; Simplicity</h2>
+        <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Everything You Need in One Unified Deck</p>
+      </div>
+
+      <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Feature 1: IDM Turbo -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 p-2 flex items-center justify-center mb-5">
+            <img src="./assets/3d_download.png" alt="IDM Turbo" class="w-8 h-8 object-contain" />
+          </div>
+          <h4 class="text-lg font-bold text-white">IDM Turbo Acceleration</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Multi-source 16-connection parallel chunk downloading for direct links, file hosters, and archives with automatic resume and zero fragmentation.
+          </p>
+        </div>
+
+        <!-- Feature 2: BitTorrent Swarm -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-purple-500/20 p-2 flex items-center justify-center mb-5">
+            <img src="./assets/3d_torrent.png" alt="BitTorrent" class="w-8 h-8 object-contain" />
+          </div>
+          <h4 class="text-lg font-bold text-white">Native BitTorrent Swarm</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Integrated peer-to-peer engine pre-configured with 40+ high-speed public trackers. No third-party clients or ads required.
+          </p>
+        </div>
+
+        <!-- Feature 3: Synced Lyrics -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-pink-500/20 p-2 flex items-center justify-center mb-5">
+            <img src="./assets/3d_music.png" alt="Music & Lyrics" class="w-8 h-8 object-contain" />
+          </div>
+          <h4 class="text-lg font-bold text-white">Synced Karaoke Lyrics</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Multi-source lyrics retrieval with kinetic autoscrolling and word-by-word synced karaoke mode while listening to your favorite music.
+          </p>
+        </div>
+
+        <!-- Feature 4: Theatre Deck -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center mb-5 text-emerald-400">
+            <i data-lucide="play" class="w-6 h-6"></i>
+          </div>
+          <h4 class="text-lg font-bold text-white">Instant Theatre Deck</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Directly stream audio or preview media from inside repack packages or downloads without having to open an external player.
+          </p>
+        </div>
+
+        <!-- Feature 5: Hardware & USB Detection -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-amber-500/20 p-2 flex items-center justify-center mb-5">
+            <img src="./assets/3d_storage.png" alt="Storage" class="w-8 h-8 object-contain" />
+          </div>
+          <h4 class="text-lg font-bold text-white">Automated USB Routing</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Plug in a flash drive or external SSD, and Lumina automatically detects it, organizing downloads straight onto your portable device.
+          </p>
+        </div>
+
+        <!-- Feature 6: 0% Idle Energy -->
+        <div class="glass-card rounded-3xl p-7 hover:-translate-y-1 transition-transform">
+          <div class="w-12 h-12 rounded-2xl bg-sky-500/20 flex items-center justify-center mb-5 text-sky-400">
+            <i data-lucide="battery-charging" class="w-6 h-6"></i>
+          </div>
+          <h4 class="text-lg font-bold text-white">0% Idle Battery Drain</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Intelligent canvas lifecycle management halts 60fps animation loops the moment Lumina is minimized, conserving your laptop battery.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HONEST TRANSPARENCY: WHAT LUMINA STILL CAN'T DO -->
+  <section id="transparency" class="py-24 border-t border-white/5">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="p-8 sm:p-12 rounded-3xl glass-card border border-pink-500/20 bg-gradient-to-b from-pink-500/[0.04] to-transparent">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-pink-500/20 text-pink-300 text-xs font-bold mb-4">
+          <i data-lucide="shield-alert" class="w-4 h-4"></i>
+          <span>Absolute Transparency</span>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-white">What Lumina 2.0 CANNOT Do</h2>
+        <p class="mt-3 text-slate-400 text-sm sm:text-base leading-relaxed">
+          We believe in honest, uncompromising software. Here are the technical realities of what Lumina cannot do, so you know exactly what to expect:
+        </p>
+
+        <div class="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div class="p-5 rounded-2xl bg-black/40 border border-white/5 space-y-2">
+            <div class="flex items-center gap-2 text-pink-400 font-bold text-sm">
+              <i data-lucide="ban" class="w-4 h-4"></i>
+              <span>No Captcha / Turnstile Bypass</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              If a filehost enforces Cloudflare Turnstile or manual human interactive puzzles (e.g. Rapidgator free tier), Lumina cannot automatically solve it. You must resolve the captcha once in your browser.
+            </p>
+          </div>
+
+          <div class="p-5 rounded-2xl bg-black/40 border border-white/5 space-y-2">
+            <div class="flex items-center gap-2 text-pink-400 font-bold text-sm">
+              <i data-lucide="lock" class="w-4 h-4"></i>
+              <span>No Paid VIP Account Bypassing</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Lumina cannot grant you free premium speeds on hosts that strictly gate bandwidth behind paid subscription tokens (unless you import your own browser session cookies in Settings).
+            </p>
+          </div>
+
+          <div class="p-5 rounded-2xl bg-black/40 border border-white/5 space-y-2">
+            <div class="flex items-center gap-2 text-pink-400 font-bold text-sm">
+              <i data-lucide="file-x" class="w-4 h-4"></i>
+              <span>No Magic Corrupted RAR Repair</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              If an archive was uploaded broken by the repacker and has no recovery records (`.rev`), Lumina cannot reconstruct missing bytes out of thin air. (However, Lumina prevents you from downloading missing parts!).
+            </p>
+          </div>
+
+          <div class="p-5 rounded-2xl bg-black/40 border border-white/5 space-y-2">
+            <div class="flex items-center gap-2 text-pink-400 font-bold text-sm">
+              <i data-lucide="server-off" class="w-4 h-4"></i>
+              <span>Zero Server Hosting</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Lumina does not operate any backend proxy or caching servers. Downloads connect directly between your system and the origin hosts or BitTorrent peers.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLATFORMS & DOWNLOAD SECTION -->
+  <section id="platforms" class="py-24 border-t border-white/5 bg-lumina-card/20">
+    <div class="max-w-6xl mx-auto px-6 text-center">
+      <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-widest">Multi-Platform Freedom</h2>
+      <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Download Lumina 2.0 for Your Device</p>
+      <p class="mt-4 text-slate-400 text-sm max-w-xl mx-auto">
+        Built natively for desktop and mobile with zero telemetry and zero third-party adware.
+      </p>
+
+      <div class="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+        <!-- Windows 11 -->
+        <div class="glass-card rounded-3xl p-8 flex flex-col justify-between border-blue-500/20 hover:border-blue-400/40 transition-all">
+          <div>
+            <div class="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center mb-6">
+              <i data-lucide="monitor" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white">Windows 11 / 10</h3>
+            <p class="text-xs text-slate-400 mt-2">
+              Full 64-bit installer with NSIS setup wizard, Desktop shortcut, and custom protocol handlers.
+            </p>
+            <div class="mt-4 space-y-1.5 text-xs text-slate-400 font-mono">
+              <div>• Target: Windows 10 & 11 (x64)</div>
+              <div>• Direct Hardware Muxing</div>
+              <div>• Path: %USERPROFILE%\Downloads\Lumina</div>
+            </div>
+          </div>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="mt-8 flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-black font-extrabold text-xs transition-colors">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span>Download for Windows (.exe)</span>
+          </a>
+        </div>
+
+        <!-- Linux -->
+        <div class="glass-card rounded-3xl p-8 flex flex-col justify-between border-emerald-500/20 hover:border-emerald-400/40 transition-all">
+          <div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-6">
+              <i data-lucide="terminal" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white">Linux (All Distros)</h3>
+            <p class="text-xs text-slate-400 mt-2">
+              Portable, zero-dependency AppImage compatible with Fedora, Ubuntu, Arch Linux, Debian, and openSUSE.
+            </p>
+            <div class="mt-4 space-y-1.5 text-xs text-slate-400 font-mono">
+              <div>• Target: Linux x86_64</div>
+              <div>• Respects XDG user directories</div>
+              <div>• Just chmod +x and run</div>
+            </div>
+          </div>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="mt-8 flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-black font-extrabold text-xs transition-colors">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span>Download Linux AppImage</span>
+          </a>
+        </div>
+
+        <!-- Android 11+ -->
+        <div class="glass-card rounded-3xl p-8 flex flex-col justify-between border-purple-500/20 hover:border-purple-400/40 transition-all">
+          <div>
+            <div class="w-12 h-12 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center mb-6">
+              <i data-lucide="smartphone" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-xl font-bold text-white">Android Phone (11+)</h3>
+            <p class="text-xs text-slate-400 mt-2">
+              Powered by an embedded loopback engine that eliminates WebView CORS blocks completely.
+            </p>
+            <div class="mt-4 space-y-1.5 text-xs text-slate-400 font-mono">
+              <div>• Android API 30+ Compatible</div>
+              <div>• Path: /storage/emulated/0/Download/Lumina</div>
+              <div>• Direct Audio & Lyrics Streaming</div>
+            </div>
+          </div>
+          <a href="https://github.com/nikhlgoel/lumina/releases" class="mt-8 flex items-center justify-center gap-2 w-full py-3.5 rounded-xl bg-purple-400 hover:bg-purple-300 text-black font-extrabold text-xs transition-colors">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span>Download Android APK</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ SECTION -->
+  <section id="faq" class="py-24 border-t border-white/5">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="text-center mb-14">
+        <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-widest">Got Questions?</h2>
+        <p class="mt-2 text-3xl font-extrabold text-white">Frequently Asked Questions</p>
+      </div>
+
+      <div class="space-y-4">
+        <div class="p-6 rounded-2xl glass-card">
+          <h4 class="text-base font-bold text-white">Is Lumina 2.0 really 100% free and open source?</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Yes. Lumina is published under the MIT license with zero paid tiers, zero subscription fees, and zero hidden telemetry. The complete source code is available on GitHub.
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl glass-card">
+          <h4 class="text-base font-bold text-white">How does the FitGirl / DODI multi-part repack crawler work?</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            Lumina parses the entire text or HTML you paste, discards all CSS, JavaScript, and ads, identifies the 500MB chunk sequences, resolves intermediate filehosts (like Pixeldrain and Mediafire), and organizes them into complete mirror packages with missing-part verification.
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl glass-card">
+          <h4 class="text-base font-bold text-white">Where are the files saved?</h4>
+          <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+            On Windows, they save to <code class="text-cyan-300 font-mono">%USERPROFILE%\Downloads\Lumina</code>. On Linux, <code class="text-cyan-300 font-mono">~/Downloads/Lumina</code>. On Android, <code class="text-cyan-300 font-mono">/storage/emulated/0/Download/Lumina</code>. If an external USB drive is plugged in, Lumina can automatically route downloads to your USB device.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="py-12 border-t border-white/5 text-center text-xs text-slate-500">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2 text-slate-400">
+        <img src="./assets/lumina_3d.png" alt="Lumina" class="w-6 h-6 object-contain" />
+        <span class="font-bold text-white">Lumina 2.0</span>
+        <span>•</span>
+        <span>Universal Media &amp; Repack Suite</span>
+      </div>
+      <div>
+        Free &amp; Open Source under MIT License. Crafted with precision for high-performance downloading.
+      </div>
+    </div>
+  </footer>
+
+  <!-- SCRIPT: Lucide Icons & 3D Tilt Effect -->
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // 3D Parallax Tilt on Mockup Card
+    const card = document.getElementById('tiltCard');
+    if (card) {
+      card.addEventListener('mousemove', (e) => {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left - rect.width / 2;
+        const y = e.clientY - rect.top - rect.height / 2;
+        const rotateX = (-y / rect.height) * 12;
+        const rotateY = (x / rect.width) * 12;
+        card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+      });
+
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg)';
+      });
+    }
+  </script>
+</body>
+</html>
