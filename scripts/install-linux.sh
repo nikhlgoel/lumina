@@ -9,11 +9,11 @@ set -euo pipefail
 APP_NAME="Lumina"
 APP_ID="com.lumina.media"
 DESKTOP_NAME="lumina-media"
-VERSION="1.3.1"
 
 # ── Resolve source directory (where this script lives) ───────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VERSION=$(node -p "require('$PROJECT_ROOT/package.json').version" 2>/dev/null || echo "2.0.0")
 APPIMAGE="$PROJECT_ROOT/release/Lumina-${VERSION}-x86_64.AppImage"
 
 # ── Target installation directories ─────────────────────────
