@@ -3,7 +3,44 @@ import path from 'path';
 import os from 'os';
 import type { LuminaSettings } from '../preload/types';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'lumina');
+function resolveDefaultPlatformPaths() {
+  const home = os.homedir();
+  const isWin = process.platform === 'win32';
+  const isAndroid = process.platform === 'android' || fs.existsSync('/storage/emulated/0');
+
+  let configDir: string;
+  let videoPath: string;
+  let musicPath: string;
+  let downloadPath: string;
+
+  if (isAndroid) {
+    configDir = '/storage/emulated/0/Download/Lumina/.config';
+    videoPath = '/storage/emulated/0/Movies/Lumina';
+    musicPath = '/storage/emulated/0/Music/Lumina';
+    downloadPath = '/storage/emulated/0/Download/Lumina';
+  } else if (isWin) {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    configDir = path.join(appData, 'Lumina');
+    videoPath = path.join(home, 'Videos', 'Lumina');
+    musicPath = path.join(home, 'Music', 'Lumina');
+    downloadPath = path.join(home, 'Downloads', 'Lumina');
+  } else {
+    // Linux / macOS
+    const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+    configDir = path.join(xdgConfig, 'lumina');
+    const xdgVideos = process.env.XDG_VIDEOS_DIR || path.join(home, 'Videos');
+    videoPath = path.join(xdgVideos, 'Lumina');
+    const xdgMusic = process.env.XDG_MUSIC_DIR || path.join(home, 'Music');
+    musicPath = path.join(xdgMusic, 'Lumina');
+    const xdgDownloads = process.env.XDG_DOWNLOAD_DIR || path.join(home, 'Downloads');
+    downloadPath = path.join(xdgDownloads, 'Lumina');
+  }
+
+  return { configDir, videoPath, musicPath, downloadPath };
+}
+
+const PLATFORM_PATHS = resolveDefaultPlatformPaths();
+const CONFIG_DIR = PLATFORM_PATHS.configDir;
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
 
 const DEFAULT_SETTINGS: LuminaSettings = {
@@ -15,8 +52,9 @@ const DEFAULT_SETTINGS: LuminaSettings = {
   defaultAudioFormat: 'mp3',
   autoSaveToUsb: true,
   usbFolderName: 'LuminaMedia',
-  internalVideoPath: path.join(os.homedir(), 'Videos', 'Lumina'),
-  internalMusicPath: path.join(os.homedir(), 'Music', 'Lumina'),
+  internalVideoPath: PLATFORM_PATHS.videoPath,
+  internalMusicPath: PLATFORM_PATHS.musicPath,
+  internalDownloadPath: PLATFORM_PATHS.downloadPath,
   maxConcurrentDownloads: 2,
   batchConcurrency: 3,
   speedLimit: 0,
@@ -72,6 +110,9 @@ export class SettingsManager {
       }
       if (!fs.existsSync(this.settings.internalMusicPath)) {
         fs.mkdirSync(this.settings.internalMusicPath, { recursive: true });
+      }
+      if (!fs.existsSync(this.settings.internalDownloadPath)) {
+        fs.mkdirSync(this.settings.internalDownloadPath, { recursive: true });
       }
     } catch (e) {
       console.warn('Could not create default media directories:', e);

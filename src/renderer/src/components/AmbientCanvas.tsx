@@ -107,11 +107,39 @@ export const AmbientCanvas: React.FC = () => {
       animationFrameId = requestAnimationFrame(render);
     };
 
-    render();
+    let isLoopRunning = false;
+
+    const startLoop = () => {
+      if (isLoopRunning) return;
+      isLoopRunning = true;
+      render();
+    };
+
+    const stopLoop = () => {
+      if (!isLoopRunning) return;
+      isLoopRunning = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopLoop();
+      } else {
+        startLoop();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Only run if visible
+    if (!document.hidden) {
+      startLoop();
+    }
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopLoop();
     };
   }, [isPlaying, downloads.length, settings?.ambientShader, settings?.theme, settings?.colorMode]);
 

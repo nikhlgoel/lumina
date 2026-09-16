@@ -6,7 +6,8 @@ import { storageManager } from './storage';
 import { musicManager } from './music';
 import { lyricsManager } from './lyrics';
 import { settingsManager } from './settings';
-import type { DownloadRequest, LuminaSettings } from '../preload/types';
+import { repackCrawler } from './repackCrawler';
+import type { DownloadRequest, LuminaSettings, RepackPackage } from '../preload/types';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Media Inspection & Download
@@ -15,6 +16,35 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       throw new Error('Invalid URL format');
     }
     return await downloaderManager.inspectUrl(url.trim());
+  });
+
+  // Lumina 2.0 Deep Link & Repack Crawler
+  ipcMain.handle('repack:crawl-links', async (_, rawText: unknown) => {
+    if (typeof rawText !== 'string' || !rawText.trim()) {
+      throw new Error('No links provided for inspection');
+    }
+    return await repackCrawler.crawlMultiLinks(rawText.trim());
+  });
+
+  ipcMain.handle('repack:download-package', async (_, pkg: unknown, targetDir?: unknown) => {
+    if (!pkg || typeof pkg !== 'object') {
+      throw new Error('Invalid repack package payload');
+    }
+    const customDir = typeof targetDir === 'string' && targetDir.trim() ? targetDir.trim() : undefined;
+    return await repackCrawler.startRepackDownload(pkg as RepackPackage, customDir);
+  });
+
+  ipcMain.handle('repack:resolve-direct', async (_, url: unknown) => {
+    if (typeof url !== 'string' || !url.trim()) {
+      throw new Error('Invalid URL provided');
+    }
+    const part = await repackCrawler.probeAndResolveUrl(url.trim());
+    return {
+      directUrl: part.directUrl || part.rawUrl,
+      filename: part.filename,
+      sizeBytes: part.sizeBytes,
+      sizeStr: part.sizeStr
+    };
   });
 
   ipcMain.handle('media:download', async (_, request: unknown) => {

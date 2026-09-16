@@ -146,6 +146,35 @@ export interface LyricsData {
   source: string;
 }
 
+export interface RepackPart {
+  partIndex: number;
+  rawUrl: string;
+  directUrl?: string;
+  filename: string;
+  extension: string;
+  hostName: string;
+  sizeBytes: number;
+  sizeStr: string;
+  status: 'pending' | 'resolving' | 'ready' | 'downloading' | 'completed' | 'error';
+  isPlayable: boolean;
+  streamUrl?: string;
+}
+
+export interface RepackPackage {
+  id: string;
+  title: string;
+  totalPartsExpected: number;
+  partsDiscoveredCount: number;
+  missingParts: number[];
+  isComplete: boolean;
+  totalSizeBytes: number;
+  totalSizeStr: string;
+  parts: RepackPart[];
+  standaloneFiles: RepackPart[];
+  detectedHost: string;
+  hasPlayableMedia: boolean;
+}
+
 export interface LuminaSettings {
   theme: 'onyx' | 'cyber' | 'arctic' | 'teal' | 'sunset' | 'amethyst';
   colorMode: 'dark' | 'light';
@@ -157,6 +186,7 @@ export interface LuminaSettings {
   usbFolderName: string;
   internalVideoPath: string;
   internalMusicPath: string;
+  internalDownloadPath: string;
   maxConcurrentDownloads: number;
   batchConcurrency: number;
   speedLimit: number;
@@ -171,6 +201,11 @@ export interface LuminaAPI {
   // Media Inspection & Ingestion
   inspectUrl: (url: string) => Promise<MediaMetadata>;
   
+  // Lumina 2.0 Deep Link & Repack Crawler
+  crawlMultiLinks: (rawText: string) => Promise<RepackPackage>;
+  startRepackDownload: (pkg: RepackPackage, targetDir?: string) => Promise<string[]>;
+  resolveDirectLink: (url: string) => Promise<{ directUrl: string; filename: string; sizeBytes: number; sizeStr: string }>;
+
   // Download Control
   startDownload: (request: DownloadRequest) => Promise<string>;
   pauseDownload: (taskId: string) => Promise<boolean>;
@@ -208,3 +243,4 @@ export interface LuminaAPI {
   onDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void;
   onDrivesChanged: (callback: (drives: StorageDrive[]) => void) => () => void;
 }
+

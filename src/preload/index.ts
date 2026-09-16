@@ -1,8 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DownloadRequest, LuminaSettings, DownloadProgress, StorageDrive } from './types';
+import type { DownloadRequest, LuminaSettings, DownloadProgress, StorageDrive, RepackPackage } from './types';
 
 contextBridge.exposeInMainWorld('luminaAPI', {
   inspectUrl: (url: string) => ipcRenderer.invoke('media:inspect', url),
+  crawlMultiLinks: (rawText: string) => ipcRenderer.invoke('repack:crawl-links', rawText),
+  startRepackDownload: (pkg: RepackPackage, targetDir?: string) => ipcRenderer.invoke('repack:download-package', pkg, targetDir),
+  resolveDirectLink: (url: string) => ipcRenderer.invoke('repack:resolve-direct', url),
+
   startDownload: (request: DownloadRequest) => ipcRenderer.invoke('media:download', request),
   pauseDownload: (taskId: string) => ipcRenderer.invoke('media:pause', taskId),
   resumeDownload: (taskId: string) => ipcRenderer.invoke('media:resume', taskId),

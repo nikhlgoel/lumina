@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { AmbientCanvas } from './components/AmbientCanvas';
 import { Omnibox } from './components/Omnibox';
 import { MediaInspector } from './components/MediaInspector';
+import { RepackStudio } from './components/RepackStudio';
 import { DownloadQueue } from './components/DownloadQueue';
 import { MiniPlayer } from './components/MiniPlayer';
 import { MusicHub } from './components/MusicHub';
@@ -97,6 +98,9 @@ export const App: React.FC = () => {
 
               {/* Inspected Media Matrix */}
               <MediaInspector />
+
+              {/* Lumina 2.0 Repack Studio */}
+              <RepackStudio />
 
               {/* Real-time Downloads Queue */}
               <DownloadQueue />

@@ -8,7 +8,9 @@ import type {
   StorageDrive, 
   LuminaSettings, 
   MusicTrack,
-  LyricsData 
+  LyricsData,
+  RepackPackage,
+  RepackPart
 } from '@shared/types';
 
 interface LuminaState {
@@ -38,6 +40,14 @@ interface LuminaState {
   setEmbedSubtitles: (embed: boolean) => void;
   clearInspectedMedia: () => void;
   selectTorrentFile: () => Promise<void>;
+
+  // Lumina 2.0 Repack & Multi-Link State
+  isMultiLinkMode: boolean;
+  isCrawlingRepack: boolean;
+  repackPackage: RepackPackage | null;
+  crawlMultiLinks: (rawText: string) => Promise<void>;
+  startRepackDownload: (pkg: RepackPackage) => Promise<void>;
+  clearRepackPackage: () => void;
 
   // Downloads Queue
   downloads: DownloadProgress[];
@@ -130,11 +140,56 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
 
   setUrlInput: (url) => set({ urlInput: url, inspectError: null }),
 
+  isMultiLinkMode: false,
+  isCrawlingRepack: false,
+  repackPackage: null,
+
+  crawlMultiLinks: async (rawText: string) => {
+    set({ isCrawlingRepack: true, inspectError: null, isMultiLinkMode: true });
+    try {
+      const pkg = await window.luminaAPI.crawlMultiLinks(rawText);
+      set({ repackPackage: pkg, isCrawlingRepack: false });
+    } catch (err: any) {
+      set({
+        isCrawlingRepack: false,
+        inspectError: err?.message || 'Failed to crawl multi-part repack links'
+      });
+    }
+  },
+
+  startRepackDownload: async (pkg: RepackPackage) => {
+    try {
+      const taskIds = await window.luminaAPI.startRepackDownload(pkg);
+      const currentMeta = new Map(get().activeTasksMetadata);
+      taskIds.forEach((id, idx) => {
+        const allItems = [...pkg.parts, ...pkg.standaloneFiles];
+        const part = allItems[idx];
+        currentMeta.set(id, {
+          title: part ? part.filename : `${pkg.title} - Part ${idx + 1}`,
+          thumbnail: '',
+          uploader: pkg.detectedHost,
+          mode: 'IDM Turbo'
+        });
+      });
+      set({ activeTasksMetadata: currentMeta, activeTab: 'downloader' });
+    } catch (err: any) {
+      set({ inspectError: err?.message || 'Failed to start repack batch download' });
+    }
+  },
+
+  clearRepackPackage: () => set({ repackPackage: null, isMultiLinkMode: false }),
+
   inspectUrl: async (explicitUrl) => {
     const targetUrl = explicitUrl || get().urlInput;
     if (!targetUrl.trim()) return;
 
-    set({ isInspecting: true, inspectError: null });
+    // Autodetect multi-link pastes (e.g. FitGirl/DODI repacks or lists of URLs)
+    const urlMatches = targetUrl.match(/(https?:\/\/[^\s"'<>]+|magnet:\?[^\s"'<>]+)/gi);
+    if (urlMatches && urlMatches.length > 1) {
+      return get().crawlMultiLinks(targetUrl);
+    }
+
+    set({ isInspecting: true, inspectError: null, isMultiLinkMode: false });
     try {
       const metadata = await window.luminaAPI.inspectUrl(targetUrl);
       const defaultFormat = metadata.formats[0] || null;
@@ -160,7 +215,7 @@ export const useLuminaStore = create<LuminaState>((set, get) => ({
   setIncludeSubtitles: (include) => set({ includeSubtitles: include }),
   setSelectedSubtitleLang: (lang) => set({ selectedSubtitleLang: lang }),
   setEmbedSubtitles: (embed) => set({ embedSubtitles: embed }),
-  clearInspectedMedia: () => set({ inspectedMedia: null, urlInput: '', inspectError: null }),
+  clearInspectedMedia: () => set({ inspectedMedia: null, repackPackage: null, isMultiLinkMode: false, urlInput: '', inspectError: null }),
 
   selectTorrentFile: async () => {
     try {

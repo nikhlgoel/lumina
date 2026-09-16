@@ -2,39 +2,42 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lumina</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Lumina 2.0</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="icon" type="image/png" href="./assets/lumina_3d.png" />
     <script>
-      // Lumina Mobile Bridge Polyfill for Android Phone
+      // Lumina 2.0 Mobile Bridge Polyfill for Android (API 30+)
       if (!window.luminaAPI) {
         window.luminaAPI = {
           getSettings: async () => ({
             theme: 'onyx',
+            colorMode: 'dark',
             ambientShader: true,
             blurIntensity: 20,
             defaultVideoRes: '1080p',
             defaultAudioFormat: 'mp3',
             autoSaveToUsb: false,
             usbFolderName: 'LuminaMedia',
-            internalVideoPath: '/storage/emulated/0/Download/Lumina',
+            internalVideoPath: '/storage/emulated/0/Movies/Lumina',
             internalMusicPath: '/storage/emulated/0/Music/Lumina',
+            internalDownloadPath: '/storage/emulated/0/Download/Lumina',
             maxConcurrentDownloads: 3,
+            batchConcurrency: 3,
             speedLimit: 0,
             browserForCookies: 'none',
             turboConnections: 16,
             enableTurboMode: true,
-            enableBitTorrent: true
+            enableBitTorrent: true,
+            anonymizeRequests: true
           }),
           saveSettings: async (s) => s,
           getStorageDrives: async () => ([
-            { id: 'internal', name: 'Internal Storage', label: 'Phone Storage', mountpoint: '/storage/emulated/0/Download', totalSpace: '128 GB', freeSpace: '64 GB', freeBytes: 68719476736, isRemovable: false }
+            { id: 'internal', name: 'Internal Storage', label: 'Android Phone Storage', mountpoint: '/storage/emulated/0/Download/Lumina', totalSpace: '128 GB', freeSpace: '64 GB', freeBytes: 68719476736, isRemovable: false }
           ]),
           searchMusic: async (query) => {
             try {
@@ -82,6 +85,73 @@
             } catch (e) {}
             return null;
           },
+          crawlMultiLinks: async (rawText) => {
+            const urlMatches = rawText.match(/(https?:\/\/[^\s"'<>()]+|magnet:\?[^\s"'<>]+)/gi) || [];
+            const urls = Array.from(new Set(urlMatches.map(u => u.replace(/[.,;:)\]>]+$/, '').trim()))).filter(Boolean);
+            
+            const parts = urls.map((url, idx) => {
+              let filename = 'download_file';
+              try {
+                const parsed = new URL(url);
+                filename = parsed.pathname.split('/').pop() || 'file_' + (idx + 1);
+              } catch (_) {}
+              
+              const partMatch = filename.match(/[-_.]?part[-_.]?(\d+)/i) || filename.match(/setup[-_.]?(\d+)/i) || filename.match(/fg[-_.]?(\d+)/i);
+              const partIndex = partMatch ? parseInt(partMatch[1], 10) : idx + 1;
+              const isPlayable = /\.(mp4|mkv|webm|avi|mov|mp3|flac|wav|m4a)$/i.test(filename);
+              
+              return {
+                partIndex,
+                rawUrl: url,
+                directUrl: url,
+                filename,
+                extension: '.' + (filename.split('.').pop() || 'bin'),
+                hostName: url.includes('pixeldrain') ? 'Pixeldrain' : url.includes('mediafire') ? 'Mediafire' : 'Direct Link',
+                sizeBytes: 524288000,
+                sizeStr: '500 MB',
+                status: 'ready',
+                isPlayable,
+                streamUrl: isPlayable ? url : undefined
+              };
+            });
+
+            parts.sort((a, b) => a.partIndex - b.partIndex);
+            const missingParts = [];
+            const maxPart = parts.length > 0 ? Math.max(...parts.map(p => p.partIndex)) : 0;
+            const existing = new Set(parts.map(p => p.partIndex));
+            if (maxPart > parts.length) {
+              for (let i = 1; i <= maxPart; i++) {
+                if (!existing.has(i)) missingParts.push(i);
+              }
+            }
+
+            return {
+              id: 'repack_' + Date.now(),
+              title: parts[0]?.filename?.replace(/[-_.]?part.*$/i, '') || 'Android Repack Package',
+              totalPartsExpected: maxPart || parts.length,
+              partsDiscoveredCount: parts.length,
+              missingParts,
+              isComplete: missingParts.length === 0,
+              totalSizeBytes: parts.length * 524288000,
+              totalSizeStr: (parts.length * 0.5).toFixed(1) + ' GB',
+              parts,
+              standaloneFiles: [],
+              detectedHost: 'Multi-Source Acceleration',
+              hasPlayableMedia: parts.some(p => p.isPlayable)
+            };
+          },
+          startRepackDownload: async (pkg) => {
+            if (window.LuminaAndroidBridge) {
+              window.LuminaAndroidBridge.postMessage(JSON.stringify({ type: 'repack_download', title: pkg.title, count: pkg.parts.length }));
+            }
+            return pkg.parts.map((_, i) => 'repack_task_' + i);
+          },
+          resolveDirectLink: async (url) => ({
+            directUrl: url,
+            filename: 'download_file',
+            sizeBytes: 0,
+            sizeStr: 'Direct Stream'
+          }),
           inspectUrl: async (url) => ({
             id: 'm_' + Date.now(),
             url,
@@ -100,8 +170,8 @@
             subtitles: []
           }),
           startDownload: async (req) => {
-            if (window.AndroidBridge && window.AndroidBridge.download) {
-              window.AndroidBridge.download(req.url, req.title);
+            if (window.LuminaAndroidBridge) {
+              window.LuminaAndroidBridge.postMessage(JSON.stringify({ type: 'download', url: req.url, title: req.title }));
             }
             return 'mobile_download_' + Date.now();
           },
@@ -122,8 +192,8 @@
         };
       }
     </script>
-    <script type="module" crossorigin src="./assets/index-0P2DGCq7.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-rrE2OpBH.css">
+    <script type="module" crossorigin src="./assets/index-B1TKyVx0.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Dhhdmnnw.css">
   </head>
   <body class="bg-lumina-dark text-slate-100 overflow-hidden select-none font-sans antialiased">
     <div id="root"></div>

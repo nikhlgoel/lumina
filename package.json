@@ -1,7 +1,7 @@
 {
   "name": "lumina-media",
-  "version": "1.4.0",
-  "description": "Ultra-sleek universal media downloader and player",
+  "version": "2.0.0",
+  "description": "Lumina 2.0 - Universal Media & Multi-Part Repack Suite",
   "main": "dist-electron/main/index.js",
   "author": {
     "name": "nikhlgoel",

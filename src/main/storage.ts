@@ -109,6 +109,29 @@ export class StorageManager {
     return targetDir;
   }
 
+  public getRepackDownloadDirectory(repackTitle: string): string {
+    const settings = settingsManager.get();
+    const rawClean = (typeof repackTitle === 'string' ? repackTitle : '')
+      .replace(/[\x00-\x1f\x7f\\/:*?"<>|]/g, '_')
+      .replace(/\.{2,}/g, '_')
+      .trim();
+    const sanitizedTitle = path.basename(rawClean).slice(0, 100) || 'Lumina_Repack';
+    let baseDir = settings.internalDownloadPath || path.join(path.dirname(settings.internalVideoPath), 'Downloads');
+
+    if (settings.autoSaveToUsb) {
+      const usbDrive = this.cachedDrives.find(d => d.isRemovable);
+      if (usbDrive && usbDrive.mountpoint && fs.existsSync(usbDrive.mountpoint)) {
+        baseDir = path.join(usbDrive.mountpoint, settings.usbFolderName || 'LuminaMedia', 'Repacks');
+      }
+    }
+
+    const targetDir = path.resolve(baseDir, sanitizedTitle);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    return targetDir;
+  }
+
   private async getLinuxDrives(): Promise<StorageDrive[]> {
     const drives: StorageDrive[] = [];
     try {
