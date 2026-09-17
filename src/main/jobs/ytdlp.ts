@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildDownloadArgs, outputTemplate } from '../../core/ytdlpArgs';
 import { friendlyYtdlpError, isCookieReadError, parseYtdlpLine, postprocessLabel } from '../../core/progress';
+import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from '../cookieHealth';
 import { parseExtraArgs, speedLimitActive } from '../../shared/settings';
 import { killTree, onLines, spawnTool } from '../process';
 import { tools } from '../tools';
@@ -136,6 +137,7 @@ export const ytdlpRunner: Runner = (ctx) => {
 
       // A locked or encrypted browser cookie store shouldn't sink public downloads: retry once without it.
       if (code !== 0 && opts.browserCookies && isCookieReadError(allErrors) && !outputs.length) {
+        markBrowserCookiesUnreadable();
         ctx.patch({ engineState: { ...ctx.job().engineState, cookieFallback: true } });
         ctx.progress({ stage: 'Couldn’t read browser cookies, retrying without them' }, 'running');
         run({ ...opts, browserCookies: false });
@@ -180,7 +182,7 @@ export const ytdlpRunner: Runner = (ctx) => {
       batchFile = path.join(ctx.workDir, 'batch.txt');
       fs.writeFileSync(batchFile, urls.join('\n'), 'utf8');
     }
-    run({ batchFile, browserCookies: true });
+    run({ batchFile, browserCookies: !browserCookiesUnreadable() });
   })().catch((err) => ctx.fail(err instanceof Error ? err.message : String(err)));
 
   return {

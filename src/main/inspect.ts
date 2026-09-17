@@ -6,6 +6,7 @@ import { directApiUrl, isPageHost } from '../core/hosts';
 import { fileNameFromUrl } from '../core/batch';
 import { parseStreams, parseSubtitles, type RawFormat } from '../core/streams';
 import { friendlyYtdlpError, isCookieReadError } from '../core/progress';
+import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from './cookieHealth';
 import { requestArgs } from '../core/ytdlpArgs';
 import { parseExtraArgs } from '../shared/settings';
 import { tools } from './tools';
@@ -62,7 +63,7 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
     const direct = await inspectDirect(url, request).catch(() => null);
     if (direct) return direct;
   }
-  const info = await inspectWithYtdlp(url, request);
+  const info = await inspectWithYtdlp(url, request, !browserCookiesUnreadable());
   return kind === 'stream' ? { ...info, stream: { protocol: /\.mpd/i.test(url) ? 'dash' : 'hls', encrypted: false }, request } : info;
 }
 
@@ -169,6 +170,7 @@ async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCooki
     if (r.code !== 0 || !r.stdout.trim()) {
       if (browserCookies && ctx.cookies.browser && isCookieReadError(r.stderr)) {
         log.info('Browser cookies unreadable; inspecting without them');
+        markBrowserCookiesUnreadable();
         const info = await inspectWithYtdlp(url, request, false);
         return { ...info, notes: [...(info.notes ?? []), `Couldn’t read ${ctx.cookies.browser}’s cookies, so this was opened signed-out. Sign in under Settings › Accounts for private or members-only media.`] };
       }
