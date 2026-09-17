@@ -68,11 +68,11 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
   return (
     <footer className="p-dock mx-auto grid w-full max-w-[1100px] gap-3.5 px-[clamp(16px,3vw,32px)] pb-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate font-serif text-[clamp(30px,4.2vw,46px)] leading-none tracking-[-0.01em]" data-selectable>{item.title}</h1>
           <p className="mt-1.5 truncate text-[15px] text-[var(--p-ink-2)]">{[item.artist, item.album].filter(Boolean).join(' · ') || (isVideo ? 'Video' : 'Unknown artist')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {!isVideo && (
             <div role="radiogroup" aria-label="Stage view" className="flex rounded-xl border border-white/8 bg-white/7 p-[3px]">
               {tabs.map((t) => (

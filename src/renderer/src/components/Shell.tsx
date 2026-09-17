@@ -277,14 +277,13 @@ export function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismissToast);
   const inPlayer = useApp((s) => s.mode === 'player');
-  const hasMiniBar = usePlayer((s) => s.queue.length > 0);
   return (
     <div
       aria-live="polite"
       className={cn(
         'pointer-events-none fixed z-[60] flex w-[360px] flex-col gap-2',
-        // In the player, stay clear of the controls at the bottom.
-        inPlayer ? 'top-16 left-1/2 -translate-x-1/2' : hasMiniBar ? 'right-5 bottom-[84px]' : 'right-5 bottom-5',
+        // Top-right, below the title bar's caption buttons; in the player, top-centre clear of the controls.
+        inPlayer ? 'top-16 left-1/2 -translate-x-1/2' : 'right-5 top-[calc(var(--titlebar)_+_12px)]',
       )}
     >
       {toasts.map((t) => (
