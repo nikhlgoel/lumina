@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { aria2Progress, type Aria2Status } from '../../core/progress';
+import { aria2Progress, friendlyAria2Error, type Aria2Status } from '../../core/progress';
 import { formatBytes } from '../../core/format';
 import { speedLimitActive, type Settings } from '../../shared/settings';
 import { killTree, spawnTool } from '../process';
@@ -154,6 +154,13 @@ class Aria2Daemon {
     return body.result as T;
   }
 
+  /** Bring the daemon back after it has died or stopped answering its RPC. Concurrent callers share one restart. */
+  async restart(): Promise<void> {
+    if (this.starting) return this.starting;
+    if (this.running()) this.stop();
+    await this.ensure();
+  }
+
   stop() {
     if (this.limitTimer) clearInterval(this.limitTimer);
     this.limitTimer = null;
@@ -204,10 +211,26 @@ export const aria2Runner: Runner = (ctx) => {
     ctx.complete();
   };
 
+  let addSpec: { url: string; torrentPath: string | null; opts: Record<string, string | string[]> } | null = null;
+  let pollFails = 0;
+  let recoveries = 0;
+
+  // (Re)issue the download to aria2. After a daemon restart the old gid is gone, so we add again;
+  // aria2's --continue plus the .aria2 control file resume from the bytes already on disk.
+  const addToAria = async (): Promise<void> => {
+    if (!addSpec) return;
+    gid = addSpec.torrentPath
+      ? await aria2.call<string>('aria2.addTorrent', fs.readFileSync(addSpec.torrentPath).toString('base64'), [], addSpec.opts)
+      : await aria2.call<string>('aria2.addUri', [addSpec.url], addSpec.opts);
+  };
+
   const poll = async () => {
     if (stopped || !gid) return;
     try {
       let status = await aria2.call<Aria2Status & { seeder?: string }>('aria2.tellStatus', gid, FIELDS);
+      // Healthy again: forget earlier transient failures.
+      pollFails = 0;
+      recoveries = 0;
       // Magnets first fetch metadata, then continue as a new download.
       if (status.status === 'complete' && status.followedBy?.[0]) {
         gid = status.followedBy[0];
@@ -232,7 +255,25 @@ export const aria2Runner: Runner = (ctx) => {
           : `${status.connections ?? 0} connection${status.connections === '1' ? '' : 's'} · ${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`,
       }, 'running');
     } catch (err) {
+      if (stopped) return;
+      pollFails++;
       log.warn('Status poll failed', err);
+      // The engine has died or its RPC has hung. Restart it and resume, rather than polling a corpse forever.
+      if (pollFails >= 3) {
+        if (recoveries >= 5) {
+          ctx.fail('The download engine kept stopping. Your progress is saved on disk — press Retry to resume.');
+          return;
+        }
+        recoveries++;
+        pollFails = 0;
+        ctx.progress({ stage: 'Reconnecting to the download engine…', speedBps: null, etaSec: null }, 'running');
+        try {
+          await aria2.restart();
+          await addToAria();
+        } catch (e) {
+          log.warn('aria2 recovery failed', e);
+        }
+      }
     }
     // Poll quickly at first: a browser may be paused waiting to hear that data is flowing.
     timer = setTimeout(poll, ++polls < 12 ? 200 : 1000);
@@ -280,11 +321,27 @@ export const aria2Runner: Runner = (ctx) => {
       if (cookie) opts.header = [...(Array.isArray(opts.header) ? opts.header : []), `Cookie: ${cookie}`];
     }
 
-    if (url.toLowerCase().endsWith('.torrent') && fs.existsSync(url)) {
-      gid = await aria2.call<string>('aria2.addTorrent', fs.readFileSync(url).toString('base64'), [], opts);
-    } else {
-      gid = await aria2.call<string>('aria2.addUri', [url], opts);
+    // Fail fast on a full disk instead of stalling partway through a large download.
+    const expectedBytes = job.source.direct?.sizeBytes ?? null;
+    if (expectedBytes && !isTorrent) {
+      try {
+        const st = fs.statfsSync(dir);
+        const free = st.bavail * st.bsize;
+        if (free < expectedBytes * 1.02) {
+          ctx.fail(`Not enough free space for this download (needs ~${formatBytes(expectedBytes)}, ${formatBytes(free)} free). Free up space or choose another folder in Settings.`);
+          return;
+        }
+      } catch {
+        // statfs isn't available on this platform/build — skip the check.
+      }
     }
+
+    addSpec = {
+      url,
+      torrentPath: url.toLowerCase().endsWith('.torrent') && fs.existsSync(url) ? url : null,
+      opts,
+    };
+    await addToAria();
     void poll();
   })().catch((err) => ctx.fail(err instanceof Error ? err.message : String(err)));
 
@@ -312,16 +369,6 @@ export const aria2Runner: Runner = (ctx) => {
     },
   };
 };
-
-function friendlyAria2Error(message?: string): string {
-  const m = (message ?? '').toLowerCase();
-  if (m.includes('403')) return 'The server refused the download (403). If this came from a website, download it through the Lumina browser extension.';
-  if (m.includes('404')) return 'The file wasn’t found on the server (404). The link may have expired.';
-  if (m.includes('no space') || m.includes('disk full')) return 'The disk is full.';
-  if (m.includes('name resolution') || m.includes('could not resolve')) return 'No internet connection, or the server name is wrong.';
-  if (m.includes('file already exists') || m.includes('already exists')) return 'A file with this name already exists in the download folder.';
-  return message || 'Download stopped unexpectedly.';
-}
 
 function uniqueName(dir: string, name: string): string {
   if (!fs.existsSync(path.join(dir, name))) return name;

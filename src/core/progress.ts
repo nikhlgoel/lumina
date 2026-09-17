@@ -90,6 +90,19 @@ export function friendlyYtdlpError(message: string): string {
   return message.replace(/^\[[^\]]+\]\s*/, '').replace(/\s*See\s+https?:\/\/\S+\s+for more info\.?/i, '').slice(0, 300);
 }
 
+/** Make aria2's error text readable for people. */
+export function friendlyAria2Error(message?: string): string {
+  const m = (message ?? '').toLowerCase();
+  if (m.includes('403')) return 'The server refused the download (403). If this came from a website, download it through the Lumina browser extension.';
+  if (m.includes('404')) return 'The file wasn’t found on the server (404). The link may have expired.';
+  if (m.includes('no space') || m.includes('disk full')) return 'The disk is full. Free up space or choose another download folder, then press Retry.';
+  if (m.includes('flush') || m.includes('disk cache') || m.includes('cannot write') || m.includes('write to file') || m.includes('file i/o'))
+    return 'Couldn’t write to the disk — it may be full or disconnected. Free up space (or pick another folder) and press Retry to resume.';
+  if (m.includes('name resolution') || m.includes('could not resolve')) return 'No internet connection, or the server name is wrong.';
+  if (m.includes('file already exists') || m.includes('already exists')) return 'A file with this name already exists in the download folder.';
+  return message || 'Download stopped unexpectedly.';
+}
+
 export interface Aria2Status {
   gid: string;
   status: 'active' | 'waiting' | 'paused' | 'error' | 'complete' | 'removed';

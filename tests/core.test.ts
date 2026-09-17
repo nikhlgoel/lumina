@@ -5,7 +5,7 @@ import { assForceStyle } from '@core/subtitleStyle';
 import { classifyUrl, cleanUrl, extractLinks, isMusicSite } from '@core/url';
 import { parseStreams } from '@core/streams';
 import { audioFormatArgs, buildDownloadArgs, outputTemplate, previewTemplate, SQUARE_ARTWORK_PPA, videoFormatArgs, type BuildArgsInput } from '@core/ytdlpArgs';
-import { parseYtdlpLine, friendlyYtdlpError, isCookieReadError } from '@core/progress';
+import { parseYtdlpLine, friendlyYtdlpError, friendlyAria2Error, isCookieReadError } from '@core/progress';
 import { parsePlaylist, writeM3u8 } from '@core/playlists';
 import { activeLineIndex, cleanTrackMetadata, parseCues, parseLrc, scoreLyricsMatch } from '@core/lyrics';
 import { formatBytes, formatDuration, safeFileName } from '@core/format';
@@ -212,6 +212,13 @@ describe('progress parsing', () => {
   it('explains common errors', () => {
     expect(friendlyYtdlpError('[youtube] x: Sign in to confirm you’re not a bot')).toContain('Accounts');
     expect(friendlyYtdlpError('ERROR: This video is DRM protected')).toContain('DRM');
+  });
+  it('explains aria2 disk-write failures in plain words', () => {
+    expect(friendlyAria2Error('write disk cache flush failure index=13934')).toMatch(/disk/i);
+    expect(friendlyAria2Error('Cannot write to file')).toMatch(/disk/i);
+    expect(friendlyAria2Error('No space left on device')).toMatch(/full/i);
+    expect(friendlyAria2Error('errorCode=3 404 Not Found')).toMatch(/404/);
+    expect(friendlyAria2Error(undefined)).toBe('Download stopped unexpectedly.');
   });
   it('recognises unreadable browser cookie stores', () => {
     const msg = 'Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271 for more info';
