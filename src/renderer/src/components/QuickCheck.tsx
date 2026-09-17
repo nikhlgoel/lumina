@@ -59,7 +59,7 @@ export function QuickCheck() {
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center p-6" role="dialog" aria-modal="true" aria-label="Quick check">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
-      <section className="relative flex h-[min(780px,92vh)] w-[min(1000px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-overlay shadow-[0_24px_60px_-20px_rgb(0_0_0/0.55)]">
+      <section className="relative flex h-[min(680px,90vh)] w-[min(920px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-overlay shadow-[0_24px_60px_-20px_rgb(0_0_0/0.55)]">
         <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent"><ShieldQuestion className="size-5" /></span>
           <div className="min-w-0 flex-1">
@@ -98,12 +98,16 @@ export function QuickCheck() {
           </button>
         </div>
 
-        {/* The download page is placed exactly over this frame by the main process. */}
-        <div ref={frame} className="relative min-h-0 flex-1 bg-white">
-          <div className="absolute inset-0 grid place-items-center">
-            <span className="inline-flex items-center gap-2 text-sm text-neutral-500">
-              <RotateCw className="size-4 animate-spin" /> Loading the download page…
-            </span>
+        {/* A themed matte around the live page: the site's own page (usually white) then reads as a framed
+            browser screen inside Lumina, not a raw slab bleeding to the panel edge. The page window is laid
+            exactly over the inner frame, so its rect must exclude this padding. */}
+        <div className="min-h-0 flex-1 bg-sunken p-3">
+          <div ref={frame} className="relative h-full w-full overflow-hidden rounded-lg bg-white shadow-[inset_0_0_0_1px_rgb(0_0_0/0.1)]">
+            <div className="absolute inset-0 grid place-items-center">
+              <span className="inline-flex items-center gap-2 text-sm text-neutral-500">
+                <RotateCw className="size-4 animate-spin" /> Loading the download page…
+              </span>
+            </div>
           </div>
         </div>
 

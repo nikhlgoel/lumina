@@ -14,7 +14,13 @@ import { getLyrics } from './lyrics';
 import { queueSubtitleGeneration } from './jobs/cpu';
 import { matchTracks } from './services/ytmusic';
 
-const out = (m: string) => process.stdout.write(`[selftest] ${m}\n`);
+// On Windows the GUI Electron process doesn't reliably pipe stdout to a parent shell, so also
+// append to a log file when LUMINA_SELFTEST_LOG is set — lets a runner read the results back.
+const out = (m: string) => {
+  const line = `[selftest] ${m}\n`;
+  process.stdout.write(line);
+  if (process.env.LUMINA_SELFTEST_LOG) { try { fs.appendFileSync(process.env.LUMINA_SELFTEST_LOG, line); } catch { /* best effort */ } }
+};
 
 function waitFor(id: string): Promise<Job> {
   return new Promise((resolve) => {

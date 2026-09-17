@@ -236,10 +236,21 @@ export function DownloadView() {
             </div>
           </form>
           {!compact && (
+            <button
+              type="button"
+              onClick={() => void pickTorrents()}
+              className="group/drop mt-3 flex w-full items-center gap-3 rounded-xl border border-dashed border-line-strong bg-sunken/40 px-4 py-3 text-left transition-[background-color,border-color] duration-150 hover:border-accent hover:bg-accent-soft/50 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ground outline-none"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-raised text-ink-3 shadow-sm transition-colors group-hover/drop:text-accent"><FileUp className="size-[18px]" /></span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-semibold text-ink">Have a .torrent file? Drop it here</span>
+                <span className="block text-xs text-ink-3">Drag it anywhere onto this window, or click to browse. Magnet links go in the box above.</span>
+              </span>
+            </button>
+          )}
+          {!compact && (
             <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
               <span>Press <kbd className="rounded border border-line bg-sunken px-1 font-sans">Ctrl</kbd> <kbd className="rounded border border-line bg-sunken px-1 font-sans">L</kbd> to jump here</span>
-              <span aria-hidden="true">·</span>
-              <span>Drop .torrent files anywhere</span>
               <span aria-hidden="true">·</span>
               <button onClick={() => setView('settings', 'extension')} className="inline-flex items-center gap-1 transition-colors hover:text-accent"><Puzzle className="size-3.5" /> Catch videos from any page with the browser extension</button>
             </p>

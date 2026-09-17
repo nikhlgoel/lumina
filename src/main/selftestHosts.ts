@@ -16,7 +16,11 @@ import { createWindow } from './window';
 import { runTool } from './process';
 import { tools } from './tools';
 
-const out = (m: string) => process.stdout.write(`[selftest] ${m}\n`);
+const out = (m: string) => {
+  const line = `[selftest] ${m}\n`;
+  process.stdout.write(line);
+  if (process.env.LUMINA_SELFTEST_LOG) { try { fs.appendFileSync(process.env.LUMINA_SELFTEST_LOG, line); } catch { /* best effort */ } }
+};
 const results: { name: string; ok: boolean; detail: string }[] = [];
 const check = (name: string, ok: boolean, detail = '') => {
   results.push({ name, ok, detail });
