@@ -1,0 +1,55 @@
+name: Release
+
+# Builds installers for each OS and publishes them to a GitHub Release whenever a
+# version tag (v*) is pushed. This is the hosted release every store (winget,
+# Homebrew, Flathub) points at — nothing can be submitted before one exists.
+#
+# NOTE: this workflow has not yet run in CI. The first tag push will shake out
+# any environment-specific issues (tool fetching, electron-builder on the runner).
+# See PUBLISHING.md for the full flow.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            args: --win nsis
+          - os: ubuntu-latest
+            platform: linux
+            args: --linux AppImage rpm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install
+
+      # Downloads the checksum-verified binaries (yt-dlp, ffmpeg, aria2, 7-Zip, whisper) for this OS.
+      - run: pnpm tools:fetch --platform ${{ matrix.platform }}
+
+      - run: pnpm build
+
+      # electron-builder uploads the artifacts to the GitHub Release for this tag (created as a draft).
+      - name: Build and publish installer
+        run: pnpm exec electron-builder ${{ matrix.args }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
