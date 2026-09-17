@@ -24,7 +24,7 @@ keeps history/logins/cookies/bookmarks synced across devices.
 
 **Verification:** `tsc` clean · `vitest` 63 passed · `vite build` ok.
 
-**Commit(s):** _pending in this session._
+**Commit(s):** `e462709` (pushed to `main`).
 
 **Next:** await the user's steer on Sync (start with the testable crypto+merge core?); otherwise continue #1 speed +
 #30 logging. Still pending from before: live audio test of the EQ/output-device feature.
