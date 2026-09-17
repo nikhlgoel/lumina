@@ -31,7 +31,7 @@ replaces idea C (driver auto-updater) with output-device switching, per the user
 plan/queue checks PASS; no crash from tray/IPC/protocol changes). **⚠ Needs the user's live audio test:** the actual
 sound of the EQ and the output-device switch can't be verified in the headless harness.
 
-**Commit(s):** _pending in this session._
+**Commit(s):** `fc6a280` (pushed to `main`).
 
 **Next:** live-verify audio with the user; then #1 speed + #30 logging.
 
