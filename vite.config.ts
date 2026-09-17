@@ -1,50 +1,63 @@
 import { defineConfig } from 'vite';
-import path from 'path';
+import path from 'node:path';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import electron from 'vite-plugin-electron';
-import renderer from 'vite-plugin-electron-renderer';
+
+// Editors built on Electron (VS Code) leak this into child shells; it would make
+// the app start as plain Node instead of opening a window.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
+const r = (p: string) => path.resolve(import.meta.dirname, p);
+
+const alias = {
+  '@': r('src/renderer/src'),
+  '@shared': r('src/shared'),
+  '@core': r('src/core'),
+};
 
 export default defineConfig({
+  root: r('src/renderer'),
+  // Relative asset URLs so the built page works from file:// in Electron.
+  base: './',
+  resolve: { alias },
   plugins: [
     react(),
+    tailwindcss(),
     electron([
       {
-        entry: path.resolve(__dirname, 'src/main/index.ts'),
+        entry: r('src/main/index.ts'),
+        // Keep Chromium's sandbox on in development too.
+        onstart: async ({ startup }) => {
+          await startup(['.']);
+        },
         vite: {
+          resolve: { alias },
           build: {
-            outDir: path.resolve(__dirname, 'dist-electron/main'),
-            rollupOptions: {
-              external: ['electron', 'child_process', 'fs', 'path', 'os', 'util'],
-            },
+            outDir: r('dist-electron/main'),
+            emptyOutDir: true,
+            sourcemap: true,
+            lib: { entry: r('src/main/index.ts'), formats: ['es'], fileName: () => 'index.js' },
           },
         },
       },
       {
-        entry: path.resolve(__dirname, 'src/preload/index.ts'),
-        onstart(options) {
-          options.reload();
-        },
+        entry: r('src/preload/index.ts'),
+        onstart: ({ reload }) => reload(),
         vite: {
+          resolve: { alias },
           build: {
-            outDir: path.resolve(__dirname, 'dist-electron/preload'),
-            rollupOptions: {
-              external: ['electron'],
-            },
+            outDir: r('dist-electron/preload'),
+            emptyOutDir: true,
+            // Sandboxed preload scripts must be CommonJS.
+            lib: { entry: r('src/preload/index.ts'), formats: ['cjs'], fileName: () => 'index.cjs' },
           },
         },
       },
     ]),
-    renderer(),
   ],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src/renderer/src'),
-      '@shared': path.resolve(__dirname, 'src/preload'),
-    },
-  },
-  root: path.resolve(__dirname, 'src/renderer'),
   build: {
-    outDir: path.resolve(__dirname, 'dist'),
+    outDir: r('dist'),
     emptyOutDir: true,
   },
 });

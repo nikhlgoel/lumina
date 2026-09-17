@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lumina</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <img src="icons/icon-32.png" width="22" height="22" alt="" />
+    <span class="brand">Lumina</span>
+    <span id="status" class="status" data-state="checking"><i></i><span>Checking…</span></span>
+  </header>
+
+  <section id="connect" hidden>
+    <p id="connect-text"></p>
+    <button id="connect-btn" class="primary">Connect to Lumina</button>
+    <p id="connect-error" class="error" hidden></p>
+  </section>
+
+  <section id="main" hidden>
+    <button id="send-page" class="page">
+      <span class="page-title" id="page-title">Send this page to Lumina</span>
+      <span class="page-hint">Works for YouTube, SoundCloud, Vimeo and 1,800+ sites</span>
+    </button>
+
+    <h2>Found on this page</h2>
+    <ul id="media"></ul>
+    <p id="empty" class="empty" hidden>Nothing yet. Start playing the video or song, and it will show up here.</p>
+  </section>
+
+  <footer>
+    <label class="toggle">
+      <input type="checkbox" id="capture" />
+      <span class="track"><span class="thumb"></span></span>
+      <span>Catch browser downloads</span>
+    </label>
+    <details>
+      <summary>Advanced</summary>
+      <label class="field">Port <input id="port" type="number" min="1024" max="65535" /></label>
+      <button id="disconnect" class="link">Disconnect this browser</button>
+    </details>
+  </footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

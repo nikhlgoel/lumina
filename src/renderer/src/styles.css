@@ -1,0 +1,180 @@
+@import "tailwindcss";
+@import "@fontsource-variable/hanken-grotesk";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource/vt323/400.css";
+
+@source "./";
+
+/*
+ * Lumina design tokens.
+ * Warm-neutral surfaces, one accent, hairline borders. Four surface levels:
+ * ground → panel → raised → overlay. Dark and light are both first-class.
+ */
+:root {
+  color-scheme: light;
+  --ground: #f4f2ee;
+  --panel: #fbfaf8;
+  --raised: #ffffff;
+  --overlay: #ffffff;
+  --sunken: #ebe8e2;
+  --line: rgb(40 32 20 / 0.1);
+  --line-strong: rgb(40 32 20 / 0.18);
+  --ink: #1b1813;
+  --ink-2: #4a453c;
+  --ink-3: #7a7468;
+  --ink-inverse: #fbfaf8;
+  --hover: rgb(40 32 20 / 0.05);
+  --press: rgb(40 32 20 / 0.09);
+  --success: #1f8a5b;
+  --warning: #b86e00;
+  --danger: #c2412d;
+  --shadow-sm: 0 1px 0 rgb(40 32 20 / 0.04), 0 1px 2px rgb(40 32 20 / 0.06);
+  --shadow-md: 0 1px 0 rgb(40 32 20 / 0.04), 0 8px 24px -8px rgb(40 32 20 / 0.16);
+  --shadow-lg: 0 24px 60px -20px rgb(40 32 20 / 0.28), 0 0 0 1px rgb(40 32 20 / 0.06);
+  --accent: #d9641e;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(217 100 30 / 0.12);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --titlebar: 44px;
+}
+
+:root[data-accent="iris"] { --accent: #5b5bd6; --accent-soft: rgb(91 91 214 / 0.13); }
+:root[data-accent="jade"] { --accent: #1b8a63; --accent-soft: rgb(27 138 99 / 0.13); }
+:root[data-accent="sky"] { --accent: #1f78c8; --accent-soft: rgb(31 120 200 / 0.13); }
+:root[data-accent="rose"] { --accent: #c93b62; --accent-soft: rgb(201 59 98 / 0.13); }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0d0c0b;
+  --panel: #141312;
+  --raised: #1b1a18;
+  --overlay: #22211e;
+  --sunken: #0a0908;
+  --line: rgb(255 244 225 / 0.08);
+  --line-strong: rgb(255 244 225 / 0.15);
+  --ink: #f1ede6;
+  --ink-2: #c3bdb2;
+  --ink-3: #8c867b;
+  --ink-inverse: #141312;
+  --hover: rgb(255 244 225 / 0.05);
+  --press: rgb(255 244 225 / 0.09);
+  --success: #45c08a;
+  --warning: #e8a33d;
+  --danger: #f0735a;
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 10px 30px -12px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 30px 70px -24px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 244 225 / 0.07);
+  --accent: #f08a3e;
+  --accent-ink: #1b1106;
+  --accent-soft: rgb(240 138 62 / 0.14);
+}
+:root[data-theme="dark"][data-accent="iris"] { --accent: #8f8ff5; --accent-ink: #0e0e24; --accent-soft: rgb(143 143 245 / 0.15); }
+:root[data-theme="dark"][data-accent="jade"] { --accent: #44c692; --accent-ink: #04170f; --accent-soft: rgb(68 198 146 / 0.14); }
+:root[data-theme="dark"][data-accent="sky"] { --accent: #5aaef0; --accent-ink: #04111d; --accent-soft: rgb(90 174 240 / 0.14); }
+:root[data-theme="dark"][data-accent="rose"] { --accent: #f07396; --accent-ink: #1f0610; --accent-soft: rgb(240 115 150 / 0.14); }
+
+@theme inline {
+  --font-sans: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-lcd: "VT323", ui-monospace, monospace;
+
+  --color-ground: var(--ground);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-hover: var(--hover);
+  --color-press: var(--press);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --ease-out-soft: var(--ease);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  html { font-size: calc(15px * var(--ui-scale, 1)); }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    user-select: none;
+  }
+  input, textarea, [data-selectable] { user-select: text; }
+  button { cursor: default; }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@utility drag { -webkit-app-region: drag; }
+@utility no-drag { -webkit-app-region: no-drag; }
+@utility tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes shimmer { to { background-position: -200% 0; } }
+@utility skeleton {
+  background: linear-gradient(90deg, var(--sunken) 0%, var(--hover) 50%, var(--sunken) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+@utility animate-rise { animation: rise 0.28s var(--ease) both; }
+
+@keyframes indeterminate { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+@keyframes leave { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@utility animate-leave { animation: leave 0.18s ease-in both; }
+
+@keyframes pop { 0% { transform: scale(0.6); opacity: 0; } 70% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+@utility animate-pop { animation: pop 0.36s var(--ease) both; }
+
+/* ---------- View transitions ---------- */
+/* The window chrome stays put; only the page region and the player animate. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+
+.vt-page { view-transition-name: page; }
+html[data-transition="page"]::view-transition-old(page) { animation: vt-fade-out 120ms ease-in both; }
+html[data-transition="page"]::view-transition-new(page) { animation: vt-rise-in 280ms var(--ease) both; }
+
+html[data-transition="player-open"]::view-transition-new(player) { animation: vt-player-in 420ms var(--ease) both; }
+html[data-transition="player-close"]::view-transition-old(player) { animation: vt-player-out 260ms ease-in both; }
+::view-transition-group(now-playing-art) { animation-duration: 420ms; animation-timing-function: var(--ease); }
+::view-transition-old(now-playing-art), ::view-transition-new(now-playing-art) { height: 100%; object-fit: cover; }
+
+@keyframes vt-fade-out { to { opacity: 0; transform: translateY(-3px); } }
+@keyframes vt-rise-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes vt-player-in { from { opacity: 0; transform: scale(0.985); } }
+@keyframes vt-player-out { to { opacity: 0; transform: scale(0.985); } }
+
+/* Compact density tightens rows everywhere that uses these tokens. */
+:root { --row-y: 0.875rem; --page-x: 2rem; }
+:root[data-density="compact"] { --row-y: 0.55rem; --page-x: 1.5rem; }
+
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+}

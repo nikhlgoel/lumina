@@ -1,47 +1,17 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { DownloadRequest, LuminaSettings, DownloadProgress, StorageDrive, RepackPackage } from './types';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import { EVENT_CHANNELS } from '../shared/channels';
+import type { EventChannel, InvokeChannel, LuminaBridge } from '../shared/ipc';
 
-contextBridge.exposeInMainWorld('luminaAPI', {
-  inspectUrl: (url: string) => ipcRenderer.invoke('media:inspect', url),
-  crawlMultiLinks: (rawText: string) => ipcRenderer.invoke('repack:crawl-links', rawText),
-  startRepackDownload: (pkg: RepackPackage, targetDir?: string) => ipcRenderer.invoke('repack:download-package', pkg, targetDir),
-  resolveDirectLink: (url: string) => ipcRenderer.invoke('repack:resolve-direct', url),
-
-  startDownload: (request: DownloadRequest) => ipcRenderer.invoke('media:download', request),
-  pauseDownload: (taskId: string) => ipcRenderer.invoke('media:pause', taskId),
-  resumeDownload: (taskId: string) => ipcRenderer.invoke('media:resume', taskId),
-  cancelDownload: (taskId: string) => ipcRenderer.invoke('media:cancel', taskId),
-  
-  getStorageDrives: () => ipcRenderer.invoke('storage:get-drives'),
-  
-  searchMusic: (query: string) => ipcRenderer.invoke('music:search', query),
-  getStreamUrl: (videoId: string) => ipcRenderer.invoke('music:stream-url', videoId),
-  getLyrics: (query: { title: string; artist?: string; duration?: number }) => ipcRenderer.invoke('lyrics:get', query),
-  
-  getDownloadedMedia: () => ipcRenderer.invoke('library:get-media'),
-  
-  getSettings: () => ipcRenderer.invoke('settings:get'),
-  saveSettings: (settings: Partial<LuminaSettings>) => ipcRenderer.invoke('settings:save', settings),
-  
-  openFile: (filePath: string) => ipcRenderer.invoke('shell:open-file', filePath),
-  openDirectory: (filePath: string) => ipcRenderer.invoke('shell:open-directory', filePath),
-  selectDirectory: () => ipcRenderer.invoke('shell:select-directory'),
-  selectTorrentFile: () => ipcRenderer.invoke('shell:select-torrent'),
-  
-  minimizeWindow: () => ipcRenderer.send('window:minimize'),
-  maximizeWindow: () => ipcRenderer.send('window:maximize'),
-  closeWindow: () => ipcRenderer.send('window:close'),
-  isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
-  
-  onDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
-    const handler = (_: any, data: DownloadProgress) => callback(data);
-    ipcRenderer.on('download:progress', handler);
-    return () => ipcRenderer.removeListener('download:progress', handler);
+const bridge: LuminaBridge = {
+  invoke: ((channel: InvokeChannel, payload?: unknown) => ipcRenderer.invoke(channel, payload)) as LuminaBridge['invoke'],
+  on: (channel, listener) => {
+    if (!EVENT_CHANNELS.includes(channel as EventChannel)) throw new Error(`Unknown event channel: ${channel}`);
+    const handler = (_event: IpcRendererEvent, payload: unknown) => listener(payload as never);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
   },
-  
-  onDrivesChanged: (callback: (drives: StorageDrive[]) => void) => {
-    const handler = (_: any, data: StorageDrive[]) => callback(data);
-    ipcRenderer.on('storage:drives-changed', handler);
-    return () => ipcRenderer.removeListener('storage:drives-changed', handler);
-  }
-});
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  platform: process.platform,
+};
+
+contextBridge.exposeInMainWorld('lumina', bridge);

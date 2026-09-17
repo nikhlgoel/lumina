@@ -1,143 +1,114 @@
-import React, { useEffect, useState } from 'react';
-import { Titlebar } from './components/Titlebar';
-import { Sidebar } from './components/Sidebar';
-import { AmbientCanvas } from './components/AmbientCanvas';
-import { Omnibox } from './components/Omnibox';
-import { MediaInspector } from './components/MediaInspector';
-import { RepackStudio } from './components/RepackStudio';
-import { DownloadQueue } from './components/DownloadQueue';
-import { MiniPlayer } from './components/MiniPlayer';
-import { MusicHub } from './components/MusicHub';
-import { LocalLibrary } from './components/LocalLibrary';
-import { SettingsModal } from './components/SettingsModal';
-import { SplashScreen } from './components/SplashScreen';
-import { LyricsView } from './components/LyricsView';
-import { BottomNavBar } from './components/BottomNavBar';
-import { useLuminaStore } from './store/useLuminaStore';
+import { useEffect, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
+import { errorMessage } from '@/lib/bridge';
+import { useApp, type View } from '@/stores/app';
+import { useJobs } from '@/stores/jobs';
+import { useLibrary } from '@/stores/library';
+import { media, usePlayer } from '@/stores/player';
+import { MiniBar, Sidebar, Toasts } from '@/components/Shell';
+import { QuickCheck } from '@/components/QuickCheck';
+import { DownloadView } from '@/views/download/DownloadView';
+import { QueueView } from '@/views/queue/QueueView';
+import { LibraryView } from '@/views/library/LibraryView';
+import { SettingsView } from '@/views/settings/SettingsView';
+import { PlayerView } from '@/views/player/PlayerView';
 
-export const App: React.FC = () => {
-  const { 
-    activeTab, 
-    initialize, 
-    inspectUrl, 
-    clearInspectedMedia, 
-    togglePlayPause, 
-    currentPlayingTrack, 
-    setUrlInput,
-    isLyricsOpen,
-    setLyricsOpen,
-    toggleLyrics
-  } = useLuminaStore();
-  const [showSplash, setShowSplash] = useState(true);
+function useAppearance() {
+  const appearance = useApp((s) => s.settings?.appearance);
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches);
 
   useEffect(() => {
-    initialize();
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setSystemDark(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+  useEffect(() => {
+    if (!appearance) return;
+    const root = document.documentElement;
+    const dark = appearance.colorMode === 'dark' || (appearance.colorMode === 'system' && systemDark);
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.dataset.accent = appearance.accent;
+    root.dataset.density = appearance.density;
+    root.style.setProperty('--ui-scale', appearance.uiScale);
+    const reduced = appearance.reducedMotion === 'on' || (appearance.reducedMotion === 'system' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (reduced) root.dataset.motion = 'reduced';
+    else delete root.dataset.motion;
+  }, [appearance, systemDark]);
+}
 
-      // Escape: Dismiss active lyrics or preview
-      if (e.key === 'Escape') {
-        if (isLyricsOpen) {
-          setLyricsOpen(false);
-          return;
-        }
-        clearInspectedMedia();
-      }
-
-      // 'L' key: Toggle lyrics if not typing
-      if ((e.key === 'l' || e.key === 'L') && !isInputFocused && currentPlayingTrack) {
-        e.preventDefault();
-        toggleLyrics();
-      }
-
-      // Space: Toggle in-app player play/pause if not typing
-      if (e.code === 'Space' && !isInputFocused && currentPlayingTrack) {
-        e.preventDefault();
-        togglePlayPause();
-      }
-
-      // Ctrl+V or Cmd+V anywhere outside input: Auto-paste and inspect
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !isInputFocused) {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text && text.trim().startsWith('http')) {
-            setUrlInput(text.trim());
-            inspectUrl(text.trim());
-          }
-        } catch (err) {}
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [initialize, inspectUrl, clearInspectedMedia, togglePlayPause, currentPlayingTrack, setUrlInput, isLyricsOpen, setLyricsOpen, toggleLyrics]);
-
-  return (
-    <div className="app-container relative w-screen h-screen flex flex-col bg-lumina-dark text-slate-100 overflow-hidden font-sans transition-colors duration-300">
-      {/* Dynamic Ambient Background Canvas */}
-      <AmbientCanvas />
-
-      {/* Splash Screen Bootloader */}
-      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
-
-      {/* Custom Window Titlebar */}
-      <Titlebar />
-
-      {/* Main Workspace Layout */}
-      <div className="flex-1 flex overflow-hidden relative z-10">
-        {/* Left Navigation Sidebar */}
-        <Sidebar />
-
-        {/* Dynamic Center Stage (Mobile-first responsive padding) */}
-        <main className="flex-1 h-full overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
-          {activeTab === 'downloader' && (
-            <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
-              {/* Omnibox / Link input */}
-              <Omnibox />
-
-              {/* Inspected Media Matrix */}
-              <MediaInspector />
-
-              {/* Lumina 2.0 Repack Studio */}
-              <RepackStudio />
-
-              {/* Real-time Downloads Queue */}
-              <DownloadQueue />
-            </div>
-          )}
-
-          {activeTab === 'music' && (
-            <div className="max-w-5xl mx-auto">
-              <MusicHub />
-            </div>
-          )}
-
-          {activeTab === 'library' && (
-            <div className="max-w-5xl mx-auto">
-              <LocalLibrary />
-            </div>
-          )}
-
-          {activeTab === 'settings' && (
-            <div className="max-w-4xl mx-auto">
-              <SettingsModal />
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* Full-Stage Immersive Synced Lyrics Overlay */}
-      <LyricsView />
-
-      {/* Persistent Docked Audio Player */}
-      <MiniPlayer />
-
-      {/* Mobile Bottom Navigation Bar */}
-      <BottomNavBar />
-    </div>
-  );
+const VIEWS: Record<View, () => React.JSX.Element | null> = {
+  download: DownloadView,
+  queue: QueueView,
+  library: LibraryView,
+  settings: SettingsView,
 };
 
-export default App;
+export function App() {
+  const ready = useApp((s) => s.ready);
+  const view = useApp((s) => s.view);
+  const mode = useApp((s) => s.mode);
+  const setView = useApp((s) => s.setView);
+  const [failure, setFailure] = useState<string | null>(null);
+  useAppearance();
+
+  useEffect(() => {
+    (async () => {
+      await useApp.getState().init();
+      await Promise.all([useJobs.getState().init(), useLibrary.getState().init()]);
+      const player = useApp.getState().settings?.player;
+      if (player) {
+        media.volume = player.volume;
+        usePlayer.setState({ volume: player.volume, stage: player.autoOpenLyrics ? 'lyrics' : 'art' });
+      }
+    })().catch((err) => setFailure(errorMessage(err)));
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || useApp.getState().mode === 'player') return;
+      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', ',': 'settings' };
+      const target = map[e.key];
+      if (target) {
+        e.preventDefault();
+        setView(target);
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [setView]);
+
+  if (failure) {
+    return (
+      <div className="grid h-full place-items-center p-8 text-center">
+        <div>
+          <p className="font-serif text-3xl">Lumina couldn’t start</p>
+          <p className="mt-2 max-w-md text-sm text-ink-3" data-selectable>{failure}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ready) {
+    return <div className="drag grid h-full place-items-center"><LoaderCircle className="size-6 animate-spin text-ink-3" /></div>;
+  }
+
+  const Current = VIEWS[view];
+  return (
+    <>
+      <div className="flex h-full flex-col" aria-hidden={mode === 'player' || undefined}>
+        <div className="flex min-h-0 flex-1">
+          <Sidebar />
+          <main className="vt-page min-w-0 flex-1 bg-ground">
+            <Current />
+          </main>
+        </div>
+        <MiniBar />
+      </div>
+      {mode === 'player' && <PlayerView />}
+      <QuickCheck />
+      <Toasts />
+    </>
+  );
+}
