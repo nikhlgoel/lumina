@@ -84,10 +84,13 @@
     <polygon points="512,72 876,282 876,702 512,912 148,702 148,282" stroke-width="10"/>
   </g>
 
-  <!-- Glass orb with the play mark -->
+  <!-- Glass orb with the download mark: a bold arrow of light coming down — Lumina brings it to you. -->
   <circle cx="512" cy="496" r="178" fill="#3A1709" opacity="0.35" filter="url(#soft)"/>
   <circle cx="512" cy="492" r="172" fill="url(#orb)"/>
   <circle cx="512" cy="492" r="172" fill="none" stroke="#FFF2DF" stroke-opacity="0.75" stroke-width="5"/>
-  <path d="M478 420 C478 406 492 398 504 405 L602 466 C613 473 613 488 602 495 L504 556 C492 563 478 555 478 541 Z" fill="url(#play)" opacity="0.93"/>
-  <ellipse cx="452" cy="398" rx="70" ry="34" transform="rotate(-32 452 398)" fill="#FFFFFF" opacity="0.55"/>
+  <g fill="url(#play)">
+    <rect x="484" y="398" width="56" height="126" rx="22"/>
+    <path d="M436 478 L588 478 L512 586 Z" stroke="url(#play)" stroke-width="16" stroke-linejoin="round"/>
+  </g>
+  <ellipse cx="452" cy="398" rx="70" ry="34" transform="rotate(-32 452 398)" fill="#FFFFFF" opacity="0.4"/>
 </svg>

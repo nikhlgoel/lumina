@@ -11,6 +11,7 @@ import { DownloadView } from '@/views/download/DownloadView';
 import { QueueView } from '@/views/queue/QueueView';
 import { LibraryView } from '@/views/library/LibraryView';
 import { SettingsView } from '@/views/settings/SettingsView';
+import { AboutView } from '@/views/about/AboutView';
 import { PlayerView } from '@/views/player/PlayerView';
 
 function useAppearance() {
@@ -43,6 +44,7 @@ const VIEWS: Record<View, () => React.JSX.Element | null> = {
   queue: QueueView,
   library: LibraryView,
   settings: SettingsView,
+  about: AboutView,
 };
 
 export function App() {
