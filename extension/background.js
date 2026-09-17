@@ -114,10 +114,52 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'lumina-link', title: 'Download link with Lumina', contexts: ['link'] });
     chrome.contextMenus.create({ id: 'lumina-media', title: 'Download with Lumina', contexts: ['video', 'audio', 'image'] });
     chrome.contextMenus.create({ id: 'lumina-page', title: 'Send page to Lumina', contexts: ['page'] });
+    chrome.contextMenus.create({ id: 'lumina-all-links', title: 'Send all download links on this page to Lumina', contexts: ['page'] });
   });
 });
 
+// Runs in the page: collect the download-worthy links (file hosts, direct files, magnets), deduped.
+// Self-contained — chrome.scripting serialises this function, so it can't reference anything outside it.
+function collectDownloadLinks() {
+  const HOSTS = /(?:datanodes|ddownload|rapidgator|nitroflare|katfile|uploadrar|mega4upload|hexload|usersdrive|drop\.download|clicknupload|userupload|uptobox|send\.cm|krakenfiles|mediafire|1fichier|turbobit|hitfile|buzzheavier|qiwi\.gg|fuckingfast|pixeldrain|gofile|1drv|dropbox)\./i;
+  const EXT = /\.(rar|zip|7z|iso|bin|exe|apk|dmg|mkv|mp4|avi|mov|mp3|flac|wav|pdf|epub|part\d+\.rar|\d{3})(?:\?|#|$)/i;
+  const out = [];
+  const seen = new Set();
+  for (const a of document.querySelectorAll('a[href]')) {
+    const href = a.href;
+    if (!href || seen.has(href)) continue;
+    const ok = /^magnet:/i.test(href) || (/^https?:/i.test(href) && (HOSTS.test(href) || EXT.test(href)));
+    if (ok) {
+      seen.add(href);
+      out.push(href);
+    }
+  }
+  return out.slice(0, 200);
+}
+
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'lumina-all-links') {
+    if (!tab?.id) return;
+    let links = [];
+    try {
+      const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectDownloadLinks });
+      links = res?.result ?? [];
+    } catch {
+      flag('Couldn’t read the links on this page.');
+      return;
+    }
+    if (!links.length) {
+      flag('No download links found on this page.');
+      return;
+    }
+    let sent = 0;
+    for (const link of links) {
+      const { accepted } = await capture({ url: link, kind: 'link', pageUrl: tab.url, pageTitle: tab.title, headers: recent.get(link)?.headers });
+      if (accepted) sent++;
+    }
+    flag(sent ? `Sent ${sent} link${sent === 1 ? '' : 's'} to Lumina.` : 'Lumina isn’t connected. Open Lumina, then try again.');
+    return;
+  }
   const url = info.menuItemId === 'lumina-link' ? info.linkUrl : info.menuItemId === 'lumina-media' ? info.srcUrl : info.pageUrl;
   if (!url || !/^(https?:|magnet:)/.test(url)) {
     flag('That item only exists inside this page. Use the Lumina button to pick detected media instead.');

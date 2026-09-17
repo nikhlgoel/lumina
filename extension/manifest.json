@@ -22,7 +22,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["contextMenus", "downloads", "storage", "webRequest", "cookies", "tabs"],
+  "permissions": ["contextMenus", "downloads", "storage", "webRequest", "cookies", "tabs", "scripting"],
   "host_permissions": ["<all_urls>"],
   "minimum_chrome_version": "116"
 }
