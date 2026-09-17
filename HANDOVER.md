@@ -69,8 +69,9 @@ before anything big. See §7 for the item-by-item status.
   or a local model; toggle models off to save RAM.
 
 **Later ideas captured (see §8 for detail + my recommendation):** offline music-platform experience (likes / albums /
-local playlists / hybrid stream-if-not-downloaded); in-app **equalizer + audio profiles**; (declined) audio-driver
-auto-updater; USB portable player + import/export/sync; Chrome Web Store listing for the extension.
+local playlists / hybrid stream-if-not-downloaded); in-app **equalizer + audio profiles** (DONE); (declined) audio-
+driver auto-updater; USB portable player + import/export/sync; Chrome Web Store listing for the extension;
+**Lumina Sync** — Brave-Sync-like local device "chain" with no third-party cloud (full design in §11).
 
 ## 5. Verification suite (run from repo root)
 
@@ -189,3 +190,49 @@ device) and leave actual driver updates to the OS/vendor tools.
 - Branch is `main`. Commit/push only when the user asks; the user often says "squash them all" → batch related fixes
   into one clean commit. No `Co-Authored-By` unless configured.
 - Keep files focused (<~800 lines), immutable update patterns, explicit error handling (repo + ECC house style).
+
+## 11. Planned feature — Lumina Sync (local device "chain", no third-party cloud)
+
+**User ask (2026-09-17):** replicate Brave Sync — keep browser data (history, login data, cookies, bookmarks — and we'd
+extend to library likes/playlists) synced across the user's own devices, **without a third-party cloud**. Devices join
+a "chain"; each keeps its own copy but all data is merged and available on every device, so losing one device loses
+nothing (add a new device to the chain to recover).
+
+**Reality check on "no cloud":** Brave Sync actually relays through a Brave-run server, but data is **end-to-end
+encrypted** with a BIP39 seed so the relay can't read it. Genuinely serverless options for Lumina:
+- **A) LAN peer-to-peer** — devices on the same network discover each other (mDNS `_lumina-sync._tcp`) and sync
+  directly over an encrypted socket. No server; instant; but only same-network + both online.
+- **B) User-owned location** — sync through an encrypted blob on a place the user controls: a USB drive (ties into the
+  planned USB import/export/sync, items #19/#22), a shared folder, or the user's own Syncthing/Drive/Dropbox folder.
+  Works offline/asynchronously and across networks.
+- **C) Self-hosted tiny relay** — advanced/optional.
+
+**Recommendation: hybrid A + B.** LAN P2P for instant same-network sync; encrypted **sync file on USB/shared folder**
+as the offline/cross-network fallback and the "lose a device, restore from another / from USB" story. This is the most
+faithful "no cloud" match and reuses the USB roadmap.
+
+**Security (non-negotiable — cookies & logins are secrets):**
+- End-to-end encrypt everything with a key derived (Argon2id/HKDF) from a **sync seed** (BIP39 12 words, shown as words
+  + QR). Pairing = transferring the seed to the new device (scan QR / type words on device B). The seed never leaves
+  the chain and is never sent to any server.
+- Cipher: XChaCha20-Poly1305 (or AES-256-GCM). Store the seed at rest in the OS keychain (`safeStorage`/DPAPI).
+- Authenticate LAN peers by proving knowledge of the seed (challenge-response) before exchanging anything.
+
+**Sync engine (CRDT-ish, testable in isolation):**
+- Each syncable record: `{ id, type, payload, updatedAt, deviceId, deleted }` (tombstones for deletes).
+- Merge = last-write-wins per record by `updatedAt`; history merges as a union; cookies LWW per `(domain,name)`;
+  bookmarks LWW. Each device stores the full merged set.
+- Deltas via a per-device high-water timestamp / simple vector clock.
+- The browser data itself lives in the `persist:browser` Electron session (cookies/history) — read/write via
+  `session.cookies`, a bookmarks store, and a history store; Lumina owns bookmarks/history persistence.
+
+**UI:** Settings ▸ Sync — "Start a sync chain" (generate seed → show words + QR), "Add this device" (scan/enter seed),
+list devices in the chain, per-type toggles (History · Logins & cookies · Bookmarks · Likes & playlists), "Sync now"
++ last-synced, "Remove device".
+
+**Sequencing (Phase 2, security-sensitive — needs 2 devices to fully verify):**
+1. Build the **crypto core** (seed → key, encrypt/decrypt blob) + the **merge/CRDT logic** in `src/core/*` with unit
+   tests (both are pure and fully testable here). ← recommended first step.
+2. Encrypted **file/USB sync** (write/read/merge `lumina-sync.bin`).
+3. **LAN P2P** transport (mDNS discovery + authenticated encrypted socket).
+4. Wire browser cookies/history/bookmarks + library likes/playlists as record providers; build the Settings UI.

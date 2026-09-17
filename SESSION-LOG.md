@@ -5,6 +5,32 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-09-17 (3) — Minimal browser start page; Lumina Sync design
+
+**Context:** User: the in-app browser's landing page looked crowded (that clutter was DuckDuckGo's *own* homepage menu).
+Wants it minimal — search/functions only. Also asked to add a Brave-Sync-like local (no-cloud) device "chain" that
+keeps history/logins/cookies/bookmarks synced across devices.
+
+**Done:**
+- **Minimal browser start page** (`src/main/browser.ts`): replaced the DuckDuckGo homepage as `HOME` with a clean,
+  self-contained data-URL start page (Lumina wordmark + a single search box → DuckDuckGo results). The address bar
+  shows blank on the start page (data: URLs are hidden in `emitState`), like a real new-tab page. Search/typing in the
+  address bar unchanged. Verified: `tsc` clean · `vite build` ok. (Native browser view isn't captured by the
+  screenshot harness → the user confirms visually.)
+- **Lumina Sync — full design** written to HANDOVER §11 (no code yet). Recommendation: hybrid LAN-P2P + encrypted
+  USB/shared-file sync, E2E-encrypted with a BIP39 seed ("chain"), LWW/CRDT merge with tombstones. It's Phase-2 and
+  security-sensitive (moves cookies/logins) and needs 2 devices to verify, so **not implemented this session**.
+  Recommended first step: build the pure, unit-testable **crypto core + merge logic** in `src/core/*`.
+
+**Verification:** `tsc` clean · `vitest` 63 passed · `vite build` ok.
+
+**Commit(s):** _pending in this session._
+
+**Next:** await the user's steer on Sync (start with the testable crypto+merge core?); otherwise continue #1 speed +
+#30 logging. Still pending from before: live audio test of the EQ/output-device feature.
+
+---
+
 ## 2026-09-17 (2) — Audio output switching + equalizer + tray quick-controls (idea B)
 
 **Context:** User asked to add audio **output-device switching** (for people with multiple outputs), **tray menu
