@@ -6,10 +6,11 @@ import { BrandMark, TitleBar } from '@/components/Shell';
 
 const REPO_URL = 'https://github.com/nikhlgoel/lumina';
 const ISSUES_URL = `${REPO_URL}/issues/new`;
+const SITES_URL = 'https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md';
 
 /** The projects Lumina is built on. Bundled command-line tools are annotated with their live version. */
 const TECH: { name: string; role: string; tool?: ToolName; url: string }[] = [
-  { name: 'yt-dlp', role: 'Finds and pulls media from 1,800+ sites', tool: 'yt-dlp', url: 'https://github.com/yt-dlp/yt-dlp' },
+  { name: 'yt-dlp', role: 'Finds and pulls media from 1,300+ sites', tool: 'yt-dlp', url: 'https://github.com/yt-dlp/yt-dlp' },
   { name: 'FFmpeg', role: 'Muxes, converts and re-encodes for any device', tool: 'ffmpeg', url: 'https://ffmpeg.org' },
   { name: 'aria2', role: 'Multi-connection engine for fast, resumable downloads', tool: 'aria2c', url: 'https://aria2.github.io' },
   { name: '7-Zip', role: 'Unpacks split archives and verifies them', tool: '7z', url: 'https://www.7-zip.org' },
@@ -22,7 +23,7 @@ const TECH: { name: string; role: string; tool?: ToolName; url: string }[] = [
 ];
 
 const CAN_DO = [
-  'Download video and music from 1,800+ sites at the best available quality',
+  'Download video and music from 1,300+ sites at the best available quality',
   'Match Spotify playlists to sources and grab whole playlists at once',
   'Handle direct files, file-host download pages (with an in-app quick check) and torrents',
   'Download multi-part repacks together, then unpack and checksum-verify them',
@@ -89,6 +90,15 @@ export function AboutView() {
             speed caps. It picks the right sources and formats for you, so downloading stays simple even when the
             web makes it complicated.
           </p>
+          <a
+            href={SITES_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-accent rounded outline-none"
+          >
+            See every site Lumina can download from
+            <ArrowUpRight className="size-4" />
+          </a>
 
           {/* Capabilities */}
           <div className="mt-10 grid gap-4 md:grid-cols-2">

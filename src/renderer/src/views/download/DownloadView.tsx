@@ -194,7 +194,7 @@ export function DownloadView() {
                 Paste a link.<br /><span className="text-ink-3 italic">Keep it forever.</span>
               </h1>
               <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-ink-2">
-                Videos and music from 1,800+ sites, Spotify playlists, direct files and torrents. Lumina picks the best quality and tells you exactly what you’re getting.
+                Videos and music from 1,300+ sites, Spotify playlists, direct files and torrents. Lumina picks the best quality and tells you exactly what you’re getting.
               </p>
             </div>
           )}
