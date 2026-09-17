@@ -59,6 +59,9 @@ function browserUserAgent(): string {
   return app.userAgentFallback.replace(/\s(?:Electron|lumina|Lumina)\/\S+/g, '');
 }
 
+/** Notorious pop-under / redirect / malvertising networks seen on file-host pages. Cloudflare and the host itself are never here. */
+const AD_HOSTS = /(^|\.)(doubleclick\.net|googlesyndication\.com|googleadservices\.com|adnxs\.com|popads\.net|popcash\.net|propellerads\.com|propelrads\.com|adsterra\.com|hilltopads\.net|hilltopads\.com|onclckds\.com|onclickalgo\.com|onclickmax\.com|clickadu\.com|poptm\.com|popunder\.net|adcash\.com|exoclick\.com|exosrv\.com|juicyads\.com|trafficjunky\.net|admaven\.com|admetrics\.io|mgid\.com|revcontent\.com|taboola\.com|outbrain\.com|adsterracdn\.com|highperformanceformat\.com|profitableratecpm\.com|effectiveratecpm\.com|displaycontentnetwork\.com|luckypushh?\.com|pushwhy\.com|datsprings\.com|bebi\.com|a-ads\.com)$/i;
+
 /**
  * A fresh, in-memory cookie jar per download page. Hosts keep the file being downloaded in a cookie
  * (e.g. `file_code`), so pages sharing a jar overwrite each other and hand out the wrong file.
@@ -69,6 +72,17 @@ function pageSession(): { s: Session; partition: string } {
   s.setUserAgent(browserUserAgent());
   s.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   s.setPermissionCheckHandler(() => false);
+  // Block the pop-under / redirect / malvertising networks that infest file-host pages, so the real page (and any
+  // human check) loads cleanly and can't be hijacked away. The host's own scripts and Cloudflare are never touched.
+  s.webRequest.onBeforeRequest((details, cb) => {
+    let host = '';
+    try {
+      host = new URL(details.url).hostname;
+    } catch {
+      // data:/blob: and similar — let them through
+    }
+    cb({ cancel: Boolean(host) && AD_HOSTS.test(host) });
+  });
   s.on('will-download', (event, item, wc) => {
     const waiter = wc ? downloadWaiters.get(wc.id) : undefined;
     if (waiter) {
@@ -160,6 +174,9 @@ function placePage(c: ActiveChallenge) {
   if (!c.page.isVisible()) {
     c.page.show();
     c.page.focus();
+    // The page ran while hidden; reload it now that it's genuinely visible and focused so an interactive
+    // check (e.g. Cloudflare Turnstile) initialises in a real, on-screen context for the person to solve.
+    if (c.info.reason === 'captcha') c.page.webContents.reload();
     challengeEvents.emit('placed', c.info);
   }
 }
