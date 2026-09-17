@@ -34,7 +34,7 @@ stability; (B) in-app equalizer + audio profiles — recommend YES (Web Audio, n
 
 **Verification:** `npx tsc --noEmit` clean · `npx vitest run` 58 passed · `npx vite build` succeeded.
 
-**Commit(s):** _pending in this session_ (previous head `ae099d2`).
+**Commit(s):** `f8a008e` (pushed to `main`; previous head `ae099d2`).
 
 **Next:** #1 download speed (route eligible yt-dlp through aria2 / tune fragments — needs a **public** test file) and
 #30 expanded logging + large-file tuning; then #2 subtitles + #28 video overlay controls; then the bigger #3/#9
