@@ -153,18 +153,22 @@ strong fit** — it formalizes item #17 and builds on the existing Library + pla
 Model: a "Collection" (liked/rated + user playlists) stored in sqlite, layered over the existing library scan; a track
 can be `local` or `streamable`; the player queue already exists. Start with likes + local playlists + an Albums view.
 
-**B. Equalizer + audio profiles.** **Recommendation: YES.** Fully doable in-app with the Web Audio API
-(`AudioContext` + a chain of `BiquadFilterNode`s) on the player's audio element — no drivers, no native code. Ship
-named profiles (Flat, Bass, Vocal, Warm, etc.) each with a one-line description, plus a custom band UI. Place it in the
-**player** (a dedicated EQ panel/sheet), not buried in Settings, so it doesn't clutter. Optional stretch: output-device
-picker and, on Windows, WASAPI exclusive/bit-perfect output for quality.
+**B. Equalizer + audio profiles.** **DONE (2026-09-17, opt-in; needs live audio test).** Implemented with the Web
+Audio API — a lazily-built `AudioContext` + 5 `BiquadFilterNode` peaking bands over the single `media` element
+(`src/renderer/src/lib/audio.ts`; profiles in `src/core/equalizer.ts`). Built-in profiles (Flat, Bass boost, Vocal,
+Treble, Warm, Loudness) each with a description, plus a Custom 5-band curve. UI is a **player** Dock popover
+(`views/player/AudioPanel.tsx`), not Settings. **Also (this session, per user request):** output-device switching via
+`HTMLMediaElement.setSinkId`, and **system-tray quick-controls** for both output device and EQ profile (tray writes
+`settings.player.*` → `settings:changed` → the renderer audio engine applies). EQ is off by default, so normal
+playback is untouched until the user opts in. **Still needs the user's live test** (audio routing can't be verified in
+the headless harness). Optional future stretch: WASAPI exclusive/bit-perfect output on Windows.
 
-**C. Audio-driver detection + auto-download/update.** **Recommendation: NO — do not build this.** Downloading and
-installing system audio drivers is high-risk and largely infeasible to do safely: it needs elevation, OEM drivers
-can't be legally redistributed, wrong/generic drivers can break audio, and an app that fetches-and-installs drivers
-will trip SmartScreen/AV and create liability. The real sound-quality win is achieved by **B** (in-app EQ + high-
-quality resampling + exclusive/bit-perfect output). If hardware detection is wanted, use it only to *inform* (show the
-active output device and offer the in-app high-quality path) and leave actual driver updates to the OS/vendor tools.
+**C. Audio-driver detection + auto-download/update.** **Recommendation: NO — do not build this** (user agreed —
+instead we added output-device switching under **B**). Installing system audio drivers is high-risk and largely
+infeasible to do safely: it needs elevation, OEM drivers can't be legally redistributed, wrong/generic drivers can
+break audio, and an app that fetches-and-installs drivers will trip SmartScreen/AV and create liability. The real
+sound-quality win comes from **B**. Hardware detection, if ever wanted, should only *inform* (show the active output
+device) and leave actual driver updates to the OS/vendor tools.
 
 ## 9. Architecture pointers
 

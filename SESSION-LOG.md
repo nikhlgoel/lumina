@@ -5,6 +5,38 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-09-17 (2) — Audio output switching + equalizer + tray quick-controls (idea B)
+
+**Context:** User asked to add audio **output-device switching** (for people with multiple outputs), **tray menu
+controls** to change it quickly, and a **quick equalizer profile change** from the tray. This lands idea B (EQ) and
+replaces idea C (driver auto-updater) with output-device switching, per the user.
+
+**Done:**
+- **Equalizer engine** (`src/renderer/src/lib/audio.ts`): lazy Web Audio graph (`AudioContext` + 5 `BiquadFilter`
+  peaking bands) over the single `media` element. Off by default → normal playback path is untouched until opt-in.
+- **Profiles** (`src/core/equalizer.ts`): Flat, Bass boost, Vocal, Treble, Warm, Loudness (+ Custom 5-band), each with
+  a description. Pure helpers (`gainsFor`/`normalizeBands`/`profileById`) + unit tests (`tests/equalizer.test.ts`).
+- **Output-device switching:** `setSinkId` on the media element; renderer enumerates outputs and reports them to main
+  (`audio:report-devices` IPC) for the tray.
+- **System-tray quick-controls** (`src/main/tray.ts`): "Audio output" and "Equalizer" submenus (radio items). Tray
+  writes `settings.player.*` → `settings:changed` → the renderer audio engine applies. Tray rebuilds on settings
+  change to keep the radio marks correct.
+- **In-app UI:** a Sound popover in the player Dock (`views/player/AudioPanel.tsx`) — output-device select, EQ on/off,
+  profile chips, and Custom band sliders.
+- **Settings:** `player.outputDeviceId`, `player.eqEnabled`, `player.eqProfile`, `player.eqBands`.
+- **CORS fix:** added `Access-Control-Allow-Origin: *` to the `lumina-media://` file + remux responses so
+  `createMediaElementSource` doesn't mute a "cross-origin" tap (`src/main/media/protocol.ts`).
+
+**Verification:** `tsc` clean · `vitest` 63 passed · `vite build` ok · host self-test boots clean (captcha/detection/
+plan/queue checks PASS; no crash from tray/IPC/protocol changes). **⚠ Needs the user's live audio test:** the actual
+sound of the EQ and the output-device switch can't be verified in the headless harness.
+
+**Commit(s):** _pending in this session._
+
+**Next:** live-verify audio with the user; then #1 speed + #30 logging.
+
+---
+
 ## 2026-09-17 — Queue clarity (#31), library view modes (#32), handover docs
 
 **Context:** Continuing the 30-item testing-feedback fixes (Phase 1 stability). User added two items (#31 queue

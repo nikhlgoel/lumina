@@ -1,8 +1,11 @@
-import { app, Menu, Tray, nativeImage, type NativeImage } from 'electron';
+import { app, Menu, Tray, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { AudioOutputDevice } from '../shared/ipc';
+import { EQ_PROFILES } from '../core/equalizer';
 import { iconPath } from './paths';
+import { settings } from './settings';
 import { mainWindow, showWindow } from './window';
 import { queue } from './jobs/queue';
 import { logger } from './log';
@@ -10,8 +13,52 @@ import { logger } from './log';
 const log = logger('tray');
 let tray: Tray | null = null;
 let playback = { playing: false, title: null as string | null, artist: null as string | null };
+let audioOutputs: AudioOutputDevice[] = [];
 let lastActive = -1;
 let rebuildTimer: NodeJS.Timeout | null = null;
+
+/** Windows exposes pseudo-devices we don't want to list separately from "System default". */
+const isRealDevice = (d: AudioOutputDevice) => d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications';
+
+/** Submenu to switch the audio output device straight from the tray. */
+function audioOutputSubmenu(): MenuItemConstructorOptions[] {
+  const selected = settings.get().player.outputDeviceId;
+  const items: MenuItemConstructorOptions[] = [
+    { label: 'System default', type: 'radio', checked: !selected, click: () => settings.update({ player: { outputDeviceId: '' } }) },
+  ];
+  const real = audioOutputs.filter(isRealDevice);
+  if (real.length) items.push({ type: 'separator' });
+  for (const d of real) {
+    items.push({
+      label: (d.label || 'Audio device').slice(0, 80),
+      type: 'radio',
+      checked: selected === d.deviceId,
+      click: () => settings.update({ player: { outputDeviceId: d.deviceId } }),
+    });
+  }
+  return items;
+}
+
+/** Submenu to switch the equalizer profile (or turn it off) straight from the tray. */
+function equalizerSubmenu(): MenuItemConstructorOptions[] {
+  const p = settings.get().player;
+  const items: MenuItemConstructorOptions[] = [
+    { label: 'Off', type: 'radio', checked: !p.eqEnabled, click: () => settings.update({ player: { eqEnabled: false } }) },
+    { type: 'separator' },
+  ];
+  for (const prof of EQ_PROFILES) {
+    items.push({
+      label: prof.name,
+      type: 'radio',
+      checked: p.eqEnabled && p.eqProfile === prof.id,
+      click: () => settings.update({ player: { eqEnabled: true, eqProfile: prof.id } }),
+    });
+  }
+  if (p.eqEnabled && p.eqProfile === 'custom') {
+    items.push({ type: 'separator' }, { label: 'Custom (set in the player)', type: 'radio', checked: true, enabled: false });
+  }
+  return items;
+}
 
 /** Loads "name.png" plus "name@2x.png" so the tray stays sharp at 150–200% scaling. */
 function trayImage(name: string): NativeImage {
@@ -64,6 +111,9 @@ function rebuild() {
     { label: 'Next', enabled: Boolean(playback.title), click: () => sendCommand('next') },
     { label: 'Previous', enabled: Boolean(playback.title), click: () => sendCommand('previous') },
     { type: 'separator' },
+    { label: 'Audio output', submenu: audioOutputSubmenu() },
+    { label: 'Equalizer', submenu: equalizerSubmenu() },
+    { type: 'separator' },
     { label: 'Open player', click: () => showWindow('player') },
     { label: 'Open Lumina', click: () => showWindow('downloader') },
     { label: active ? `${active} download${active > 1 ? 's' : ''} in progress` : 'No active downloads', enabled: false },
@@ -87,6 +137,8 @@ export function createTray() {
   tray.on('click', () => showWindow());
   tray.on('double-click', () => showWindow('player'));
   queue.on('updated', scheduleRebuild);
+  // Reflect tray-driven (or in-app) audio-output / equalizer changes back in the menu's radio marks.
+  settings.on('changed', scheduleRebuild);
   rebuild();
 
   if (process.platform === 'win32') {
@@ -102,6 +154,12 @@ export function createTray() {
 export function updateTrayPlayback(state: typeof playback) {
   playback = state;
   rebuild();
+}
+
+/** The renderer reports the machine's audio outputs so the tray can offer them. */
+export function setAudioOutputs(devices: AudioOutputDevice[]) {
+  audioOutputs = devices;
+  if (tray) scheduleRebuild();
 }
 
 /** Start with system, launching hidden in the tray. */

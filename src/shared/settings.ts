@@ -132,6 +132,13 @@ export const settingsSchema = z.object({
     lyricsSize: z.enum(['small', 'medium', 'large']).catch('medium'),
     openPlayerOnPlay: z.boolean().catch(false),
     showKeyboardHints: z.boolean().catch(true),
+    /** Empty = the system default audio output; otherwise a mediaDevices deviceId. */
+    outputDeviceId: z.string().max(255).catch(''),
+    eqEnabled: z.boolean().catch(false),
+    /** A built-in profile id (see core/equalizer) or 'custom'. */
+    eqProfile: z.string().max(40).catch('flat'),
+    /** Custom band gains in dB (one per EQ band); only used when eqProfile === 'custom'. */
+    eqBands: z.array(z.coerce.number().min(-12).max(12)).max(16).catch([0, 0, 0, 0, 0]),
   }),
 
   network: section({

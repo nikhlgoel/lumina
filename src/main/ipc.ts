@@ -20,7 +20,7 @@ import { library } from './library';
 import { getLyrics } from './lyrics';
 import { MEDIA_SCHEME } from './media/protocol';
 import { currentMode, mainWindow, setMode } from './window';
-import { updateTrayPlayback } from './tray';
+import { setAudioOutputs, updateTrayPlayback } from './tray';
 import { listAccounts, signIn, signOut } from './services/accounts';
 import { connectSpotify, disconnectSpotify, SPOTIFY_REDIRECT, spotifyStatus } from './services/spotify';
 import { bridge, pairedBrowsers, revokeBrowser } from './bridge/server';
@@ -197,6 +197,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
     const item = library.getById(id);
     if (item) library.savePosition(item.path, positionSec);
   },
+  'audio:report-devices': ({ devices }: { devices: { deviceId: string; label: string }[] }) => setAudioOutputs(devices),
 
   'lyrics:get': (q: { title: string; artist: string | null; durationSec: number | null; path: string | null }) => {
     if (q.path && !library.isAllowedPath(q.path)) q.path = null;

@@ -121,6 +121,9 @@ export const inputSchemas = {
     artist: z.string().max(300).nullable(),
   }),
   'player:save-position': z.object({ id: z.string().min(1).max(200), positionSec: z.number().min(0).max(1e7) }),
+  'audio:report-devices': z.object({
+    devices: z.array(z.object({ deviceId: z.string().max(255), label: z.string().max(255) })).max(64),
+  }),
   'accounts:list': z.void(),
   'accounts:sign-in': z.object({ target: z.string().min(1).max(2048) }),
   'accounts:sign-out': z.object({ domain: z.string().min(1).max(255) }),
@@ -150,6 +153,7 @@ export interface ExtensionStatus {
   paired: { id: string; browser: string; createdAt: number; lastUsedAt: number }[];
 }
 export interface DiskUsage { label: string; path: string; freeBytes: number | null; totalBytes: number | null }
+export interface AudioOutputDevice { deviceId: string; label: string }
 
 /* ---------- Output types ---------- */
 
@@ -200,6 +204,7 @@ export interface InvokeOutputs {
   'window:close': void;
   'player:state': void;
   'player:save-position': void;
+  'audio:report-devices': void;
   'accounts:list': SiteAccountInfo[];
   'accounts:sign-in': SiteAccountInfo[];
   'accounts:sign-out': SiteAccountInfo[];

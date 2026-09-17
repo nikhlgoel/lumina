@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { errorMessage } from '@/lib/bridge';
+import { initAudio } from '@/lib/audio';
 import { useApp, type View } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
 import { useLibrary } from '@/stores/library';
@@ -67,6 +68,7 @@ export function App() {
         media.volume = player.volume;
         usePlayer.setState({ volume: player.volume, stage: player.autoOpenLyrics ? 'lyrics' : 'art' });
       }
+      initAudio();
     })().catch((err) => setFailure(errorMessage(err)));
   }, []);
 

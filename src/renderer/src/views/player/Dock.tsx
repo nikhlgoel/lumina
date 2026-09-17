@@ -1,10 +1,11 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Captions, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Captions, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
 import type { PlayableItem } from '@shared/types';
 import { formatDuration } from '@core/format';
 import { cn } from '@/lib/cn';
 import { usePlayer, type StageView } from '@/stores/player';
 import { useApp } from '@/stores/app';
+import { AudioPanel } from './AudioPanel';
 
 function SeekBar() {
   const time = usePlayer((s) => s.time);
@@ -62,6 +63,8 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
 }) {
   const p = usePlayer();
   const hints = useApp((s) => s.settings?.player.showKeyboardHints ?? true);
+  const eqOn = useApp((s) => s.settings?.player.eqEnabled ?? false);
+  const [audioOpen, setAudioOpen] = useState(false);
   const isVideo = item.kind === 'video';
   const tabs: { id: StageView; label: string }[] = [{ id: 'art', label: isVideo ? 'Video' : 'Art' }, { id: 'lyrics', label: 'Lyrics' }];
 
@@ -113,6 +116,10 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
           {isVideo && (
             <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label="English subtitles" title="Subtitles (C)" aria-pressed={p.subtitles} onClick={p.toggleSubtitles}><Captions className="size-5" /></button>
           )}
+          <div className="relative">
+            <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label="Sound and equalizer" title="Sound & equalizer" aria-pressed={eqOn || audioOpen} aria-haspopup="dialog" aria-expanded={audioOpen} onClick={() => setAudioOpen((v) => !v)}><SlidersHorizontal className="size-5" /></button>
+            {audioOpen && <AudioPanel onClose={() => setAudioOpen(false)} />}
+          </div>
           <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label={p.muted ? 'Unmute' : 'Mute'} title="Mute (M)" onClick={p.toggleMute}>
             {p.muted || p.volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
           </button>

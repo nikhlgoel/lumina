@@ -29,7 +29,8 @@ function fileResponse(file: string, request: Request): Response {
   const stat = fs.statSync(file);
   const type = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
   const range = request.headers.get('range');
-  const headers: Record<string, string> = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+  // ACAO makes the stream CORS-clean so the player's Web Audio equalizer graph can tap it without muting.
+  const headers: Record<string, string> = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' };
   if (range) {
     const m = range.match(/bytes=(\d*)-(\d*)/);
     let start = m?.[1] ? Number(m[1]) : 0;
@@ -99,7 +100,7 @@ function remux(id: string, startSec: number): Response {
       killTree(child);
     },
   });
-  return new Response(stream, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' } });
+  return new Response(stream, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
 }
 
 export function handleMediaProtocol() {
