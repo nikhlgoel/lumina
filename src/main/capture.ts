@@ -39,6 +39,8 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '32-sidebar-expanded', script: "document.querySelector('button[aria-label=\"Expand sidebar\"]').click()", delay: 900 },
   { name: '33-about-bottom', script: "document.documentElement.dataset.theme='dark'; [...document.querySelectorAll('nav[aria-label=Main] button')][4].click(); setTimeout(() => { const s = document.querySelector('main .overflow-auto'); if (s) s.scrollTop = s.scrollHeight; }, 500)", delay: 1400 },
   { name: '40-shortcuts', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))", delay: 900 },
+  { name: '41-supported-sites', script: "document.documentElement.dataset.theme='dark'; [...document.querySelectorAll('nav[aria-label=Main] button')][4].click(); setTimeout(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('every site')); if (b) b.click(); }, 600)", delay: 4000 },
+  { name: '42-supported-sites-search', script: "(() => { const i = document.querySelector('input[aria-label=\"Search supported sites\"]'); if (!i) return; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'tube'); i.dispatchEvent(new Event('input', { bubbles: true })); })()", delay: 900 },
   { name: '20-splash-a', script: 'location.reload()', delay: 380 },
   { name: '21-splash-b', script: 'location.reload()', delay: 720 },
   { name: '22-splash-c', script: 'location.reload()', delay: 1050 },

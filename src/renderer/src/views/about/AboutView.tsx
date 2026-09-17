@@ -1,12 +1,12 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowUpRight, Bug, Check, Copy, Sparkles } from 'lucide-react';
 import type { ToolName } from '@shared/types';
 import { useApp } from '@/stores/app';
 import { BrandMark, TitleBar } from '@/components/Shell';
+import { SupportedSites } from '@/components/SupportedSites';
 
 const REPO_URL = 'https://github.com/nikhlgoel/lumina';
 const ISSUES_URL = `${REPO_URL}/issues/new`;
-const SITES_URL = 'https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md';
 
 /** The projects Lumina is built on. Bundled command-line tools are annotated with their live version. */
 const TECH: { name: string; role: string; tool?: ToolName; url: string }[] = [
@@ -54,6 +54,7 @@ export function AboutView() {
   const info = useApp((s) => s.info);
   const tools = useApp((s) => s.tools);
   const toast = useApp((s) => s.toast);
+  const [sitesOpen, setSitesOpen] = useState(false);
   const versionOf = (name?: ToolName) => (name ? tools.find((t) => t.name === name && t.ok)?.version ?? null : null);
 
   const copyDiagnostics = async () => {
@@ -70,6 +71,7 @@ export function AboutView() {
   };
 
   return (
+    <>
     <div className="flex h-full flex-col">
       <TitleBar />
       <div className="min-h-0 flex-1 overflow-auto">
@@ -90,15 +92,13 @@ export function AboutView() {
             speed caps. It picks the right sources and formats for you, so downloading stays simple even when the
             web makes it complicated.
           </p>
-          <a
-            href={SITES_URL}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => setSitesOpen(true)}
             className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-accent transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-accent rounded outline-none"
           >
             See every site Lumina can download from
             <ArrowUpRight className="size-4" />
-          </a>
+          </button>
 
           {/* Capabilities */}
           <div className="mt-10 grid gap-4 md:grid-cols-2">
@@ -208,5 +208,7 @@ export function AboutView() {
         </div>
       </div>
     </div>
+    <SupportedSites open={sitesOpen} onClose={() => setSitesOpen(false)} />
+    </>
   );
 }

@@ -12,6 +12,7 @@ import { settings } from './settings';
 import { tools } from './tools';
 import { inspect } from './inspect';
 import { queue } from './jobs/queue';
+import { runTool } from './process';
 import { challengeAction, currentChallenge, placeChallenge } from './hosters';
 import { queueConversion, queueSubtitleGeneration } from './jobs/cpu';
 import { library } from './library';
@@ -78,6 +79,18 @@ export function extensionStatus(): ExtensionStatus {
 
 const spotify = (): SpotifyStatus => ({ ...spotifyStatus(), redirectUri: SPOTIFY_REDIRECT });
 
+// The exact list of sites the bundled yt-dlp can handle, cached after the first call.
+let sitesCache: string[] | null = null;
+async function supportedSites(): Promise<string[]> {
+  if (sitesCache) return sitesCache;
+  const r = await runTool(tools.require('yt-dlp'), ['--list-extractors'], { env: tools.env(), timeoutMs: 60_000 });
+  const names = r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  sitesCache = [...new Set(names)]
+    .filter((n) => n.toLowerCase() !== 'generic' && !/^testurl/i.test(n))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return sitesCache;
+}
+
 function dirSize(dir: string): number {
   let total = 0;
   try {
@@ -100,6 +113,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
 
   'tools:status': () => tools.list(),
   'tools:update-ytdlp': () => tools.updateYtdlp(),
+  'tools:supported-sites': () => supportedSites(),
 
   'settings:get': () => settings.get(),
   'settings:update': (patch: SettingsPatch) => settings.update(patch),

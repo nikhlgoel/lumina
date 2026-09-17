@@ -62,6 +62,7 @@ export const inputSchemas = {
   'app:info': z.void(),
   'tools:status': z.void(),
   'tools:update-ytdlp': z.void(),
+  'tools:supported-sites': z.void(),
   'settings:get': z.void(),
   'settings:update': z.record(z.string(), z.record(z.string(), z.unknown())),
   'presets:list': z.void(),
@@ -148,6 +149,7 @@ export interface InvokeOutputs {
   'app:info': AppInfo;
   'tools:status': ToolStatus[];
   'tools:update-ytdlp': ToolStatus;
+  'tools:supported-sites': string[];
   'settings:get': Settings;
   'settings:update': Settings;
   'presets:list': Preset[];
