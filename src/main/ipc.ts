@@ -14,6 +14,7 @@ import { inspect } from './inspect';
 import { queue } from './jobs/queue';
 import { runTool } from './process';
 import { challengeAction, currentChallenge, placeChallenge } from './hosters';
+import { browserBack, browserBounds, browserForward, browserGo, browserHide, browserReload, browserShow, browserStop } from './browser';
 import { queueConversion, queueSubtitleGeneration } from './jobs/cpu';
 import { library } from './library';
 import { getLyrics } from './lyrics';
@@ -158,6 +159,14 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'hosts:challenge-current': () => currentChallenge(),
   'hosts:challenge-frame': ({ id, ...rect }: { id: string; x: number; y: number; width: number; height: number }) => placeChallenge(id, rect),
   'hosts:challenge-action': ({ id, action }: { id: string; action: 'reload' | 'skip' }) => challengeAction(id, action),
+  'browser:go': ({ url }: { url: string }) => browserGo(url),
+  'browser:back': () => browserBack(),
+  'browser:forward': () => browserForward(),
+  'browser:reload': () => browserReload(),
+  'browser:stop': () => browserStop(),
+  'browser:show': (r: { x: number; y: number; width: number; height: number }) => browserShow(r),
+  'browser:hide': () => browserHide(),
+  'browser:bounds': (r: { x: number; y: number; width: number; height: number }) => browserBounds(r),
   'jobs:convert': ({ paths, format }: { paths: string[]; format: FormatChoice }) => {
     paths.forEach(assertKnownPath);
     return queueConversion(paths, format);

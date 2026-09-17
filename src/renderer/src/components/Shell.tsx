@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, ChevronUp, CircleCheck, CircleX, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronUp, CircleCheck, CircleX, Globe, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatSpeed, plural } from '@core/format';
 import { cn } from '@/lib/cn';
@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { view: 'download', label: 'Download', icon: <ArrowDownToLine />, shortcut: `${mod}1` },
   { view: 'queue', label: 'Queue', icon: <ListTodo />, shortcut: `${mod}2` },
   { view: 'library', label: 'Library', icon: <Library />, shortcut: `${mod}3` },
+  { view: 'browser', label: 'Browser', icon: <Globe />, shortcut: `${mod}4` },
   { view: 'settings', label: 'Settings', icon: <Settings />, shortcut: `${mod},` },
 ];
 const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };

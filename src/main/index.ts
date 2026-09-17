@@ -20,6 +20,7 @@ import { applyGlobalShortcut, watchClipboard } from './shortcuts';
 import { watchQueuePower } from './power';
 import { iconPath } from './paths';
 import { takeOverDownload } from './bridge/handoff';
+import { browserEvents } from './browser';
 import type { Job } from '../shared/types';
 
 /**
@@ -54,6 +55,9 @@ function openLink(url: string, source: 'extension' | 'clipboard' | 'system', req
   if (wc?.isLoading()) wc.once('did-finish-load', send);
   else send();
 }
+
+// A download started in the in-app browser is caught and handed to the downloader to pick a format and pull it.
+browserEvents.on('download', (dl) => openLink(dl.url, 'system'));
 
 function notify(title: string, body: string, onClick?: () => void) {
   if (!Notification.isSupported()) return;

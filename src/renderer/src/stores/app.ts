@@ -4,7 +4,7 @@ import type { AppInfo, Preset, RequestInfo, ToolStatus } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { transition } from '@/lib/motion';
 
-export type View = 'download' | 'queue' | 'library' | 'settings' | 'about';
+export type View = 'download' | 'queue' | 'library' | 'settings' | 'about' | 'browser';
 export type Mode = 'downloader' | 'player';
 
 export interface Toast {

@@ -13,6 +13,7 @@ import { QueueView } from '@/views/queue/QueueView';
 import { LibraryView } from '@/views/library/LibraryView';
 import { SettingsView } from '@/views/settings/SettingsView';
 import { AboutView } from '@/views/about/AboutView';
+import { BrowserView } from '@/views/browser/BrowserView';
 import { PlayerView } from '@/views/player/PlayerView';
 
 function useAppearance() {
@@ -46,6 +47,7 @@ const VIEWS: Record<View, () => React.JSX.Element | null> = {
   library: LibraryView,
   settings: SettingsView,
   about: AboutView,
+  browser: BrowserView,
 };
 
 export function App() {
@@ -71,7 +73,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || useApp.getState().mode === 'player') return;
-      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', ',': 'settings' };
+      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', '4': 'browser', ',': 'settings' };
       const target = map[e.key];
       if (target) {
         e.preventDefault();

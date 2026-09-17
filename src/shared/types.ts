@@ -303,6 +303,16 @@ export interface AppInfo {
   startMode: 'downloader' | 'player';
 }
 
+/* ---------- In-app browser ---------- */
+
+export interface BrowserState {
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
 /* ---------- File-host pages that need a person ---------- */
 
 export interface HostChallenge {

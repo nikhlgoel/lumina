@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type {
-  AppInfo, DownloadOptions, FormatChoice, HostChallenge, Job, LibraryItem, LibraryPlaylist, LibraryStats,
+  AppInfo, BrowserState, DownloadOptions, FormatChoice, HostChallenge, Job, LibraryItem, LibraryPlaylist, LibraryStats,
   Lyrics, MediaInfo, PlayableItem, Preset, RequestInfo, ToolStatus,
 } from './types';
 import type { Settings, SettingsPatch } from './settings';
@@ -81,6 +81,14 @@ export const inputSchemas = {
     width: z.number().min(0).max(20_000), height: z.number().min(0).max(20_000),
   }),
   'hosts:challenge-action': z.object({ id: z.string().min(1).max(64), action: z.enum(['reload', 'skip']) }),
+  'browser:go': z.object({ url: z.string().max(4096) }),
+  'browser:back': z.void(),
+  'browser:forward': z.void(),
+  'browser:reload': z.void(),
+  'browser:stop': z.void(),
+  'browser:show': z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+  'browser:hide': z.void(),
+  'browser:bounds': z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
   'jobs:convert': z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(2000), format: formatChoiceSchema }),
   'subtitles:generate': path,
   'library:stats': z.void(),
@@ -164,6 +172,14 @@ export interface InvokeOutputs {
   'jobs:clear-finished': void;
   'hosts:challenge-current': HostChallenge | null;
   'hosts:challenge-frame': void;
+  'browser:go': void;
+  'browser:back': void;
+  'browser:forward': void;
+  'browser:reload': void;
+  'browser:stop': void;
+  'browser:show': void;
+  'browser:hide': void;
+  'browser:bounds': void;
   'hosts:challenge-action': void;
   'jobs:convert': Job[];
   'subtitles:generate': Job;
@@ -235,6 +251,7 @@ export interface EventPayloads {
   'extension:changed': ExtensionStatus;
   'hosts:challenge': HostChallenge;
   'hosts:challenge-done': { id: string };
+  'browser:state': BrowserState;
 }
 
 export type EventChannel = keyof EventPayloads;
