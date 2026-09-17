@@ -1,123 +1,75 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import type { LuminaSettings } from '../preload/types';
+import { app } from 'electron';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import { mergeSettings, settingsSchema, type Settings, type SettingsPatch } from '../shared/settings';
+import { settingsFile } from './paths';
+import { logger } from './log';
 
-function resolveDefaultPlatformPaths() {
-  const home = os.homedir();
-  const isWin = process.platform === 'win32';
-  const isAndroid = process.platform === 'android' || fs.existsSync('/storage/emulated/0');
+const log = logger('settings');
 
-  let configDir: string;
-  let videoPath: string;
-  let musicPath: string;
-  let downloadPath: string;
-
-  if (isAndroid) {
-    configDir = '/storage/emulated/0/Download/Lumina/.config';
-    videoPath = '/storage/emulated/0/Movies/Lumina';
-    musicPath = '/storage/emulated/0/Music/Lumina';
-    downloadPath = '/storage/emulated/0/Download/Lumina';
-  } else if (isWin) {
-    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-    configDir = path.join(appData, 'Lumina');
-    videoPath = path.join(home, 'Videos', 'Lumina');
-    musicPath = path.join(home, 'Music', 'Lumina');
-    downloadPath = path.join(home, 'Downloads', 'Lumina');
-  } else {
-    // Linux / macOS
-    const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
-    configDir = path.join(xdgConfig, 'lumina');
-    const xdgVideos = process.env.XDG_VIDEOS_DIR || path.join(home, 'Videos');
-    videoPath = path.join(xdgVideos, 'Lumina');
-    const xdgMusic = process.env.XDG_MUSIC_DIR || path.join(home, 'Music');
-    musicPath = path.join(xdgMusic, 'Lumina');
-    const xdgDownloads = process.env.XDG_DOWNLOAD_DIR || path.join(home, 'Downloads');
-    downloadPath = path.join(xdgDownloads, 'Lumina');
+function withOsDefaults(s: Settings): Settings {
+  const storage = { ...s.storage };
+  const lumina = (dir: string) => path.join(dir, 'Lumina');
+  if (!storage.musicDir) storage.musicDir = lumina(app.getPath('music'));
+  if (!storage.videoDir) storage.videoDir = lumina(app.getPath('videos'));
+  if (!storage.seriesDir) storage.seriesDir = path.join(storage.videoDir, 'Series');
+  if (!storage.otherDir) storage.otherDir = lumina(app.getPath('downloads'));
+  if (!storage.libraryRoots.length) {
+    storage.libraryRoots = [app.getPath('music'), app.getPath('videos')];
   }
-
-  return { configDir, videoPath, musicPath, downloadPath };
+  return { ...s, storage };
 }
 
-const PLATFORM_PATHS = resolveDefaultPlatformPaths();
-const CONFIG_DIR = PLATFORM_PATHS.configDir;
-const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
+class SettingsStore extends EventEmitter<{ changed: [Settings] }> {
+  private current: Settings = withOsDefaults(settingsSchema.parse({}));
 
-const DEFAULT_SETTINGS: LuminaSettings = {
-  theme: 'onyx',
-  colorMode: 'dark',
-  ambientShader: true,
-  blurIntensity: 20,
-  defaultVideoRes: 'max',
-  defaultAudioFormat: 'mp3',
-  autoSaveToUsb: true,
-  usbFolderName: 'LuminaMedia',
-  internalVideoPath: PLATFORM_PATHS.videoPath,
-  internalMusicPath: PLATFORM_PATHS.musicPath,
-  internalDownloadPath: PLATFORM_PATHS.downloadPath,
-  maxConcurrentDownloads: 2,
-  batchConcurrency: 3,
-  speedLimit: 0,
-  browserForCookies: 'none',
-  turboConnections: 16,
-  enableTurboMode: true,
-  enableBitTorrent: true,
-  anonymizeRequests: true
-};
-
-export class SettingsManager {
-  private settings: LuminaSettings;
-
-  constructor() {
-    this.settings = this.load();
-    this.ensureDirectories();
-  }
-
-  public get(): LuminaSettings {
-    return { ...this.settings };
-  }
-
-  public save(newSettings: Partial<LuminaSettings>): LuminaSettings {
-    this.settings = { ...this.settings, ...newSettings };
+  load(): Settings {
     try {
-      if (!fs.existsSync(CONFIG_DIR)) {
-        fs.mkdirSync(CONFIG_DIR, { recursive: true });
-      }
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(this.settings, null, 2), 'utf8');
-      this.ensureDirectories();
+      const raw = fs.existsSync(settingsFile()) ? JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) : {};
+      this.current = withOsDefaults(settingsSchema.parse(raw));
     } catch (err) {
-      console.error('Failed to save settings:', err);
+      log.warn('Settings file unreadable; using defaults', err);
+      this.current = withOsDefaults(settingsSchema.parse({}));
     }
-    return this.get();
+    return this.current;
   }
 
-  private load(): LuminaSettings {
+  get(): Settings {
+    return this.current;
+  }
+
+  update(patch: SettingsPatch): Settings {
+    return this.replace(mergeSettings(this.current, patch));
+  }
+
+  /** Replace everything (import), re-validating so a hand-edited file can't break the app. */
+  replace(next: unknown): Settings {
+    this.current = withOsDefaults(settingsSchema.parse(next));
+    this.persist();
+    this.emit('changed', this.current);
+    return this.current;
+  }
+
+  /** Reset one section, or everything except saved folders. */
+  reset(section?: string): Settings {
+    const defaults = settingsSchema.parse({});
+    if (section && section in defaults && section !== 'version') {
+      return this.replace({ ...this.current, [section]: defaults[section as keyof Settings] });
+    }
+    return this.replace({ ...defaults, storage: this.current.storage });
+  }
+
+  private persist() {
+    const file = settingsFile();
+    const tmp = `${file}.tmp`;
     try {
-      if (fs.existsSync(SETTINGS_FILE)) {
-        const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-      }
+      fs.writeFileSync(tmp, JSON.stringify(this.current, null, 2), 'utf8');
+      fs.renameSync(tmp, file);
     } catch (err) {
-      console.warn('Could not read settings file, using defaults', err);
-    }
-    return { ...DEFAULT_SETTINGS };
-  }
-
-  private ensureDirectories() {
-    try {
-      if (!fs.existsSync(this.settings.internalVideoPath)) {
-        fs.mkdirSync(this.settings.internalVideoPath, { recursive: true });
-      }
-      if (!fs.existsSync(this.settings.internalMusicPath)) {
-        fs.mkdirSync(this.settings.internalMusicPath, { recursive: true });
-      }
-      if (!fs.existsSync(this.settings.internalDownloadPath)) {
-        fs.mkdirSync(this.settings.internalDownloadPath, { recursive: true });
-      }
-    } catch (e) {
-      console.warn('Could not create default media directories:', e);
+      log.error('Could not save settings', err);
     }
   }
 }
 
-export const settingsManager = new SettingsManager();
+export const settings = new SettingsStore();

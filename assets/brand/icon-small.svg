@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Simplified crystal for 16–40 px: bold faces, no hexagram, heavy rim and play mark. -->
+  <polygon points="512,20 938,266 512,512 86,266" fill="#FFC27F"/>
+  <polygon points="86,266 512,512 512,1004 86,758" fill="#E8752F"/>
+  <polygon points="938,266 938,758 512,1004 512,512" fill="#A8441A"/>
+  <polygon points="512,20 938,266 938,758 512,1004 86,758 86,266" fill="none" stroke="#FFE9CC" stroke-width="44" stroke-linejoin="round"/>
+  <circle cx="512" cy="512" r="238" fill="#FFF1DE"/>
+  <path d="M452 392 L672 512 L452 632 Z" fill="#C4531B" stroke="#C4531B" stroke-width="36" stroke-linejoin="round"/>
+</svg>

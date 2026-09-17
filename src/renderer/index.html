@@ -1,18 +1,83 @@
-<!DOCTYPE html>
-<html lang="en" class="dark">
+<!doctype html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lumina</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: lumina-media:; media-src 'self' blob: lumina-media:; connect-src 'self' ws://localhost:* lumina-media:; object-src 'none'; base-uri 'none'; frame-src 'none'"
     />
-    <link rel="icon" type="image/png" href="./assets/lumina_3d.png" />
+    <title>Lumina</title>
+    <style>
+      /* Splash: painted before the app bundle loads, removed by main.tsx once React has rendered. */
+      #splash {
+        --bg: #f4f2ee; --ink: #1c1814; --muted: #6d655b;
+        position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: var(--bg);
+        transition: opacity 260ms cubic-bezier(.2,.7,.2,1), transform 260ms cubic-bezier(.2,.7,.2,1);
+      }
+      @media (prefers-color-scheme: dark) { #splash { --bg: #0d0c0b; --ink: #f1ede6; --muted: #a39c90; } }
+      #splash.done { opacity: 0; transform: scale(1.015); pointer-events: none; }
+      #splash .stage { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+      #splash svg { width: 132px; height: 132px; overflow: visible; }
+      #splash .shard {
+        transform-box: fill-box; transform-origin: center; opacity: 0;
+        animation: shard-in 620ms cubic-bezier(.16,1,.3,1) var(--d, 0ms) forwards;
+      }
+      @keyframes shard-in {
+        from { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scale(.6); }
+        60% { opacity: 1; }
+        to { opacity: var(--o, 1); transform: none; }
+      }
+      #splash .edges { stroke-dasharray: 100; stroke-dashoffset: 100; animation: draw 420ms ease-out 470ms forwards; }
+      @keyframes draw { to { stroke-dashoffset: 0; } }
+      #splash .orb { transform-box: fill-box; transform-origin: center; opacity: 0; animation: orb 340ms cubic-bezier(.34,1.56,.64,1) 620ms forwards; }
+      @keyframes orb { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: none; } }
+      #splash .flare { transform-box: fill-box; transform-origin: center; opacity: 0; animation: flare 700ms ease-out 760ms forwards; }
+      @keyframes flare { 0% { opacity: .55; transform: scale(.7); } 100% { opacity: 0; transform: scale(1.5); } }
+      #splash .word {
+        font: 400 30px/1 "Instrument Serif", Georgia, serif; letter-spacing: -.01em; color: var(--ink);
+        opacity: 0; transform: translateY(6px); animation: word 420ms ease-out 560ms forwards;
+      }
+      @keyframes word { to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        #splash .shard, #splash .orb, #splash .word { animation: none; opacity: var(--o, 1); transform: none; }
+        #splash .edges { animation: none; stroke-dashoffset: 0; }
+        #splash .flare { display: none; }
+      }
+    </style>
   </head>
-  <body class="bg-lumina-dark text-slate-100 overflow-hidden select-none font-sans antialiased">
+  <body>
+    <div id="splash" aria-hidden="true">
+      <div class="stage">
+        <svg viewBox="0 0 1024 1024">
+          <defs>
+            <linearGradient id="sp-top" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#FFE9C9"/><stop offset="0.5" stop-color="#FFBE7A"/><stop offset="1" stop-color="#F59A4E"/></linearGradient>
+            <linearGradient id="sp-left" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#F7A45C"/><stop offset="0.6" stop-color="#E4712C"/><stop offset="1" stop-color="#C4531B"/></linearGradient>
+            <linearGradient id="sp-right" x1="1" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#D86A2A"/><stop offset="0.55" stop-color="#A9441A"/><stop offset="1" stop-color="#7A2E12"/></linearGradient>
+            <radialGradient id="sp-orb" cx="0.4" cy="0.36" r="0.72"><stop offset="0" stop-color="#FFF8EE" stop-opacity="0.95"/><stop offset="0.45" stop-color="#FFD3A1" stop-opacity="0.6"/><stop offset="0.85" stop-color="#E9793A" stop-opacity="0.5"/><stop offset="1" stop-color="#B84C1A" stop-opacity="0.75"/></radialGradient>
+            <radialGradient id="sp-flare"><stop offset="0" stop-color="#F08A3E" stop-opacity="0.7"/><stop offset="1" stop-color="#F08A3E" stop-opacity="0"/></radialGradient>
+          </defs>
+          <circle class="flare" cx="512" cy="492" r="470" fill="url(#sp-flare)"/>
+          <polygon class="shard" style="--dx:-40px;--dy:-260px;--r:-28deg;--d:0ms" points="512,72 876,282 512,492 148,282" fill="url(#sp-top)"/>
+          <polygon class="shard" style="--dx:-280px;--dy:120px;--r:24deg;--d:50ms" points="148,282 512,492 512,912 148,702" fill="url(#sp-left)"/>
+          <polygon class="shard" style="--dx:290px;--dy:140px;--r:-22deg;--d:90ms" points="876,282 876,702 512,912 512,492" fill="url(#sp-right)"/>
+          <polygon class="shard" style="--dx:180px;--dy:-240px;--r:60deg;--d:120ms;--o:.38" points="512,72 876,282 633.3,282" fill="#FFF3E0"/>
+          <polygon class="shard" style="--dx:320px;--dy:-20px;--r:-50deg;--d:150ms;--o:.3" points="876,282 876,702 754.5,492" fill="#FFC58A"/>
+          <polygon class="shard" style="--dx:200px;--dy:260px;--r:40deg;--d:170ms;--o:.3" points="876,702 512,912 633.3,702" fill="#5C200B"/>
+          <polygon class="shard" style="--dx:-160px;--dy:280px;--r:-45deg;--d:140ms;--o:.28" points="512,912 148,702 390.7,702" fill="#FFB36B"/>
+          <polygon class="shard" style="--dx:-330px;--dy:-10px;--r:55deg;--d:110ms;--o:.22" points="148,702 148,282 269.5,492" fill="#7E2F12"/>
+          <polygon class="shard" style="--dx:-200px;--dy:-250px;--r:-60deg;--d:80ms;--o:.3" points="148,282 512,72 390.7,282" fill="#FFFFFF"/>
+          <polygon class="edges" pathLength="100" fill="none" stroke="#FFF1DE" stroke-opacity=".85" stroke-width="9" stroke-linejoin="round" points="512,72 876,282 876,702 512,912 148,702 148,282 512,72"/>
+          <polyline class="edges" pathLength="100" fill="none" stroke="#FFF1DE" stroke-opacity=".5" stroke-width="5" points="512,72 876,702 148,702 512,72 512,912 148,282 876,282 512,912"/>
+          <g class="orb">
+            <circle cx="512" cy="492" r="172" fill="url(#sp-orb)" stroke="#FFF2DF" stroke-opacity=".75" stroke-width="5"/>
+            <path d="M478 420 C478 406 492 398 504 405 L602 466 C613 473 613 488 602 495 L504 556 C492 563 478 555 478 541 Z" fill="#FFFFFF" opacity=".93"/>
+            <ellipse cx="452" cy="398" rx="70" ry="34" transform="rotate(-32 452 398)" fill="#FFFFFF" opacity=".5"/>
+          </g>
+        </svg>
+        <div class="word">Lumina</div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

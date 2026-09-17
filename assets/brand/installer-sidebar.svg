@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 314">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B221B"/>
+      <stop offset="1" stop-color="#0E0B09"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="82" cy="118" r="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F08A3E" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#F08A3E" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="164" height="314" fill="url(#g)"/>
+  <circle cx="82" cy="118" r="90" fill="url(#glow)"/>
+  <!--ICON-->
+  <text x="82" y="232" text-anchor="middle" font-family="Georgia, serif" font-size="30" fill="#F1EDE6">Lumina</text>
+  <text x="82" y="256" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="10" letter-spacing="1.6" fill="#A39C90">DOWNLOAD · PLAY</text>
+</svg>

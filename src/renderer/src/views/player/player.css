@@ -1,0 +1,97 @@
+/* Immersive player stage. Always dark, regardless of the app theme. */
+.player {
+  --p-ink: #f3f1f8;
+  --p-ink-2: rgb(243 241 248 / 0.72);
+  --p-ink-3: rgb(243 241 248 / 0.5);
+  --p-glass: rgb(255 255 255 / 0.06);
+  --p-line: rgb(255 255 255 / 0.12);
+  --p-accent: #ffd27a;
+  --p-c1: #7b5cff;
+  --p-c2: #ff7a59;
+  color: var(--p-ink);
+  background: #0b0a10;
+  isolation: isolate;
+}
+.player :focus-visible { outline-color: var(--p-accent); }
+
+.player .scrim { background: radial-gradient(120% 90% at 50% 40%, transparent 30%, rgb(5 4 10 / 0.55) 100%); }
+
+.p-btn { color: var(--p-ink-2); transition: background-color .2s var(--ease), color .2s, transform .1s; }
+.p-btn:hover { background: var(--p-glass); color: var(--p-ink); }
+.p-btn:active { transform: scale(.94); }
+.p-btn[aria-pressed="true"] { color: var(--p-accent); }
+
+.p-view { transition: opacity .45s var(--ease), transform .55s var(--ease), filter .45s; }
+.p-view[data-off] { opacity: 0; transform: scale(.97); filter: blur(8px); pointer-events: none; }
+
+.p-cover { width: min(56vh, 78vw, 440px); aspect-ratio: 1; border-radius: 18px; box-shadow: 0 40px 80px -30px rgb(0 0 0 / .75), 0 0 0 1px rgb(255 255 255 / .08); transition: transform .6s var(--ease); }
+.player:not([data-playing]) .p-cover { transform: scale(.92); }
+
+/* Seek bar */
+.p-bar { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.p-bar .track { height: 4px; width: 100%; border-radius: 4px; background: rgb(255 255 255 / .14); overflow: hidden; transition: height .15s; }
+.p-bar:hover .track, .p-bar[data-drag] .track { height: 6px; }
+.p-bar .fill { height: 100%; background: var(--p-ink); border-radius: inherit; }
+.p-bar .knob { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--p-ink); transform: translateX(-50%) scale(0); transition: transform .15s var(--ease); }
+.p-bar:hover .knob, .p-bar:focus-visible .knob, .p-bar[data-drag] .knob { transform: translateX(-50%) scale(1); }
+
+.p-range { accent-color: var(--p-ink); width: 92px; }
+
+/* Lyrics */
+.p-lyrics { mask-image: linear-gradient(transparent, #000 22%, #000 70%, transparent); }
+.p-lyrics-inner { transition: transform .8s var(--ease); }
+.p-line { display: block; width: 100%; text-align: left; padding: .18em 0; font-weight: 700; font-size: clamp(26px, 4vw, 48px); line-height: 1.15; letter-spacing: -.02em; color: rgb(255 255 255 / .28); transform-origin: left center; transition: color .5s, filter .6s, transform .6s var(--ease), opacity .6s; text-wrap: balance; }
+.p-line:hover { color: rgb(255 255 255 / .55); }
+.p-line[data-active] { color: var(--p-ink); transform: scale(1.03); text-shadow: 0 0 28px rgb(255 255 255 / .28); }
+.p-line[data-gap] { font-size: clamp(20px, 3vw, 32px); letter-spacing: .3em; }
+.p-line[data-plain] { font-size: clamp(20px, 2.6vw, 30px); color: rgb(255 255 255 / .8); cursor: default; }
+[data-player-theme="vinyl"] .p-line { font-family: var(--font-serif); font-weight: 400; font-size: clamp(30px, 4.6vw, 56px); letter-spacing: 0; }
+[data-player-theme="pocket"] .p-line { font-family: var(--font-lcd); font-weight: 400; font-size: clamp(30px, 4.4vw, 52px); letter-spacing: .02em; color: rgb(160 255 190 / .25); }
+[data-player-theme="pocket"] .p-line[data-active] { color: #b8ffcb; text-shadow: 0 0 14px rgb(120 255 160 / .7); }
+
+/* Vinyl */
+.p-deck { position: relative; width: min(60vh, 82vw, 500px); aspect-ratio: 1; }
+.p-record { position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle, transparent 0 33%, rgb(255 255 255 / .035) 33.3% 34%, transparent 34.2%), repeating-radial-gradient(circle, #101014 0 2px, #17171c 2px 3px);
+  box-shadow: 0 30px 70px -25px rgb(0 0 0 / .9), inset 0 0 0 1px rgb(255 255 255 / .05);
+  animation: p-spin 1.8s linear infinite; animation-play-state: paused; }
+.p-record::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 20deg, transparent 0 10%, rgb(255 255 255 / .09) 14%, transparent 20% 60%, rgb(255 255 255 / .06) 64%, transparent 70%); }
+.player[data-playing] .p-record { animation-play-state: running; }
+.p-label { position: absolute; inset: 32%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px rgb(0 0 0 / .4); }
+.p-label::after { content: ""; position: absolute; inset: 46%; border-radius: 50%; background: #0b0a10; }
+.p-tonearm { position: absolute; right: -4%; top: -2%; width: 44%; height: 70%; transform-origin: 82% 10%; transform: rotate(-24deg); transition: transform 1s var(--ease); pointer-events: none; }
+.player[data-playing] .p-tonearm { transform: rotate(4deg); }
+.p-tonearm i { position: absolute; left: 78%; top: 4%; width: 9%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #e8e2d6, #8b857a); box-shadow: 0 6px 14px rgb(0 0 0 / .6); }
+.p-tonearm b { position: absolute; left: 81%; top: 10%; width: 2.4%; height: 78%; background: linear-gradient(90deg, #b9b3a8, #efe9dd, #9c968b); border-radius: 4px; transform: rotate(18deg); transform-origin: top center; }
+.p-tonearm em { position: absolute; left: 52%; top: 82%; width: 12%; height: 9%; background: #2a2a30; border-radius: 3px; transform: rotate(18deg); }
+@keyframes p-spin { to { transform: rotate(360deg); } }
+
+/* Pocket */
+.p-pocket { width: min(420px, 86vw); padding: 18px; border-radius: 30px; background: linear-gradient(160deg, #ede7da, #cfc6b4); box-shadow: 0 40px 80px -30px rgb(0 0 0 / .8), inset 0 2px 0 rgb(255 255 255 / .7), inset 0 -4px 0 rgb(0 0 0 / .12); color: #2a2620; display: grid; gap: 14px; }
+.p-lcd { border-radius: 12px; padding: 10px 14px; background: #0f1f14; box-shadow: inset 0 2px 8px rgb(0 0 0 / .7); font-family: var(--font-lcd); color: #a6ffbe; text-shadow: 0 0 8px rgb(120 255 160 / .55); overflow: hidden; white-space: nowrap; }
+.p-lcd .marq { display: inline-block; font-size: 26px; padding-left: 100%; animation: p-marq 14s linear infinite; }
+.p-lcd .row { display: flex; justify-content: space-between; font-size: 20px; opacity: .8; }
+@keyframes p-marq { to { transform: translateX(-100%); } }
+.p-tape { position: relative; border-radius: 14px; padding: 16px; background: #2b2a2e; box-shadow: inset 0 0 0 2px rgb(255 255 255 / .05); }
+.p-sticker { border-radius: 8px; padding: 10px 12px 60px; background: linear-gradient(135deg, var(--p-c1), var(--p-c2)); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.p-window { position: absolute; left: 18%; right: 18%; bottom: 24px; height: 44px; border-radius: 22px; background: #151417; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; }
+.p-reel { width: 34px; height: 34px; border-radius: 50%; background: repeating-conic-gradient(#efe9dd 0 20deg, #151417 20deg 60deg); box-shadow: 0 0 0 5px #6b5a45; animation: p-spin 2.4s linear infinite reverse; animation-play-state: paused; }
+.player[data-playing] .p-reel { animation-play-state: running; }
+.p-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.p-keys span { height: 30px; border-radius: 8px; background: linear-gradient(#f7f3ea, #dcd3c1); box-shadow: 0 3px 0 #a89f8c, 0 5px 10px rgb(0 0 0 / .2); }
+.player[data-playing] .p-keys span:nth-child(2) { transform: translateY(3px); box-shadow: 0 0 0 #a89f8c, 0 2px 4px rgb(0 0 0 / .2); background: linear-gradient(#dcd3c1, #ede6d8); }
+
+/* Queue sheet */
+.p-sheet { background: rgb(16 14 22 / .82); backdrop-filter: blur(30px) saturate(1.3); border-left: 1px solid var(--p-line); transition: transform .4s var(--ease); }
+.p-sheet[data-closed] { transform: translateX(105%); }
+
+/* Video */
+.p-video video { width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 14px; }
+.p-video { --cue-base: clamp(18px, 2.6vh, 34px); }
+.player[data-lyrics-size="small"] .p-line { font-size: clamp(20px, 3vw, 36px); }
+.player[data-lyrics-size="large"] .p-line { font-size: clamp(32px, 5.2vw, 64px); }
+.player[data-video] .p-dock { transition: opacity .4s var(--ease), transform .4s var(--ease); }
+.player[data-video][data-idle] .p-dock, .player[data-video][data-idle] .p-top { opacity: 0; transform: translateY(8px); pointer-events: none; }
+.player[data-video][data-idle] { cursor: none; }
+
+.p-menu { background: rgb(20 18 28 / .82); backdrop-filter: blur(24px) saturate(1.4); border: 1px solid var(--p-line); box-shadow: 0 20px 50px -20px rgb(0 0 0 / .7); transform-origin: top right; }

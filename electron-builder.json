@@ -1,33 +1,42 @@
 {
   "appId": "com.lumina.media",
   "productName": "Lumina",
+  "copyright": "Copyright © 2026 Lumina",
   "directories": {
-    "output": "release"
+    "output": "release",
+    "buildResources": "build"
   },
-  "files": [
-    "dist",
-    "dist-electron",
-    "engine",
-    "assets"
+  "files": ["dist", "dist-electron", "package.json", "!node_modules/**", "!**/*.map"],
+  "extraResources": [
+    { "from": "resources/bin/${platform}-${arch}", "to": "bin", "filter": ["**/*"] },
+    { "from": "resources/models", "to": "models", "filter": ["**/*"] },
+    { "from": "assets/icons", "to": "icons", "filter": ["*.png", "*.ico"] },
+    { "from": "extension", "to": "extension", "filter": ["**/*"] }
+  ],
+  "protocols": [
+    { "name": "Magnet link", "schemes": ["magnet"] },
+    { "name": "Lumina", "schemes": ["lumina"] }
+  ],
+  "fileAssociations": [
+    { "ext": "torrent", "name": "BitTorrent file", "description": "Torrent file", "role": "Viewer", "icon": "assets/icons/icon.ico" }
   ],
   "linux": {
-    "target": ["rpm", "AppImage"],
+    "target": ["AppImage", "rpm"],
     "category": "AudioVideo",
-    "icon": "assets/icons",
-    "synopsis": "Ultra-sleek universal media downloader and player",
-    "description": "Download 8K/4K videos, extract lossless audio, stream music, manage torrents, and save media to USB drives — all from one beautiful interface.",
+    "icon": "build/icons",
+    "synopsis": "Download anything, play it beautifully",
+    "executableName": "lumina",
     "desktop": {
-      "Name": "Lumina",
-      "Comment": "Universal Media Downloader & Player",
-      "Categories": "AudioVideo;Audio;Video;Network;FileTransfer;",
-      "Keywords": "download;video;music;torrent;youtube;spotify;media;",
-      "StartupWMClass": "lumina-media",
-      "MimeType": "application/x-bittorrent;x-scheme-handler/magnet;"
-    },
-    "mimeTypes": [
-      "application/x-bittorrent",
-      "x-scheme-handler/magnet"
-    ]
+      "entry": {
+        "Name": "Lumina",
+        "GenericName": "Media Downloader and Player",
+        "Comment": "Download and play music and video",
+        "Categories": "AudioVideo;Audio;Video;Network;FileTransfer;",
+        "Keywords": "download;youtube;music;video;torrent;player;",
+        "StartupWMClass": "lumina-media",
+        "MimeType": "application/x-bittorrent;x-scheme-handler/magnet;x-scheme-handler/lumina;"
+      }
+    }
   },
   "rpm": {
     "fpm": ["--rpm-rpmbuild-define", "_build_id_links none"]
@@ -36,14 +45,10 @@
     "artifactName": "Lumina-${version}-${arch}.AppImage"
   },
   "win": {
-    "target": [
-      {
-        "target": "nsis",
-        "arch": ["x64"]
-      }
-    ],
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
     "icon": "assets/icons/icon.ico",
-    "signAndEditExecutable": false
+    "legalTrademarks": "Lumina",
+    "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
     "oneClick": false,
@@ -54,10 +59,17 @@
     "shortcutName": "Lumina",
     "installerIcon": "assets/icons/icon.ico",
     "uninstallerIcon": "assets/icons/icon.ico",
+    "installerHeaderIcon": "assets/icons/icon.ico",
+    "installerSidebar": "build/installerSidebar.bmp",
+    "uninstallerSidebar": "build/installerSidebar.bmp",
+    "installerHeader": "build/installerHeader.bmp",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false,
     "artifactName": "Lumina-Setup-${version}-windows-x64.exe"
   },
   "mac": {
     "target": ["dmg"],
-    "category": "public.app-category.video"
+    "icon": "assets/icons/icon_1024.png",
+    "category": "public.app-category.music"
   }
 }

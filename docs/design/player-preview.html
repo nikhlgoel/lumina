@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lumina Player Themes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=VT323&display=swap">
+<style>
+/* Deliberately single-world: an immersive dark player stage, painted explicitly. */
+:root{
+  --ink:#F3F1F8; --ink-2:rgba(243,241,248,.72); --ink-3:rgba(243,241,248,.5);
+  --ground:#0B0A10; --glass:rgba(255,255,255,.06); --line:rgba(255,255,255,.12);
+  --c1:#7B5CFF; --c2:#FF7A59; --c3:#1FC8B4; --accent:#FFD27A;
+  --ui:"Hanken Grotesk",ui-sans-serif,system-ui,sans-serif;
+  --serif:"Instrument Serif",Georgia,serif;
+  --lcd:"VT323",ui-monospace,monospace;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+html,body{height:100%}
+body{background:var(--ground);color:var(--ink);font-family:var(--ui);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:10px}
+svg{display:block}
+.ico{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- Player shell ---------- */
+.player{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr auto;isolation:isolate;transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.player.leaving{opacity:0;transform:scale(.98)}
+#bg{position:absolute;inset:0;width:100%;height:100%;z-index:-2}
+.scrim{position:absolute;inset:0;z-index:-1;background:radial-gradient(120% 90% at 50% 40%,transparent 30%,rgba(5,4,10,.55) 100%)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top,0px)) clamp(16px,3vw,32px) 0}
+.iconbtn{width:40px;height:40px;display:grid;place-items:center;border-radius:12px;color:var(--ink-2);transition:background .2s var(--ease),color .2s,transform .1s}
+.iconbtn:hover{background:var(--glass);color:var(--ink)}
+.iconbtn:active{transform:scale(.94)}
+.exit{display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:12px;color:var(--ink-2);font-weight:500;font-size:14px}
+.exit:hover{background:var(--glass);color:var(--ink)}
+.top-right{display:flex;gap:4px;position:relative}
+
+/* theme popover (icon trigger only) */
+.pop{position:absolute;right:44px;top:46px;width:236px;padding:6px;border-radius:16px;background:rgba(20,18,28,.78);backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);box-shadow:0 20px 50px -20px rgba(0,0,0,.7);transform-origin:top right;transition:opacity .18s var(--ease),transform .18s var(--ease);z-index:20}
+.pop[hidden]{display:block!important;opacity:0;transform:scale(.96) translateY(-4px);pointer-events:none}
+.pop button{width:100%;display:flex;align-items:center;gap:12px;padding:10px;border-radius:11px;text-align:left}
+.pop button:hover{background:var(--glass)}
+.pop .sw{width:34px;height:34px;border-radius:9px;flex:none;border:1px solid var(--line)}
+.pop b{display:block;font-weight:600;font-size:14px}
+.pop small{color:var(--ink-3);font-size:12px}
+.pop button[aria-checked="true"]{background:rgba(255,255,255,.09)}
+.pop button[aria-checked="true"] b::after{content:"  ●";color:var(--accent);font-size:10px;vertical-align:2px}
+
+/* ---------- Stage ---------- */
+.stage{position:relative;display:grid;place-items:center;min-height:0;padding:12px clamp(16px,4vw,48px)}
+.view{position:absolute;inset:12px clamp(16px,4vw,48px);display:grid;place-items:center;transition:opacity .45s var(--ease),transform .55s var(--ease),filter .45s}
+.view[data-off]{opacity:0;transform:scale(.97);filter:blur(8px);pointer-events:none}
+
+/* art view variants per theme */
+.art-aurora,.art-vinyl,.art-cassette{display:none}
+[data-theme-player="aurora"] .art-aurora,[data-theme-player="vinyl"] .art-vinyl,[data-theme-player="cassette"] .art-cassette{display:grid;place-items:center}
+.cover{width:min(56vh,78vw,440px);aspect-ratio:1;max-width:100%;border-radius:18px;box-shadow:0 40px 80px -30px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.08);transition:transform .6s var(--ease)}
+.player:not(.playing) .art-aurora .cover{transform:scale(.9)}
+.cover canvas{width:100%;height:100%;border-radius:inherit;display:block}
+
+/* ---------- Bottom dock ---------- */
+.dock{padding:0 clamp(16px,3vw,32px) calc(18px + env(safe-area-inset-bottom,0px));display:grid;gap:14px;max-width:1100px;width:100%;margin:0 auto}
+.meta-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.meta{min-width:0}
+.title{font-family:var(--serif);font-size:clamp(30px,4.2vw,46px);line-height:1;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.artist{color:var(--ink-2);font-size:15px;margin-top:6px}
+.seg{display:flex;padding:3px;border-radius:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);position:relative}
+.seg button{position:relative;z-index:1;padding:7px 14px;border-radius:9px;font-size:13px;font-weight:600;color:var(--ink-3);transition:color .2s}
+.seg button[aria-pressed="true"]{color:var(--ink)}
+.seg .thumb{position:absolute;top:3px;bottom:3px;border-radius:9px;background:rgba(255,255,255,.14);transition:left .3s var(--ease),width .3s var(--ease)}
+.progress{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.bar{position:relative;height:18px;cursor:pointer;display:flex;align-items:center}
+.bar .track{height:4px;width:100%;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden;transition:height .15s}
+.bar:hover .track{height:6px}
+.bar .fill{height:100%;background:var(--ink);border-radius:inherit;width:0}
+.bar .knob{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--ink);transform:translateX(-50%) scale(0);transition:transform .15s var(--ease)}
+.bar:hover .knob,.bar:focus-visible .knob{transform:translateX(-50%) scale(1)}
+.controls{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+.transport{display:flex;align-items:center;gap:clamp(6px,2vw,18px)}
+.play{width:58px;height:58px;border-radius:50%;background:var(--ink);color:#0B0A10;display:grid;place-items:center;transition:transform .15s var(--ease)}
+.play:hover{transform:scale(1.05)}
+.play:active{transform:scale(.95)}
+.play .ico{width:24px;height:24px;fill:currentColor;stroke:none}
+.iconbtn[aria-pressed="true"]{color:var(--accent)}
+.side{display:flex;gap:4px;align-items:center}
+.side.right{justify-content:flex-end}
+.vol{width:84px;accent-color:var(--ink)}
+.kbd{justify-self:start;color:var(--ink-3);font-size:12px}
+/* ---------- Lyrics view ---------- */
+.lyrics{width:min(900px,100%);height:100%;overflow:hidden;position:relative;mask-image:linear-gradient(transparent,#000 22%,#000 70%,transparent)}
+.lyrics-inner{position:absolute;left:0;right:0;top:0;transition:transform .8s var(--ease)}
+.line{display:block;width:100%;text-align:left;padding:.18em 0;font-family:var(--ui);font-weight:700;font-size:clamp(26px,4vw,48px);line-height:1.15;letter-spacing:-.02em;color:rgba(255,255,255,.28);transform-origin:left center;transition:color .5s,filter .6s,transform .6s var(--ease),opacity .6s;text-wrap:balance}
+.line:hover{color:rgba(255,255,255,.55)}
+.line.active{color:var(--ink);transform:scale(1.03);text-shadow:0 0 28px rgba(255,255,255,.28)}
+.line.gap{font-size:clamp(20px,3vw,32px);letter-spacing:.3em}
+[data-theme-player="vinyl"] .line{font-family:var(--serif);font-weight:400;font-size:clamp(30px,4.6vw,56px);letter-spacing:0}
+[data-theme-player="cassette"] .line{font-family:var(--lcd);font-weight:400;font-size:clamp(30px,4.4vw,52px);letter-spacing:.02em;color:rgba(160,255,190,.25)}
+[data-theme-player="cassette"] .line.active{color:#B8FFCB;text-shadow:0 0 14px rgba(120,255,160,.7)}
+
+/* ---------- Vinyl ---------- */
+.deck{position:relative;width:min(60vh,82vw,500px);aspect-ratio:1;max-width:100%}
+.record{position:absolute;inset:0;border-radius:50%;background:
+  radial-gradient(circle,transparent 0 33%,rgba(255,255,255,.035) 33.3% 34%,transparent 34.2%),
+  repeating-radial-gradient(circle,#101014 0 2px,#17171c 2px 3px);
+  box-shadow:0 30px 70px -25px rgba(0,0,0,.9),inset 0 0 0 1px rgba(255,255,255,.05);animation:spin 1.8s linear infinite;animation-play-state:paused}
+.record::after{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 20deg,transparent 0 10%,rgba(255,255,255,.09) 14%,transparent 20% 60%,rgba(255,255,255,.06) 64%,transparent 70%)}
+.player.playing .record{animation-play-state:running}
+.label{position:absolute;inset:32%;border-radius:50%;overflow:hidden;box-shadow:0 0 0 2px rgba(0,0,0,.4)}
+.label canvas{width:100%;height:100%;display:block}
+.label::after{content:"";position:absolute;inset:46%;border-radius:50%;background:#0B0A10}
+.tonearm{position:absolute;right:-4%;top:-2%;width:44%;height:70%;transform-origin:82% 10%;transform:rotate(-24deg);transition:transform 1s var(--ease);pointer-events:none}
+.player.playing .tonearm{transform:rotate(4deg)}
+.tonearm i{position:absolute;left:78%;top:4%;width:9%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e8e2d6,#8b857a);box-shadow:0 6px 14px rgba(0,0,0,.6)}
+.tonearm b{position:absolute;left:81%;top:10%;width:2.4%;height:78%;background:linear-gradient(90deg,#b9b3a8,#efe9dd,#9c968b);border-radius:4px;transform:rotate(18deg);transform-origin:top center}
+.tonearm em{position:absolute;left:52%;top:82%;width:12%;height:9%;background:#2a2a30;border-radius:3px;transform:rotate(18deg)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.dust{position:absolute;inset:0;pointer-events:none;z-index:-1}
+
+/* ---------- Cassette / Pocket ---------- */
+.pocket{width:min(420px,86vw);max-width:100%;padding:18px;border-radius:30px;background:linear-gradient(160deg,#EDE7DA,#CFC6B4);box-shadow:0 40px 80px -30px rgba(0,0,0,.8),inset 0 2px 0 rgba(255,255,255,.7),inset 0 -4px 0 rgba(0,0,0,.12);color:#2A2620;display:grid;gap:14px}
+.lcd{border-radius:12px;padding:10px 14px;background:#0F1F14;box-shadow:inset 0 2px 8px rgba(0,0,0,.7);font-family:var(--lcd);color:#A6FFBE;text-shadow:0 0 8px rgba(120,255,160,.55);overflow:hidden;white-space:nowrap}
+.lcd .marq{display:inline-block;font-size:26px;padding-left:100%;animation:marq 12s linear infinite}
+.lcd .row{display:flex;justify-content:space-between;font-size:20px;opacity:.8}
+@keyframes marq{to{transform:translateX(-100%)}}
+.tape{position:relative;border-radius:14px;padding:16px;background:#2B2A2E;box-shadow:inset 0 0 0 2px rgba(255,255,255,.05)}
+.tape .sticker{border-radius:8px;padding:10px 12px 34px;background:var(--c2);background:linear-gradient(135deg,var(--c1),var(--c2));color:#fff;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;position:relative}
+.window{position:absolute;left:18%;right:18%;bottom:22px;height:44px;border-radius:22px;background:#151417;display:flex;justify-content:space-between;align-items:center;padding:0 10px}
+.reel{width:34px;height:34px;border-radius:50%;background:repeating-conic-gradient(#EFE9DD 0 20deg,#151417 20deg 60deg);box-shadow:0 0 0 5px #6b5a45;animation:spin 2.4s linear infinite reverse;animation-play-state:paused}
+.player.playing .reel{animation-play-state:running}
+.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.keys span{height:30px;border-radius:8px;background:linear-gradient(#F7F3EA,#DCD3C1);box-shadow:0 3px 0 #A89F8C,0 5px 10px rgba(0,0,0,.2)}
+.player.playing .keys span:nth-child(2){transform:translateY(3px);box-shadow:0 0 0 #A89F8C,0 2px 4px rgba(0,0,0,.2);background:linear-gradient(#DCD3C1,#EDE6D8)}
+
+/* ---------- Queue slide-over ---------- */
+.sheet{position:fixed;top:0;right:0;bottom:0;width:min(380px,100%);padding:calc(18px + env(safe-area-inset-top,0px)) 16px 18px;background:rgba(16,14,22,.8);backdrop-filter:blur(30px) saturate(1.3);border-left:1px solid var(--line);transform:translateX(0);transition:transform .4s var(--ease);z-index:30;display:flex;flex-direction:column;gap:12px}
+.sheet[hidden]{display:flex!important;transform:translateX(105%)}
+.sheet h2{font-size:15px;font-weight:600;display:flex;justify-content:space-between;align-items:center;padding:0 6px}
+.qtabs{display:flex;gap:4px;padding:0 6px}
+.qtabs button{font-size:13px;padding:6px 10px;border-radius:8px;color:var(--ink-3);font-weight:600}
+.qtabs button[aria-pressed="true"]{background:var(--glass);color:var(--ink)}
+.qlist{overflow:auto;display:grid;gap:2px;align-content:start}
+.qitem{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:8px;border-radius:12px;text-align:left;width:100%}
+.qitem:hover{background:var(--glass)}
+.qitem[aria-current="true"]{background:rgba(255,255,255,.1)}
+.qitem canvas,.qitem .pl{width:44px;height:44px;border-radius:8px}
+.qitem .pl{display:grid;place-items:center;background:var(--glass);color:var(--ink-2)}
+.qitem b{font-weight:600;font-size:14px;display:block}
+.qitem small{color:var(--ink-3);font-size:12px}
+.qitem .d{color:var(--ink-3);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* ---------- Exited: normal app ---------- */
+.app{position:fixed;inset:0;display:grid;grid-template-rows:1fr auto;background:#0E0E12;color:#E6E6EA;opacity:0;pointer-events:none;transition:opacity .4s var(--ease)}
+.app.on{opacity:1;pointer-events:auto}
+.app main{display:grid;place-content:center;gap:10px;text-align:center;padding:24px 16px}
+.app h1{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.app p{color:#9A9AA6;max-width:44ch;margin:0 auto;line-height:1.5}
+.mini{display:flex;align-items:center;gap:12px;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid #23232B;background:#131318}
+.mini canvas{width:40px;height:40px;border-radius:8px}
+.mini .t{flex:1;min-width:0}
+.mini .t b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .t small{color:#8C8C98}
+.mini{cursor:pointer;transition:background .2s var(--ease)}
+.mini:hover{background:#18181F}
+.mini:active{background:#1C1C24}
+.mini .up{color:#8C8C98;display:grid;place-items:center;width:32px;transition:transform .2s var(--ease),color .2s}
+.mini:hover .up{transform:translateY(-2px);color:#E6E6EA}
+.toast{position:fixed;left:50%;bottom:120px;transform:translate(-50%,10px);padding:8px 14px;border-radius:10px;background:rgba(20,18,28,.85);border:1px solid var(--line);font-size:13px;opacity:0;transition:opacity .25s,transform .25s var(--ease);pointer-events:none;z-index:40}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:640px){
+  .controls{grid-template-columns:1fr}
+  .side,.kbd{display:none}
+  .transport{justify-content:center}
+  .title{font-size:30px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important}
+}
+</style>
+</head>
+<body>
+<div class="player" id="player" data-theme-player="aurora" data-view="art">
+  <canvas id="bg" aria-hidden="true"></canvas>
+  <div class="scrim" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <button class="exit" id="exitBtn" title="Exit player (Esc)">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Exit
+    </button>
+    <div class="top-right">
+      <button class="iconbtn" id="themeBtn" aria-label="Player theme" aria-haspopup="menu" aria-expanded="false" title="Theme (T)">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5C21 6.5 17 3 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7" r="1"/><circle cx="15.5" cy="7.5" r="1"/></svg>
+      </button>
+      <button class="iconbtn" id="fsBtn" aria-label="Full screen" title="Full screen (F)">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
+      <div class="pop" id="themePop" role="menu" hidden>
+        <button role="menuitemradio" data-theme="aurora" aria-checked="true"><span class="sw" style="background:radial-gradient(circle at 30% 30%,#FF7A59,transparent 60%),radial-gradient(circle at 70% 70%,#1FC8B4,transparent 60%),#7B5CFF"></span><span><b>Aurora</b><small>Flowing color from the artwork</small></span></button>
+        <button role="menuitemradio" data-theme="vinyl" aria-checked="false"><span class="sw" style="background:repeating-radial-gradient(circle,#111 0 2px,#1d1d22 2px 3px)"></span><span><b>Vinyl</b><small>Spinning record, warm room</small></span></button>
+        <button role="menuitemradio" data-theme="cassette" aria-checked="false"><span class="sw" style="background:linear-gradient(160deg,#EDE7DA,#CFC6B4)"></span><span><b>Pocket</b><small>Y2K handheld with tape reels</small></span></button>
+      </div>
+    </div>
+  </header>
+
+  <section class="stage" aria-live="polite">
+    <div class="view" id="viewArt">
+      <div class="art-aurora"><div class="cover"><canvas id="coverA" width="600" height="600"></canvas></div></div>
+      <div class="art-vinyl">
+        <div class="deck">
+          <canvas class="dust" id="dust"></canvas>
+          <div class="record"><div class="label"><canvas id="coverV" width="300" height="300"></canvas></div></div>
+          <div class="tonearm" aria-hidden="true"><b></b><i></i><em></em></div>
+        </div>
+      </div>
+      <div class="art-cassette">
+        <div class="pocket">
+          <div class="lcd"><span class="marq" id="lcdTitle"></span><div class="row"><span id="lcdTime">0:00</span><span id="lcdState">STOP</span><span>VOL <span id="lcdVol">8</span></span></div></div>
+          <div class="tape"><div class="sticker" id="tapeLabel"></div><div class="window"><span class="reel"></span><span class="reel"></span></div></div>
+          <div class="keys" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="view" id="viewLyrics" data-off>
+      <div class="lyrics" id="lyrics"><div class="lyrics-inner" id="lyricsInner"></div></div>
+    </div>
+  </section>
+
+  <footer class="dock">
+    <div class="meta-row">
+      <div class="meta"><div class="title" id="title"></div><div class="artist" id="artist"></div></div>
+      <div class="seg" role="group" aria-label="Stage view">
+        <span class="thumb" id="segThumb"></span>
+        <button id="segArt" aria-pressed="true">Art</button>
+        <button id="segLyr" aria-pressed="false">Lyrics</button>
+        <button id="segQueue" aria-pressed="false">Queue</button>
+      </div>
+    </div>
+    <div class="progress">
+      <span id="cur">0:00</span>
+      <div class="bar" id="bar" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="track"><div class="fill" id="fill"></div></div><span class="knob" id="knob"></span></div>
+      <span id="dur">0:00</span>
+    </div>
+    <div class="controls">
+      <span class="kbd">Space play · L lyrics · T theme · Esc exit</span>
+      <div class="transport">
+        <button class="iconbtn" id="shuffle" aria-label="Shuffle" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg></button>
+        <button class="iconbtn" id="prev" aria-label="Previous"><svg class="ico" viewBox="0 0 24 24"><path d="M19 20L9 12l10-8v16zM5 19V5"/></svg></button>
+        <button class="play" id="play" aria-label="Play"><svg class="ico" viewBox="0 0 24 24" id="playIco"><path d="M7 4.5v15l13-7.5z"/></svg></button>
+        <button class="iconbtn" id="next" aria-label="Next"><svg class="ico" viewBox="0 0 24 24"><path d="M5 4l10 8-10 8V4zM19 5v14"/></svg></button>
+        <button class="iconbtn" id="repeat" aria-label="Repeat" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
+      </div>
+      <div class="side right">
+        <button class="iconbtn" id="cc" aria-label="Subtitles" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 10.5a2 2 0 1 0 0 3M16.5 10.5a2 2 0 1 0 0 3"/></svg></button>
+        <button class="iconbtn" id="mute" aria-label="Mute"><svg class="ico" viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg></button>
+        <input class="vol" id="vol" type="range" min="0" max="10" value="8" aria-label="Volume">
+      </div>
+    </div>
+  </footer>
+
+  <aside class="sheet" id="sheet" hidden aria-label="Queue and playlists">
+    <h2>Up next <button class="iconbtn" id="closeSheet" aria-label="Close queue"><svg class="ico" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h2>
+    <div class="qtabs"><button id="tabQueue" aria-pressed="true">Queue</button><button id="tabPl" aria-pressed="false">Playlists on this PC</button></div>
+    <div class="qlist" id="qlist"></div>
+  </aside>
+</div>
+
+<div class="app" id="app" aria-hidden="true">
+  <main>
+    <h1>Downloads</h1>
+    <p>This is the normal Lumina app. Playback keeps going in the bar below; click the bar to open the player again. Closing the window keeps Lumina playing from the system tray.</p>
+  </main>
+  <div class="mini" id="mini" role="button" tabindex="0" aria-label="Open player" title="Open player">
+    <canvas id="coverM" width="80" height="80"></canvas>
+    <div class="t"><b id="miniTitle"></b><small id="miniArtist"></small></div>
+    <button class="iconbtn" id="miniPlay" aria-label="Play or pause" style="color:#E6E6EA"><svg class="ico" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z" fill="currentColor" stroke="none"/></svg></button>
+    <span class="up" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></span>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+/* Sample tracks with original lyrics written for this preview. No audio: playback is simulated. */
+const TRACKS=[
+ {title:"Low Tide Radio",artist:"Harbor Lights",album:"Salt & Static",dur:204,pal:["#6A4CFF","#FF7A59","#1FC8B4"],seed:3,
+  lyr:[[0,"♪"],[9,"The kettle hums a song I almost know"],[15,"Blue hour leaking through the window glass"],[22,"You tune the dial between the waves and snow"],[29,"And every station sounds like something past"],[37,"♪"],[44,"Low tide, low tide radio"],[50,"Carry me somewhere slow"],[57,"Static like a heartbeat in the dark"],[64,"Low tide, low tide radio"],[70,"Play the one we used to know"],[78,"♪"],[88,"Paper boats and pennies in the drain"],[95,"The streetlights blinking out their morse code rain"],[103,"We never needed words to hold the line"],[110,"Just the crackle and the passing time"],[118,"♪"],[126,"Low tide, low tide radio"],[132,"Carry me somewhere slow"],[139,"Static like a heartbeat in the dark"],[146,"Low tide, low tide radio"],[152,"Let the evening overflow"],[162,"♪"],[176,"Turn it down, but don't turn it off"],[186,"♪"]]},
+ {title:"Glasshouse",artist:"Mira Solen",album:"Greenroom",dur:188,pal:["#12B886","#F6C453","#2F6BFF"],seed:11,
+  lyr:[[0,"♪"],[8,"Morning in a house made out of glass"],[14,"Every plant is leaning toward the sun"],[21,"I keep my secrets where the shadows pass"],[28,"But light gets in, it gets in everyone"],[36,"♪"],[42,"Open every window, let it grow"],[49,"All the green we planted long ago"],[56,"If it breaks, it breaks in gold"],[63,"♪"],[72,"Rain is only music on the roof"],[79,"Ferns unrolling like a slow reply"],[86,"You don't need a reason or a proof"],[93,"To stand beneath a clearing sky"],[101,"♪"],[108,"Open every window, let it grow"],[115,"All the green we planted long ago"],[122,"If it breaks, it breaks in gold"],[132,"♪"]]},
+ {title:"Night Bus 42",artist:"Kilo & The Quiet",album:"Transit",dur:176,pal:["#FF3D7F","#3B1C8C","#FFB23F"],seed:27,
+  lyr:[[0,"♪"],[7,"Headphones on the last bus out of town"],[13,"Neon smearing sideways on the pane"],[20,"Every stop a city lying down"],[27,"Every stranger humming the same refrain"],[34,"♪"],[40,"Ride it to the end of the line"],[46,"Forty-two past midnight, we're fine"],[53,"Nobody's waiting, nobody's late"],[60,"♪"],[68,"Driver taps the wheel in four-four time"],[75,"Streetlight chorus flickers into view"],[82,"I don't know the words but that's alright"],[89,"I'll learn them on the way to you"],[97,"♪"],[104,"Ride it to the end of the line"],[110,"Forty-two past midnight, we're fine"],[118,"♪"]]}
+];
+const PLAYLISTS=[["Road trip","Music › Playlists",24,"m3u8"],["Lo-fi study","Music",58,"folder"],["Harbor Lights — Salt & Static","Music › Albums",11,"folder"],["Anime OSTs","D:\\Media",37,"m3u"],["Travel vlogs 4K","Videos",9,"folder"],["Documentaries","Videos › Series",14,"folder"]];
+
+const $=s=>document.querySelector(s);
+const player=$("#player"),reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let idx=0,t=0,playing=false,view="art",theme="aurora",vol=8,muted=false,lastTs=0,beat=0;
+let store={};try{store=JSON.parse(localStorage.getItem("lumina-player")||"{}")}catch(e){}
+const save=()=>{try{localStorage.setItem("lumina-player",JSON.stringify({theme}))}catch(e){}};
+const fmt=s=>Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0");
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255);
+
+/* Procedural cover art so the palette always comes "from the artwork". */
+function rng(seed){return()=>((seed=Math.imul(seed^seed>>>15,1|seed)+0x6D2B79F5|0)>>>0)/4294967296}
+function drawCover(cv,tr){
+  const c=cv.getContext("2d"),w=cv.width,h=cv.height,r=rng(tr.seed*7919);
+  c.fillStyle=tr.pal[1];c.fillRect(0,0,w,h);
+  for(let i=0;i<6;i++){const g=c.createRadialGradient(r()*w,r()*h,0,r()*w,r()*h,w*(.4+r()*.5));g.addColorStop(0,tr.pal[i%3]);g.addColorStop(1,"transparent");c.fillStyle=g;c.fillRect(0,0,w,h)}
+  c.globalCompositeOperation="overlay";
+  for(let i=0;i<14;i++){c.strokeStyle=`rgba(255,255,255,${.05+r()*.15})`;c.lineWidth=w*(.004+r()*.02);c.beginPath();c.arc(w*.5,h*.62,w*(.08+i*.05),Math.PI,0);c.stroke()}
+  c.globalCompositeOperation="source-over";
+  c.fillStyle="rgba(255,255,255,.92)";c.font=`600 ${w*.05}px Hanken Grotesk, sans-serif`;c.fillText(tr.artist.toUpperCase(),w*.07,h*.1);
+  c.font=`italic ${w*.11}px Instrument Serif, serif`;c.fillText(tr.album,w*.07,h*.92);
+}
+
+/* Aurora: WebGL mesh gradient with grain, colors from the artwork, breathing with the beat. */
+const bg=$("#bg"),gl=bg.getContext("webgl",{premultipliedAlpha:false,antialias:false});
+let prog,uT,uC,uRes,uBeat,uMode,colors=[[0,0,0],[0,0,0],[0,0,0]],target=colors;
+if(gl){
+  const vs=`attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+  const fs=`precision mediump float;uniform float t,beat,mode;uniform vec2 res;uniform vec3 c0,c1,c2;
+  float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+  void main(){vec2 uv=gl_FragCoord.xy/res;vec2 p=uv*vec2(res.x/res.y,1.);
+   float s=t*.008;
+   vec2 q=p+.08*vec2(sin(p.y*1.6+s*2.),cos(p.x*1.4-s*1.5));
+   vec2 a=vec2(.35+.12*sin(s*1.3),.4+.08*cos(s*1.7)),b=vec2(1.15+.12*cos(s*1.1),.72+.08*sin(s*1.9)),c=vec2(.8+.15*sin(s*.7),.18+.1*cos(s));
+   float wa=1./(.08+pow(distance(q,a),2.)*(2.6-beat*.12)),wb=1./(.08+pow(distance(q,b),2.)*2.6),wc=1./(.08+pow(distance(q,c),2.)*2.8);
+   vec3 col=(c0*wa+c1*wb+c2*wc)/(wa+wb+wc);
+   vec3 warm=vec3(.09,.06,.05);
+   col=mix(col*.7,warm+col*.25,mode);
+   col*=.55+.015*beat;
+   col+=(h(floor(gl_FragCoord.xy))-.5)*.035;
+   gl_FragColor=vec4(col,1.);}`;
+  const sh=(ty,src)=>{const o=gl.createShader(ty);gl.shaderSource(o,src);gl.compileShader(o);return o};
+  prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,vs));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(prog);gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+  const loc=gl.getAttribLocation(prog,"p");gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  uT=gl.getUniformLocation(prog,"t");uRes=gl.getUniformLocation(prog,"res");uBeat=gl.getUniformLocation(prog,"beat");uMode=gl.getUniformLocation(prog,"mode");
+  uC=["c0","c1","c2"].map(n=>gl.getUniformLocation(prog,n));
+}
+function resize(){const d=Math.min(devicePixelRatio,1.5);bg.width=innerWidth*d*.5;bg.height=innerHeight*d*.5;gl&&gl.viewport(0,0,bg.width,bg.height)}
+addEventListener("resize",resize);resize();
+const toast=(m)=>{const el=$("#toast");el.textContent=m;el.classList.add("show");clearTimeout(toast.h);toast.h=setTimeout(()=>el.classList.remove("show"),1600)};
+
+function load(i,autoplay){
+  idx=(i+TRACKS.length)%TRACKS.length;t=0;const tr=TRACKS[idx];
+  ["#coverA","#coverV","#coverM"].forEach(s=>drawCover($(s),tr));
+  $("#title").textContent=tr.title;$("#artist").textContent=`${tr.artist} · ${tr.album}`;
+  $("#miniTitle").textContent=tr.title;$("#miniArtist").textContent=tr.artist;
+  $("#dur").textContent=fmt(tr.dur);
+  $("#lcdTitle").textContent=`${tr.artist} — ${tr.title}  ★  ${tr.album}`;
+  $("#tapeLabel").textContent=`${tr.album} · side A`;
+  document.documentElement.style.setProperty("--c1",tr.pal[0]);document.documentElement.style.setProperty("--c2",tr.pal[1]);
+  target=tr.pal.map(hex);
+  const inner=$("#lyricsInner");inner.innerHTML="";
+  tr.lyr.forEach(([s,txt],k)=>{const b=document.createElement("button");b.className="line"+(txt==="♪"?" gap":"");b.textContent=txt==="♪"?"• • •":txt;b.dataset.k=k;b.onclick=()=>{t=s;tick(0,true)};inner.appendChild(b)});
+  renderQueue();
+  if(autoplay!==undefined)setPlaying(autoplay);
+  tick(0,true);
+}
+
+let activeLine=-1;
+function syncLyrics(force){
+  const tr=TRACKS[idx];let k=0;for(let j=0;j<tr.lyr.length;j++)if(t>=tr.lyr[j][0])k=j;
+  if(k===activeLine&&!force)return;activeLine=k;
+  const lines=[...$("#lyricsInner").children];
+  lines.forEach((el,j)=>{const d=Math.abs(j-k);el.classList.toggle("active",j===k);el.style.filter=j===k?"none":`blur(${Math.min(d*.9,3)}px)`;el.style.opacity=d>5?.3:1});
+  const el=lines[k];if(!el)return;
+  const box=$("#lyrics").clientHeight;$("#lyricsInner").style.transform=`translateY(${box*.4-el.offsetTop-el.offsetHeight/2}px)`;
+}
+
+function tick(dt,force){
+  const tr=TRACKS[idx];
+  if(playing){t+=dt;if(t>=tr.dur){if($("#repeat").getAttribute("aria-pressed")==="true"){t=0}else{load(idx+1,true);return}}}
+  const pct=t/tr.dur*100;$("#fill").style.width=pct+"%";$("#knob").style.left=pct+"%";$("#bar").setAttribute("aria-valuenow",Math.round(pct));
+  $("#cur").textContent=fmt(t);$("#lcdTime").textContent=fmt(t);
+  syncLyrics(force);
+}
+
+function setPlaying(p){
+  playing=p;player.classList.toggle("playing",p);
+  const path=p?'<rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/>':'<path d="M7 4.5v15l13-7.5z"/>';
+  $("#playIco").innerHTML=path;$("#play").setAttribute("aria-label",p?"Pause":"Play");
+  $("#miniPlay svg").innerHTML=p?'<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/>':'<path d="M7 4.5v15l13-7.5z" fill="currentColor" stroke="none"/>';
+  $("#lcdState").textContent=p?"PLAY ▶":"PAUSE ‖";
+}
+
+/* One view at a time on the stage */
+function setView(v){
+  view=v;$("#viewArt").toggleAttribute("data-off",v!=="art");$("#viewLyrics").toggleAttribute("data-off",v!=="lyrics");
+  $("#segArt").setAttribute("aria-pressed",v==="art");$("#segLyr").setAttribute("aria-pressed",v==="lyrics");
+  moveThumb(v==="art"?$("#segArt"):$("#segLyr"));if(v==="lyrics")requestAnimationFrame(()=>syncLyrics(true));
+}
+function moveThumb(btn){const th=$("#segThumb");th.style.left=btn.offsetLeft+"px";th.style.width=btn.offsetWidth+"px"}
+function setTheme(name,quiet){
+  theme=name;player.dataset.themePlayer=name;save();
+  document.querySelectorAll("#themePop [data-theme]").forEach(b=>b.setAttribute("aria-checked",b.dataset.theme===name));
+  if(!quiet)toast({aurora:"Aurora",vinyl:"Vinyl",cassette:"Pocket"}[name]+" theme");
+  requestAnimationFrame(()=>syncLyrics(true));
+}
+
+/* Queue slide-over, with playlists auto-detected on this PC */
+let qtab="queue";
+function renderQueue(){
+  const list=$("#qlist");list.innerHTML="";
+  if(qtab==="queue"){TRACKS.forEach((tr,i)=>{const b=document.createElement("button");b.className="qitem";b.setAttribute("aria-current",i===idx);
+    const cv=document.createElement("canvas");cv.width=cv.height=88;drawCover(cv,tr);
+    b.append(cv);b.insertAdjacentHTML("beforeend",`<span><b>${tr.title}</b><small>${tr.artist}</small></span><span class="d">${fmt(tr.dur)}</span>`);
+    b.onclick=()=>load(i,true);list.append(b)})}
+  else PLAYLISTS.forEach(([n,where,count,kind])=>{const b=document.createElement("button");b.className="qitem";
+    b.innerHTML=`<span class="pl"><svg class="ico" viewBox="0 0 24 24"><path d="M3 6h13M3 12h13M3 18h8M19 14v7M16 18h6"/></svg></span><span><b>${n}</b><small>${where} · ${kind==="folder"?"folder":"."+kind+" file"}</small></span><span class="d">${count}</span>`;
+    b.onclick=()=>toast(`Playing “${n}” (preview)`);list.append(b)});
+}
+const openSheet=o=>{$("#sheet").hidden=!o;$("#segQueue").setAttribute("aria-pressed",o)};
+
+/* Vinyl dust motes */
+const dust=$("#dust"),dctx=dust.getContext("2d"),motes=Array.from({length:40},()=>({x:Math.random(),y:Math.random(),r:Math.random()*1.6+.4,v:Math.random()*.02+.005,a:Math.random()}));
+function drawDust(dt){
+  if(theme!=="vinyl")return;const w=dust.width=dust.clientWidth,h=dust.height=dust.clientHeight;dctx.clearRect(0,0,w,h);
+  motes.forEach(m=>{m.y-=m.v*dt;m.x+=Math.sin((m.y+m.a)*6)*.0008;if(m.y<0){m.y=1;m.x=Math.random()}dctx.fillStyle=`rgba(255,230,190,${.15+.35*Math.abs(Math.sin(m.a+m.y*4))})`;dctx.beginPath();dctx.arc(m.x*w,m.y*h,m.r,0,7);dctx.fill()});
+}
+
+function frame(ts){
+  const dt=lastTs?Math.min((ts-lastTs)/1000,.1):0;lastTs=ts;
+  if(!document.hidden){
+    tick(dt);
+    beat=playing?Math.pow(Math.max(0,Math.sin(t*Math.PI*2*1.6)),6)*(vol/10)*(muted?0:1):beat*.9;
+    if(gl){
+      colors=colors.map((c,i)=>c.map((v,j)=>v+(target[i][j]-v)*Math.min(1,dt*2)));
+      gl.uniform1f(uT,reduce?0:ts/1000);gl.uniform2f(uRes,bg.width,bg.height);gl.uniform1f(uBeat,reduce?0:beat);
+      gl.uniform1f(uMode,theme==="aurora"?0:theme==="vinyl"?.85:.55);
+      uC.forEach((u,i)=>gl.uniform3fv(u,colors[i]));gl.drawArrays(gl.TRIANGLES,0,3);
+    }
+    if(!reduce)drawDust(dt);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* Wiring */
+$("#play").onclick=()=>setPlaying(!playing);$("#miniPlay").onclick=()=>setPlaying(!playing);
+$("#next").onclick=()=>load(idx+1,playing);$("#prev").onclick=()=>{if(t>3){t=0;tick(0,true)}else load(idx-1,playing)};
+["#shuffle","#repeat","#cc"].forEach(s=>$(s).onclick=e=>{const b=e.currentTarget,on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",on);if(s==="#cc")toast(on?"English subtitles on":"Subtitles off")});
+$("#mute").onclick=()=>{muted=!muted;$("#mute").setAttribute("aria-pressed",muted);$("#lcdVol").textContent=muted?0:vol};
+$("#vol").oninput=e=>{vol=+e.target.value;muted=false;$("#lcdVol").textContent=vol};
+const seek=x=>{const r=$("#bar").getBoundingClientRect();t=Math.max(0,Math.min(1,(x-r.left)/r.width))*TRACKS[idx].dur;tick(0,true)};
+$("#bar").addEventListener("pointerdown",e=>{seek(e.clientX);const mv=ev=>seek(ev.clientX);addEventListener("pointermove",mv);addEventListener("pointerup",()=>removeEventListener("pointermove",mv),{once:true})});
+$("#bar").onkeydown=e=>{if(e.key==="ArrowRight"){t=Math.min(TRACKS[idx].dur,t+5);tick(0,true)}if(e.key==="ArrowLeft"){t=Math.max(0,t-5);tick(0,true)}};
+$("#segArt").onclick=()=>setView("art");$("#segLyr").onclick=()=>setView("lyrics");
+$("#segQueue").onclick=()=>openSheet($("#sheet").hidden);$("#closeSheet").onclick=()=>openSheet(false);
+$("#tabQueue").onclick=()=>{qtab="queue";$("#tabQueue").setAttribute("aria-pressed",true);$("#tabPl").setAttribute("aria-pressed",false);renderQueue()};
+$("#tabPl").onclick=()=>{qtab="pl";$("#tabPl").setAttribute("aria-pressed",true);$("#tabQueue").setAttribute("aria-pressed",false);renderQueue()};
+const pop=$("#themePop"),togglePop=o=>{pop.hidden=!o;$("#themeBtn").setAttribute("aria-expanded",o)};
+$("#themeBtn").onclick=e=>{e.stopPropagation();togglePop(pop.hidden)};
+pop.querySelectorAll("[data-theme]").forEach(b=>b.onclick=()=>{setTheme(b.dataset.theme);togglePop(false)});
+document.addEventListener("click",e=>{if(!pop.hidden&&!pop.contains(e.target))togglePop(false)});
+$("#fsBtn").onclick=()=>{try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()}catch(e){toast("Full screen isn't available here")}};
+const exitPlayer=()=>{player.classList.add("leaving");$("#app").classList.add("on");$("#app").setAttribute("aria-hidden","false");setTimeout(()=>player.hidden=true,450)};
+const openPlayer=()=>{player.hidden=false;$("#app").classList.remove("on");$("#app").setAttribute("aria-hidden","true");requestAnimationFrame(()=>{player.classList.remove("leaving");moveThumb(view==="art"?$("#segArt"):$("#segLyr"));syncLyrics(true)})};
+$("#exitBtn").onclick=exitPlayer;
+$("#mini").onclick=e=>{if(!e.target.closest("#miniPlay"))openPlayer()};
+$("#miniPlay").addEventListener("click",e=>e.stopPropagation());
+$("#mini").onkeydown=e=>{if((e.key==="Enter"||e.key===" ")&&e.target.id==="mini"){e.preventDefault();openPlayer()}};
+addEventListener("keydown",e=>{
+  if(e.target.matches("input"))return;
+  if(e.code==="Space"&&!e.target.matches("button")){e.preventDefault();setPlaying(!playing)}
+  else if(e.key==="l"||e.key==="L")setView(view==="art"?"lyrics":"art");
+  else if(e.key==="t"||e.key==="T"){const n=["aurora","vinyl","cassette"];setTheme(n[(n.indexOf(theme)+1)%3])}
+  else if(e.key==="q"||e.key==="Q")openSheet($("#sheet").hidden);
+  else if(e.key==="Escape"){if(!pop.hidden)togglePop(false);else if(!$("#sheet").hidden)openSheet(false);else if(!player.hidden)exitPlayer()}
+});
+addEventListener("resize",()=>{moveThumb(view==="art"?$("#segArt"):$("#segLyr"));syncLyrics(true)});
+
+load(0);setTheme(["aurora","vinyl","cassette"].includes(store.theme)?store.theme:"aurora",true);
+t=62;setPlaying(true);tick(0,true);
+document.fonts&&document.fonts.ready.then(()=>{load(idx);t=62;tick(0,true);moveThumb($("#segArt"))});
+requestAnimationFrame(()=>moveThumb($("#segArt")));requestAnimationFrame(frame);
+</script>
+
+</body>
+</html>
