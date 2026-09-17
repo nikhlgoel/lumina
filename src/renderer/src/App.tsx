@@ -7,6 +7,7 @@ import { useLibrary } from '@/stores/library';
 import { media, usePlayer } from '@/stores/player';
 import { MiniBar, Sidebar, Toasts } from '@/components/Shell';
 import { QuickCheck } from '@/components/QuickCheck';
+import { Shortcuts } from '@/components/Shortcuts';
 import { DownloadView } from '@/views/download/DownloadView';
 import { QueueView } from '@/views/queue/QueueView';
 import { LibraryView } from '@/views/library/LibraryView';
@@ -110,6 +111,7 @@ export function App() {
       </div>
       {mode === 'player' && <PlayerView />}
       <QuickCheck />
+      <Shortcuts />
       <Toasts />
     </>
   );

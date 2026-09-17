@@ -252,6 +252,8 @@ export function DownloadView() {
             <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
               <span>Press <kbd className="rounded border border-line bg-sunken px-1 font-sans">Ctrl</kbd> <kbd className="rounded border border-line bg-sunken px-1 font-sans">L</kbd> to jump here</span>
               <span aria-hidden="true">·</span>
+              <span>Press <kbd className="rounded border border-line bg-sunken px-1 font-sans">?</kbd> for shortcuts</span>
+              <span aria-hidden="true">·</span>
               <button onClick={() => setView('settings', 'extension')} className="inline-flex items-center gap-1 transition-colors hover:text-accent"><Puzzle className="size-3.5" /> Catch videos from any page with the browser extension</button>
             </p>
           )}

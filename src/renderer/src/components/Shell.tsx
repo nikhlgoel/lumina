@@ -21,7 +21,8 @@ const NAV: NavItem[] = [
 const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };
 
 const COLLAPSE_KEY = 'lumina.sidebar.collapsed';
-const NARROW_QUERY = '(max-width: 880px)';
+// Auto-collapse sits above the window's 900px min width so the rail actually appears on smaller windows.
+const NARROW_QUERY = '(max-width: 1024px)';
 
 /** Collapsed when the user has pinned it collapsed, or (on 'auto') when the window is too narrow to spare the room. */
 function useSidebarCollapsed(): [boolean, () => void] {

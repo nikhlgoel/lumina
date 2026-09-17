@@ -38,6 +38,7 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '31-sidebar-collapsed', script: "document.querySelector('button[aria-label=\"Collapse sidebar\"]').click()", delay: 1000 },
   { name: '32-sidebar-expanded', script: "document.querySelector('button[aria-label=\"Expand sidebar\"]').click()", delay: 900 },
   { name: '33-about-bottom', script: "document.documentElement.dataset.theme='dark'; [...document.querySelectorAll('nav[aria-label=Main] button')][4].click(); setTimeout(() => { const s = document.querySelector('main .overflow-auto'); if (s) s.scrollTop = s.scrollHeight; }, 500)", delay: 1400 },
+  { name: '40-shortcuts', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))", delay: 900 },
   { name: '20-splash-a', script: 'location.reload()', delay: 380 },
   { name: '21-splash-b', script: 'location.reload()', delay: 720 },
   { name: '22-splash-c', script: 'location.reload()', delay: 1050 },

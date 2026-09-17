@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { ArrowUpRight, Check, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Bug, Check, Copy, Sparkles } from 'lucide-react';
 import type { ToolName } from '@shared/types';
 import { useApp } from '@/stores/app';
 import { BrandMark, TitleBar } from '@/components/Shell';
 
 const REPO_URL = 'https://github.com/nikhlgoel/lumina';
+const ISSUES_URL = `${REPO_URL}/issues/new`;
 
 /** The projects Lumina is built on. Bundled command-line tools are annotated with their live version. */
 const TECH: { name: string; role: string; tool?: ToolName; url: string }[] = [
@@ -51,7 +52,21 @@ function Card({ children, className }: { children: ReactNode; className?: string
 export function AboutView() {
   const info = useApp((s) => s.info);
   const tools = useApp((s) => s.tools);
+  const toast = useApp((s) => s.toast);
   const versionOf = (name?: ToolName) => (name ? tools.find((t) => t.name === name && t.ok)?.version ?? null : null);
+
+  const copyDiagnostics = async () => {
+    const lines = [
+      `Lumina ${info?.version ?? '?'} · ${info?.platform ?? '?'}${info?.isPackaged === false ? ' (dev)' : ''}`,
+      `Tools: ${tools.map((t) => `${t.name} ${t.ok ? (t.version ?? 'ok') : 'MISSING'}`).join(', ')}`,
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast('Diagnostics copied — paste them into your bug report', 'success');
+    } catch {
+      toast('Couldn’t copy to the clipboard', 'error');
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -150,14 +165,30 @@ export function AboutView() {
                   contribution helps keep Lumina free and fast for everyone.
                 </p>
               </div>
-              <a
-                href={REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-ink-inverse transition-transform duration-150 hover:-translate-y-0.5 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ground outline-none"
-              >
-                <GithubMark className="size-4" /> View the repository
-              </a>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                  onClick={copyDiagnostics}
+                  className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-raised px-3.5 py-2.5 text-sm font-semibold text-ink transition-[background-color,transform] duration-150 hover:bg-hover active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-accent outline-none"
+                >
+                  <Copy className="size-4" /> Copy diagnostics
+                </button>
+                <a
+                  href={ISSUES_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-line-strong bg-raised px-3.5 py-2.5 text-sm font-semibold text-ink transition-[background-color,transform] duration-150 hover:bg-hover active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-accent outline-none"
+                >
+                  <Bug className="size-4" /> Report a bug
+                </a>
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-ink-inverse transition-transform duration-150 hover:-translate-y-0.5 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ground outline-none"
+                >
+                  <GithubMark className="size-4" /> View the repository
+                </a>
+              </div>
             </div>
           </div>
 
