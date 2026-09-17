@@ -6,13 +6,13 @@ import { mediaKindOf } from '@core/mediaKind';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
-import { useJobs } from '@/stores/jobs';
+import { queuePosition, useJobs } from '@/stores/jobs';
 import { usePlayer } from '@/stores/player';
 import { Artwork } from '@/components/Artwork';
 import { Badge, IconButton, ProgressBar } from '@/components/ui';
 
 const STATUS_LABEL: Record<Job['status'], string> = {
-  queued: 'Waiting', running: 'Downloading', paused: 'Paused', processing: 'Processing', completed: 'Done', failed: 'Failed', cancelled: 'Cancelled',
+  queued: 'Queued', running: 'Downloading', paused: 'Paused', processing: 'Processing', completed: 'Done', failed: 'Failed', cancelled: 'Cancelled',
 };
 
 function playablePath(job: Job): string | null {
@@ -21,6 +21,7 @@ function playablePath(job: Job): string | null {
 
 export const JobRow = memo(function JobRow({ id, compact }: { id: string; compact?: boolean }) {
   const job = useJobs((s) => s.byId[id]);
+  const position = useJobs((s) => queuePosition(s.byId, id));
   const act = useJobs((s) => s.act);
   const toast = useApp((s) => s.toast);
   const setMode = useApp((s) => s.setMode);
@@ -68,6 +69,12 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
   if (job.status === 'running' && p.etaSec != null) meta.push(`${formatEta(p.etaSec)} left`);
   if (job.status === 'running' && p.totalBytes) meta.push(`${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`);
 
+  // A queued download waits its turn and starts on its own when a slot frees — say so, so there's
+  // no need to babysit it or pause others by hand.
+  const queuedLabel = job.status === 'queued'
+    ? position <= 1 ? 'Up next — starts automatically' : `Queued · ${position} in line — starts automatically`
+    : null;
+
   return (
     <div className={cn('group border-b border-line last:border-b-0', compact ? 'px-3 py-2.5' : 'px-4 py-3.5')}>
       <div className="flex items-center gap-3.5">
@@ -87,12 +94,12 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
             <span className={cn('font-medium', job.status === 'failed' && 'text-danger', active && 'text-ink-2')}>
-              {job.status === 'failed' ? job.error?.message ?? 'Failed' : active || job.status === 'queued' || job.status === 'paused' ? p.stage || STATUS_LABEL[job.status] : job.status === 'completed' ? doneSummary : STATUS_LABEL[job.status]}
+              {job.status === 'failed' ? job.error?.message ?? 'Failed' : queuedLabel ? queuedLabel : active || job.status === 'paused' ? p.stage || STATUS_LABEL[job.status] : job.status === 'completed' ? doneSummary : STATUS_LABEL[job.status]}
             </span>
             {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
           </div>
           {(active || job.status === 'paused' || job.status === 'queued') && (
-            <ProgressBar className="mt-2" value={p.percent} tone={tone} indeterminate={job.status === 'queued' || (active && p.percent === 0)} />
+            <ProgressBar className="mt-2" value={p.percent} tone={tone} indeterminate={active && p.percent === 0} />
           )}
         </div>
 

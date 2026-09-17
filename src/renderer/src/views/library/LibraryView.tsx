@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Captions, Film, FolderOpen, ListMusic, Music, Play, RefreshCw, Search, Tv } from 'lucide-react';
+import { Captions, Film, FolderOpen, LayoutGrid, ListMusic, Music, Play, Rows3, RefreshCw, Search, Tv } from 'lucide-react';
 import type { LibraryItem, LibraryPlaylist } from '@shared/types';
 import { formatDuration, plural } from '@core/format';
 import { presetById } from '@core/presets';
@@ -22,10 +22,16 @@ function qualityTag(item: LibraryItem): string | null {
   return item.bitrateKbps ? `${item.bitrateKbps}k` : null;
 }
 
+type MusicView = 'details' | 'compact';
+type VideoView = 'grid' | 'list';
+
 export function LibraryView() {
   const [tab, setTab] = useState<Tab>('music');
   const [query, setQuery] = useState('');
   const { items, playlists, loaded, load, loadPlaylists, rescan, stats } = useLibrary();
+  const musicView = useApp((s) => s.settings?.library.musicView ?? 'details');
+  const videoView = useApp((s) => s.settings?.library.videoView ?? 'grid');
+  const updateSettings = useApp((s) => s.updateSettings);
 
   useEffect(() => {
     if (tab === 'music' && !loaded.audio) void load('audio');
@@ -54,6 +60,20 @@ export function LibraryView() {
           <Segmented label="Library section" value={tab} onChange={setTab} options={[
             { value: 'music', label: 'Music' }, { value: 'videos', label: 'Videos' }, { value: 'playlists', label: 'Playlists on this PC' },
           ]} />
+          {tab === 'music' && (
+            <ViewToggle
+              value={musicView}
+              onChange={(v) => void updateSettings({ library: { musicView: v } })}
+              options={[{ value: 'details', label: 'Details', icon: <Rows3 /> }, { value: 'compact', label: 'Compact', icon: <ListMusic /> }]}
+            />
+          )}
+          {tab === 'videos' && (
+            <ViewToggle
+              value={videoView}
+              onChange={(v) => void updateSettings({ library: { videoView: v } })}
+              options={[{ value: 'grid', label: 'Grid', icon: <LayoutGrid /> }, { value: 'list', label: 'List', icon: <Rows3 /> }]}
+            />
+          )}
           <div className="relative ml-auto">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-3" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search library"
@@ -62,8 +82,8 @@ export function LibraryView() {
         </div>
 
         <div className="min-h-0 flex-1 pb-4">
-          {tab === 'music' && <MusicList items={music} loaded={loaded.audio} searching={!!q} />}
-          {tab === 'videos' && <VideoGrid items={videos} loaded={loaded.video} searching={!!q} />}
+          {tab === 'music' && <MusicList items={music} loaded={loaded.audio} searching={!!q} view={musicView} />}
+          {tab === 'videos' && <VideoGrid items={videos} loaded={loaded.video} searching={!!q} view={videoView} />}
           {tab === 'playlists' && <PlaylistGrid lists={lists} loaded={loaded.playlists} searching={!!q} />}
         </div>
       </div>
@@ -91,7 +111,31 @@ function useItemActions() {
   };
 }
 
-function MusicList({ items, loaded, searching }: { items: LibraryItem[]; loaded: boolean; searching: boolean }) {
+function ViewToggle<T extends string>({ value, onChange, options }: {
+  value: T; onChange: (v: T) => void; options: { value: T; label: string; icon: React.ReactNode }[];
+}) {
+  return (
+    <div role="radiogroup" aria-label="View mode" className="flex rounded-lg border border-line-strong bg-raised p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          aria-label={o.label}
+          title={o.label}
+          onClick={() => onChange(o.value)}
+          className={cn('grid size-8 place-items-center rounded-md transition-colors [&_svg]:size-[18px]',
+            value === o.value ? 'bg-accent-soft text-accent' : 'text-ink-3 hover:bg-hover hover:text-ink-2')}
+        >
+          {o.icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; loaded: boolean; searching: boolean; view: MusicView }) {
   const playIds = usePlayer((s) => s.playIds);
   const currentId = usePlayer((s) => s.queue[s.index]?.id);
   const playing = usePlayer((s) => s.playing);
@@ -107,15 +151,19 @@ function MusicList({ items, loaded, searching }: { items: LibraryItem[]; loaded:
       if (useApp.getState().settings?.player.openPlayerOnPlay) setMode('player');
     });
   };
+  const compact = view === 'compact';
+  const cols = compact ? 'grid-cols-[32px_1fr_52px_32px]' : 'grid-cols-[44px_1fr_1fr_110px_64px_40px]';
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
-      <div className="grid grid-cols-[44px_1fr_1fr_110px_64px_40px] items-center gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
-        <span /><span>Title</span><span>Album</span><span>Quality</span><span className="text-right">Time</span><span />
-      </div>
+      {!compact && (
+        <div className="grid grid-cols-[44px_1fr_1fr_110px_64px_40px] items-center gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
+          <span /><span>Title</span><span>Album</span><span>Quality</span><span className="text-right">Time</span><span />
+        </div>
+      )}
       <VirtualList
         className="min-h-0 flex-1"
         items={items}
-        rowHeight={52}
+        rowHeight={compact ? 40 : 52}
         render={(item, index) => {
           const isCurrent = item.id === currentId;
           const tag = qualityTag(item);
@@ -125,38 +173,89 @@ function MusicList({ items, loaded, searching }: { items: LibraryItem[]; loaded:
               tabIndex={0}
               onDoubleClick={() => play(index)}
               onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && play(index)}
-              className={cn('group grid h-full grid-cols-[44px_1fr_1fr_110px_64px_40px] items-center gap-3 px-3 transition-colors hover:bg-hover', isCurrent && 'bg-accent-soft')}
+              className={cn('group grid h-full items-center gap-3 px-3 transition-colors hover:bg-hover', cols, isCurrent && 'bg-accent-soft')}
             >
               <button data-play aria-label={`Play ${item.title}`} className="relative" onClick={(e) => { e.stopPropagation(); play(index); }}>
-                <Artwork src={item.hasArtwork ? art(item.id) : null} seed={item.album ?? item.title} className="size-9" rounded="rounded-md" />
+                <Artwork src={item.hasArtwork ? art(item.id) : null} seed={item.album ?? item.title} className={compact ? 'size-7' : 'size-9'} rounded="rounded-md" />
                 {isCurrent && playing
                   ? <span className="absolute inset-0 grid place-items-center rounded-md bg-black/45"><EqBars /></span>
                   : <span className="absolute inset-0 grid place-items-center rounded-md bg-black/45 opacity-0 transition-opacity group-hover:opacity-100"><Play className="size-4 fill-white text-white" /></span>}
               </button>
-              <div className="min-w-0">
-                <p className={cn('truncate text-sm font-semibold', isCurrent && 'text-accent')}>{item.title}</p>
-                <p className="truncate text-[13px] text-ink-3">{item.artist ?? 'Unknown artist'}</p>
-              </div>
-              <p className="truncate text-[13px] text-ink-3">{item.album ?? '—'}</p>
-              <span>{tag && <Badge tone={item.lossless ? 'accent' : 'neutral'}>{tag}</Badge>}</span>
+              {compact ? (
+                <p className="truncate text-[13px]">
+                  <span className={cn('font-semibold', isCurrent && 'text-accent')}>{item.title}</span>
+                  <span className="text-ink-3"> · {item.artist ?? 'Unknown artist'}</span>
+                </p>
+              ) : (
+                <>
+                  <div className="min-w-0">
+                    <p className={cn('truncate text-sm font-semibold', isCurrent && 'text-accent')}>{item.title}</p>
+                    <p className="truncate text-[13px] text-ink-3">{item.artist ?? 'Unknown artist'}</p>
+                  </div>
+                  <p className="truncate text-[13px] text-ink-3">{item.album ?? '—'}</p>
+                  <span>{tag && <Badge tone={item.lossless ? 'accent' : 'neutral'}>{tag}</Badge>}</span>
+                </>
+              )}
               <span className="text-right text-[13px] text-ink-3 tabular">{formatDuration(item.durationSec)}</span>
               <IconButton label="Show in folder" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
             </div>
           );
         }}
       />
-      <p className="border-t border-line px-3 py-1.5 text-xs text-ink-3">Double-click a song to play it. The rest of the list plays after it.</p>
+      {!compact && <p className="border-t border-line px-3 py-1.5 text-xs text-ink-3">Double-click a song to play it. The rest of the list plays after it.</p>}
     </div>
   );
 }
 
-function VideoGrid({ items, loaded, searching }: { items: LibraryItem[]; loaded: boolean; searching: boolean }) {
+function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; loaded: boolean; searching: boolean; view: VideoView }) {
   const playIds = usePlayer((s) => s.playIds);
   const setMode = useApp((s) => s.setMode);
   const { reveal, makeTvSafe, generateSubs } = useItemActions();
 
   if (!loaded) return <ListSkeleton />;
   if (!items.length) return <EmptyState icon={<Film />} title={searching ? 'No videos match' : 'No videos yet'}>{searching ? 'Try a different search.' : 'Downloaded videos and anything in your Videos folder shows up here.'}</EmptyState>;
+
+  if (view === 'list') {
+    const openAt = (i: number) => { void playIds(items.map((x) => x.id), i); setMode('player'); };
+    return (
+      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
+        <VirtualList
+          className="min-h-0 flex-1"
+          items={items}
+          rowHeight={64}
+          render={(item, i) => {
+            const tag = qualityTag(item);
+            return (
+              <div
+                role="button"
+                tabIndex={0}
+                onDoubleClick={() => openAt(i)}
+                onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && openAt(i)}
+                className="group grid h-full grid-cols-[96px_1fr_auto] items-center gap-3 px-3 transition-colors hover:bg-hover"
+              >
+                <button aria-label={`Play ${item.title}`} className="relative overflow-hidden rounded-md" onClick={(e) => { e.stopPropagation(); openAt(i); }}>
+                  <Artwork src={art(item.id)} seed={item.title} kind="video" className="aspect-video w-24" rounded="rounded-md" />
+                  <span className="absolute inset-0 grid place-items-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"><Play className="size-4 fill-white text-white" /></span>
+                </button>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold" title={item.title}>{item.title}</p>
+                  <p className="mt-0.5 truncate text-[13px] text-ink-3">{[item.codec?.toUpperCase(), tag].filter(Boolean).join(' · ') || '—'}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="mr-1 text-[13px] text-ink-3 tabular">{formatDuration(item.durationSec)}</span>
+                  <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <IconButton label="Generate English subtitles" size="sm" onClick={() => generateSubs(item.path)}><Captions /></IconButton>
+                    {item.codec !== 'h264' && <IconButton label="Make a TV-ready copy" size="sm" onClick={() => makeTvSafe(item.path)}><Tv /></IconButton>}
+                    <IconButton label="Show in folder" size="sm" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid h-full auto-rows-min grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-4 overflow-auto pr-1 pb-4">

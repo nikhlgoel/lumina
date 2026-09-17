@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import type { Job } from '@shared/types';
+import { queuePosition } from '@core/jobOrder';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from './app';
+
+export { queuePosition };
 
 type JobAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove';
 

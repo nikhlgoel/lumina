@@ -28,7 +28,7 @@ export function DownloadsSection({ s, set }: SectionProps) {
       </Group>
 
       <Group title="Speed">
-        <Row id="concurrency" label="Downloads at the same time">
+        <Row id="concurrency" label="Downloads at the same time" description="Extra downloads wait in line and start on their own when a slot frees. Fewer at once means more speed for each.">
           <Segmented label="Concurrent downloads" value={String(d.concurrency)} onChange={(v) => set({ downloads: { concurrency: Number(v) } })} options={['1', '2', '3', '4', '6', '8'].map((v) => ({ value: v, label: v }))} />
         </Row>
         <Row id="fragments" label="Parallel pieces per video" description="Streams are split into pieces; fetching more at once is faster on good connections.">
