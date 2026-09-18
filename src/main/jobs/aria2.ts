@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { aria2Progress, friendlyAria2Error, type Aria2Status } from '../../core/progress';
+import { diskCacheMb } from '../../core/tuning';
 import { formatBytes } from '../../core/format';
 import { speedLimitActive, type Settings } from '../../shared/settings';
 import { killTree, spawnTool } from '../process';
@@ -96,7 +98,9 @@ class Aria2Daemon {
         '--enable-rpc', `--rpc-listen-port=${this.port}`, '--rpc-listen-all=false', `--rpc-secret=${this.secret}`,
         `--stop-with-process=${process.pid}`, '--continue=true', '--auto-file-renaming=true', '--allow-overwrite=false',
         // falloc needs a privilege on Windows; plain writes are fine on NTFS.
-        `--file-allocation=${process.platform === 'win32' ? 'none' : 'falloc'}`, '--summary-interval=0', '--console-log-level=warn', '--disk-cache=32M',
+        // Disk cache (a write-smoothing RAM buffer, not a rate limit) sized to this machine's RAM so it suits
+        // everyone from a slow laptop to a many-Gbps workstation. See core/tuning.
+        `--file-allocation=${process.platform === 'win32' ? 'none' : 'falloc'}`, '--summary-interval=0', '--console-log-level=warn', `--disk-cache=${diskCacheMb(os.totalmem())}M`,
         `--max-connection-per-server=${s.network.connectionsPerServer}`, `--split=${s.network.connectionsPerServer}`, '--min-split-size=1M',
         '--retry-wait=3', `--max-tries=${Math.max(5, s.downloads.retries * 2)}`, '--connect-timeout=20', '--timeout=60',
         '--follow-torrent=true', '--bt-save-metadata=true', `--listen-port=${t.listenPort}`, `--dht-listen-port=${t.listenPort}`,
@@ -185,6 +189,7 @@ export const aria2Runner: Runner = (ctx) => {
   const verifyAbort = new AbortController();
   const finish = async (status: Aria2Status) => {
     const files = (status.files ?? []).map((f) => f.path).filter((p) => p && !p.startsWith('[METADATA]'));
+    log.info(`aria2 download finished: ${job.title}`, { files: files.length, totalBytes: Number(status.totalLength) || null });
     const top = files.length > 1 ? commonRoot(files, dir) : files[0];
     ctx.patch({ outputPaths: files, outputDir: top && files.length > 1 ? top : dir });
     // Torrents are already verified piece by piece; plain downloads get checked before they count as done.
@@ -342,6 +347,15 @@ export const aria2Runner: Runner = (ctx) => {
       opts,
     };
     await addToAria();
+    // Structured start line so a stuck/slow aria2 download is diagnosable from the log alone.
+    log.info(`aria2 download started: ${job.title}`, {
+      kind: isTorrent ? 'torrent' : 'direct',
+      connectionsPerServer: settings.get().network.connectionsPerServer,
+      diskCacheMb: diskCacheMb(os.totalmem()),
+      dir,
+      expectedBytes,
+      hostedPage: Boolean(job.source.direct?.hosted),
+    });
     void poll();
   })().catch((err) => ctx.fail(err instanceof Error ? err.message : String(err)));
 

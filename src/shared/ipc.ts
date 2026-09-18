@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type {
-  AppInfo, BrowserState, DownloadOptions, FormatChoice, HostChallenge, Job, LibraryItem, LibraryPlaylist, LibraryStats,
-  Lyrics, MediaInfo, PlayableItem, Preset, RequestInfo, ToolStatus,
+  AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryItem, LibraryPlaylist, LibraryStats,
+  Lyrics, MediaInfo, PlayableItem, Preset, RequestInfo, SearchResults, SyncStatus, ToolStatus,
 } from './types';
 import type { Settings, SettingsPatch } from './settings';
 
@@ -67,6 +67,7 @@ export const inputSchemas = {
   'settings:update': z.record(z.string(), z.record(z.string(), z.unknown())),
   'presets:list': z.void(),
   'media:inspect': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
+  'search:query': z.object({ query: z.string().min(1).max(200) }),
   'jobs:list': z.void(),
   'jobs:add': z.object({ url: z.string().min(1).max(8192), info: z.unknown(), options: downloadOptionsSchema }),
   'jobs:pause': id,
@@ -80,7 +81,9 @@ export const inputSchemas = {
     id: z.string().min(1).max(64), x: z.number().min(-10_000).max(20_000), y: z.number().min(-10_000).max(20_000),
     width: z.number().min(0).max(20_000), height: z.number().min(0).max(20_000),
   }),
-  'hosts:challenge-action': z.object({ id: z.string().min(1).max(64), action: z.enum(['reload', 'skip']) }),
+  'hosts:challenge-action': z.object({ id: z.string().min(1).max(64), action: z.enum(['reload', 'skip', 'skip-all']) }),
+  'firewall:status': z.void(),
+  'firewall:grant': z.void(),
   'browser:go': z.object({ url: z.string().max(4096) }),
   'browser:back': z.void(),
   'browser:forward': z.void(),
@@ -142,6 +145,15 @@ export const inputSchemas = {
   'storage:usage': z.void(),
   'cache:sizes': z.void(),
   'cache:clear': z.object({ what: z.enum(['artwork', 'lyrics']) }),
+
+  'sync:status': z.void(),
+  'sync:create-chain': z.void(),
+  'sync:join-chain': z.object({ code: z.string().min(1).max(200) }),
+  'sync:leave': z.void(),
+  'sync:now': z.void(),
+  'bookmarks:list': z.void(),
+  'bookmarks:add': z.object({ url: z.string().min(1).max(8192), title: z.string().max(500).catch('') }),
+  'bookmarks:remove': z.object({ id: z.string().min(1).max(8192) }),
 } as const;
 
 export interface SiteAccountInfo { domain: string; cookies: number; signedIn: boolean }
@@ -166,6 +178,7 @@ export interface InvokeOutputs {
   'settings:update': Settings;
   'presets:list': Preset[];
   'media:inspect': MediaInfo;
+  'search:query': SearchResults;
   'jobs:list': Job[];
   'jobs:add': Job;
   'jobs:pause': void;
@@ -185,6 +198,8 @@ export interface InvokeOutputs {
   'browser:hide': void;
   'browser:bounds': void;
   'hosts:challenge-action': void;
+  'firewall:status': FirewallStatus;
+  'firewall:grant': FirewallStatus;
   'jobs:convert': Job[];
   'subtitles:generate': Job;
   'library:stats': LibraryStats;
@@ -223,6 +238,14 @@ export interface InvokeOutputs {
   'storage:usage': DiskUsage[];
   'cache:sizes': { artworkBytes: number; lyricsEntries: number };
   'cache:clear': void;
+  'sync:status': SyncStatus;
+  'sync:create-chain': SyncStatus;
+  'sync:join-chain': SyncStatus;
+  'sync:leave': SyncStatus;
+  'sync:now': SyncStatus;
+  'bookmarks:list': Bookmark[];
+  'bookmarks:add': Bookmark;
+  'bookmarks:remove': void;
 }
 
 export type InvokeChannel = keyof typeof inputSchemas;
@@ -257,6 +280,7 @@ export interface EventPayloads {
   'hosts:challenge': HostChallenge;
   'hosts:challenge-done': { id: string };
   'browser:state': BrowserState;
+  'sync:changed': SyncStatus;
 }
 
 export type EventChannel = keyof EventPayloads;

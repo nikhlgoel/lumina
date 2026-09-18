@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Captions, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Puzzle, Search, Settings2, Shield, UserRound, Wrench, X,
+  Captions, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Puzzle, RefreshCw, Search, Settings2, Shield, UserRound, Wrench, X,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -8,6 +8,7 @@ import { TitleBar } from '@/components/Shell';
 import { AppearanceSection, GeneralSection, PlayerSection } from './sections/app';
 import { DownloadsSection, FormatsSection, SubtitlesSection, TorrentsSection } from './sections/downloading';
 import { AccountsSection, ExtensionSection, NetworkSection } from './sections/connections';
+import { SyncSection } from './sections/sync';
 import { AdvancedSection, PrivacySection, StorageSection } from './sections/system';
 import type { SectionProps } from './controls';
 
@@ -39,7 +40,7 @@ const SECTIONS: SectionDef[] = [
   ] },
   { id: 'downloads', label: 'Downloads', icon: <Download />, group: 'Downloading', component: DownloadsSection, index: [
     ['presetMusic', 'Default music format', 'quality mp3 flac'], ['presetVideo', 'Default video format', 'quality 4k 1080p'], ['concurrency', 'Downloads at the same time', 'parallel simultaneous'],
-    ['fragments', 'Parallel pieces per video', 'speed fragments'], ['connections', 'Connections per file', 'speed aria2'], ['speedLimit', 'Speed limit', 'bandwidth throttle'],
+    ['fragments', 'Parallel pieces per video', 'speed fragments'], ['connections', 'Connections per file', 'speed aria2'], ['accelerate', 'Faster downloads (multi-connection)', 'speed aria2 slow kb'], ['speedLimit', 'Speed limit', 'bandwidth throttle'],
     ['speedSchedule', 'Only limit during these hours', 'schedule'], ['retries', 'Retries on network errors'], ['autoRetry', 'Try failed downloads again later'],
     ['preventSleep', 'Keep the computer awake'], ['filename', 'File name', 'template naming'], ['musicLayout', 'Organize music', 'artist album folders'],
     ['videoLayout', 'Organize videos', 'channel folders'], ['numbering', 'Number playlist items'], ['playlistFile', 'Write a playlist file', 'm3u8'],
@@ -68,6 +69,7 @@ const SECTIONS: SectionDef[] = [
     ['youtubeAccount', 'Sign in to YouTube', 'login members age-restricted private bot'], ['otherSite', 'Sign in to another site'],
     ['cookiesFrom', 'Which sign-in downloads use', 'cookies browser chrome firefox'], ['cookiesFile', 'Import a cookies.txt file'],
     ['spotifyConnect', 'Connect Spotify', 'private playlists liked songs'], ['spotifyClientId', 'Spotify Client ID'],
+    ['fw-aria2c', 'Allow torrents through Windows Firewall', 'network access permission peers block denied re-grant'],
   ] },
   { id: 'extension', label: 'Browser extension', icon: <Puzzle />, group: 'Connections', component: ExtensionSection, index: [
     ['extEnabled', 'Allow the extension to connect', 'chrome edge firefox'], ['extCapture', 'Take over browser downloads', 'catch integrate'],
@@ -75,6 +77,11 @@ const SECTIONS: SectionDef[] = [
   ] },
   { id: 'network', label: 'Network', icon: <Globe />, group: 'Connections', component: NetworkSection, index: [
     ['proxy', 'Proxy', 'socks vpn'], ['userAgent', 'Custom user agent'], ['ipv4', 'Use IPv4 only'],
+  ] },
+  { id: 'sync', label: 'Sync', icon: <RefreshCw />, group: 'Connections', component: SyncSection, index: [
+    ['createChain', 'Start a sync chain', 'devices phone android luminabr brave chain'], ['joinChain', 'Join a sync chain', 'recovery code pair'],
+    ['recoveryCode', 'Recovery code', 'seed encrypt e2e'], ['syncFolder', 'Sync folder', 'usb shared cloud'],
+    ['syncBookmarks', 'Sync bookmarks'], ['syncNow', 'Sync now'],
   ] },
   { id: 'privacy', label: 'Privacy', icon: <Shield />, group: 'System', component: PrivacySection, index: [
     ['keepHistory', 'Keep a list of finished downloads', 'history'], ['historyDays', 'Forget finished downloads after'],

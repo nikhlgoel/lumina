@@ -178,3 +178,11 @@ html[data-transition="player-close"]::view-transition-old(player) { animation: v
   animation-delay: 0s !important;
   transition-duration: 0s !important;
 }
+
+/* Home search bar: a slow, theme-coloured glow that drifts behind the box (auto-stilled by data-motion="reduced"). */
+@keyframes search-drift-a { 0%,100% { transform: translate(-6%, -4%) scale(1); } 50% { transform: translate(7%, 5%) scale(1.18); } }
+@keyframes search-drift-b { 0%,100% { transform: translate(6%, 5%) scale(1.1); } 50% { transform: translate(-7%, -5%) scale(0.95); } }
+.search-glow { position: absolute; left: 50%; top: 50%; width: 118%; height: 320%; translate: -50% -50%; z-index: 0; pointer-events: none; filter: blur(64px); opacity: 0.55; }
+.search-glow::before, .search-glow::after { content: ""; position: absolute; top: 0; height: 100%; width: 52%; border-radius: 9999px; background: radial-gradient(closest-side, var(--accent), transparent 72%); }
+.search-glow::before { left: 2%; animation: search-drift-a 24s ease-in-out infinite; }
+.search-glow::after { right: 2%; opacity: 0.7; animation: search-drift-b 30s ease-in-out infinite; }

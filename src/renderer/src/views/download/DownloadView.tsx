@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowRight, ClipboardPaste, FileDown, FileUp, Link2, Puzzle, TriangleAlert, X } from 'lucide-react';
-import type { MediaInfo, RequestInfo } from '@shared/types';
-import { extractLinks } from '@core/url';
+import type { MediaInfo, RequestInfo, SearchHit, SearchResults as SearchResultsData } from '@shared/types';
+import { extractLinks, toInspectTarget } from '@core/url';
 import { planBatch, type BatchPlan } from '@core/batch';
 import { call, errorMessage, pathForFile } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
@@ -12,6 +12,9 @@ import { TitleBar } from '@/components/Shell';
 import { InspectResult } from './InspectResult';
 import { RecentStrip } from './RecentStrip';
 import { BatchPicker } from './BatchPicker';
+import { SearchResults } from './SearchResults';
+import { SearchSuggestions } from './SearchSuggestions';
+import { addRecentSearch, clearRecentSearches, getRecentSearches } from './recentSearches';
 import { quickOptions } from './quickOptions';
 
 type Phase =
@@ -19,7 +22,9 @@ type Phase =
   | { kind: 'inspecting'; url: string; source?: PendingLink['source'] }
   | { kind: 'ready'; url: string; info: MediaInfo; source?: PendingLink['source'] }
   | { kind: 'error'; url: string; message: string; request?: RequestInfo }
-  | { kind: 'batch'; plan: BatchPlan };
+  | { kind: 'batch'; plan: BatchPlan }
+  | { kind: 'searching'; query: string }
+  | { kind: 'results'; results: SearchResultsData };
 
 const SOURCE_LABEL: Record<NonNullable<PendingLink['source']>, string> = {
   extension: 'Sent from your browser',
@@ -40,6 +45,8 @@ export function DownloadView() {
   const setView = useApp((s) => s.setView);
   const toast = useApp((s) => s.toast);
   const [dragging, setDragging] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [recent, setRecent] = useState<string[]>(() => getRecentSearches());
   const hasJobs = useJobs((s) => s.order.length > 0);
 
   const inspect = async (url: string, opts: { request?: RequestInfo; source?: PendingLink['source'] } = {}) => {
@@ -54,7 +61,7 @@ export function DownloadView() {
     }
   };
 
-  /** One link inspects; several links become a batch grouped into archive sets and optional extras. */
+  /** One link inspects; several links become a batch; plain text becomes a YouTube search. */
   const handleText = (raw: string) => {
     const links = extractLinks(raw);
     if (links.length > 1) {
@@ -63,8 +70,28 @@ export function DownloadView() {
       setPhase({ kind: 'batch', plan: planBatch(links) });
       return;
     }
-    const url = links[0] ?? raw.trim();
-    if (url) void inspect(url);
+    if (links.length === 1) {
+      void inspect(links[0]!);
+      return;
+    }
+    // No link pasted: a bare domain becomes a URL, anything else searches (songs + videos).
+    const { target, isSearch } = toInspectTarget(raw);
+    if (!target) return;
+    if (isSearch) void runSearch(raw.trim());
+    else void inspect(target);
+  };
+
+  const runSearch = async (query: string) => {
+    setInput(query);
+    setRecent(addRecentSearch(query));
+    const token = ++request.current;
+    setPhase({ kind: 'searching', query });
+    try {
+      const results = await call('search:query', { query });
+      if (token === request.current) setPhase({ kind: 'results', results });
+    } catch (err) {
+      if (token === request.current) setPhase({ kind: 'error', url: query, message: errorMessage(err) });
+    }
   };
 
   useEffect(() => {
@@ -208,13 +235,17 @@ export function DownloadView() {
             </div>
           )}
 
-          <form onSubmit={submit} className="group relative">
-            <Link2 className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-ink-3 transition-colors group-focus-within:text-accent" />
+          <div className="relative">
+            {!compact && <div className="search-glow" aria-hidden="true" />}
+            <form onSubmit={submit} className="group relative z-[1]">
+            <Link2 className={cn('pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-ink-3 transition-colors group-focus-within:text-accent', compact ? 'size-5' : 'size-[22px]')} />
             <input
               ref={inputRef}
               autoFocus
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               onPaste={(e) => {
                 const text = e.clipboardData.getData('text');
                 if (extractLinks(text).length) {
@@ -222,10 +253,13 @@ export function DownloadView() {
                   handleText(text);
                 }
               }}
-              placeholder="https://…  or  magnet:?xt=…"
-              aria-label="Link to download"
+              placeholder="Paste a link or magnet — or type to search"
+              aria-label="Link to download or search"
               spellCheck={false}
-              className="h-14 w-full rounded-2xl border border-line-strong bg-raised pr-[322px] pl-12 text-[15px] shadow-md outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-ink-3 focus:border-accent focus:shadow-[0_0_0_4px_var(--accent-soft)]"
+              className={cn(
+                'w-full rounded-2xl border border-line-strong bg-raised pr-[322px] shadow-md outline-none transition-[border-color,box-shadow,height] duration-200 placeholder:text-ink-3 focus:border-accent focus:shadow-[0_0_0_4px_var(--accent-soft)]',
+                compact ? 'h-14 pl-12 text-[15px]' : 'h-[68px] pl-14 text-base',
+              )}
             />
             <div className="absolute top-1/2 right-2 flex -translate-y-1/2 gap-1.5">
               <Button type="button" variant="ghost" icon={<FileUp className="size-4" />} onClick={() => void pickTorrents()} title="Open .torrent files">Torrent</Button>
@@ -234,7 +268,15 @@ export function DownloadView() {
                 {phase.kind === 'inspecting' ? 'Reading' : 'Go'}
               </Button>
             </div>
-          </form>
+            {phase.kind === 'idle' && focused && !input.trim() && (
+              <SearchSuggestions
+                items={recent}
+                onPick={(q) => void runSearch(q)}
+                onClear={() => { clearRecentSearches(); setRecent([]); }}
+              />
+            )}
+            </form>
+          </div>
           {!compact && (
             <button
               type="button"
@@ -263,6 +305,10 @@ export function DownloadView() {
               <p className="mb-2 text-xs font-semibold tracking-[0.06em] text-ink-3 uppercase animate-rise">{SOURCE_LABEL[phase.source]}</p>
             )}
             {phase.kind === 'inspecting' && <InspectSkeleton />}
+            {phase.kind === 'searching' && (
+              <div className="rounded-xl border border-line bg-panel p-5 text-sm text-ink-3 animate-rise" aria-busy="true">Searching songs and videos for “{phase.query}”…</div>
+            )}
+            {phase.kind === 'results' && <SearchResults results={phase.results} onPick={(hit) => inspect(hit.url)} />}
             {phase.kind === 'error' && (
               <div className="flex items-start gap-3 rounded-xl border border-danger/25 bg-danger/8 p-4 animate-rise">
                 <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" />

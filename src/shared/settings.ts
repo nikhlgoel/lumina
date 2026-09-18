@@ -52,6 +52,8 @@ export const settingsSchema = z.object({
   downloads: section({
     concurrency: clampInt(1, 8, 3),
     concurrentFragments: clampInt(1, 16, 8),
+    /** Use the bundled aria2 (many connections) for plain HTTP stream downloads — the big speed win on fast links. */
+    accelerate: z.boolean().catch(true),
     speedLimitKbps: clampInt(0, 1_000_000, 0),
     speedLimitSchedule: section({
       enabled: z.boolean().catch(false),
@@ -187,6 +189,15 @@ export const settingsSchema = z.object({
     autoUpdateYtdlp: z.boolean().catch(true),
     ytdlpChannel: z.enum(['stable', 'nightly']).catch('stable'),
     lastYtdlpCheck: z.number().catch(0),
+  }),
+
+  sync: section({
+    /** Folder holding the encrypted lumina-sync.bin both devices reach (USB / shared / cloud-drive folder). */
+    folder: z.string().max(1024).catch(''),
+    /** A friendly name for this device shown in the chain (defaults to the hostname in the main process). */
+    deviceLabel: z.string().max(60).catch(''),
+    /** Sync bookmarks across the chain. More record types (likes, history) toggle in as they land. */
+    syncBookmarks: z.boolean().catch(true),
   }),
 
   advanced: section({

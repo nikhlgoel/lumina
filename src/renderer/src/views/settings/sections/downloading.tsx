@@ -37,6 +37,9 @@ export function DownloadsSection({ s, set }: SectionProps) {
         <Row id="connections" label="Connections per file" description="For direct file downloads. Most servers allow up to 16.">
           <Segmented label="Connections per server" value={String(s.network.connectionsPerServer)} onChange={(v) => set({ network: { connectionsPerServer: Number(v) } })} options={['1', '4', '8', '16'].map((v) => ({ value: v, label: v }))} />
         </Row>
+        <Row id="accelerate" label="Faster downloads (multi-connection)" description="Downloads plain video/audio links with many connections at once (via aria2) instead of one, using the “Connections per file” count. Big speed-up on fast links; leave on unless a site misbehaves.">
+          <Switch label="Faster downloads" checked={d.accelerate} onChange={(v) => set({ downloads: { accelerate: v } })} />
+        </Row>
         <Row id="speedLimit" label="Speed limit" description={d.speedLimitKbps ? `About ${(d.speedLimitKbps / 1024).toFixed(1)} MB/s` : 'No limit.'}>
           <NumberInput value={d.speedLimitKbps} min={0} suffix="KB/s" onCommit={(v) => set({ downloads: { speedLimitKbps: v } })} />
         </Row>

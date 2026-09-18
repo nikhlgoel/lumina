@@ -48,7 +48,7 @@ export function QuickCheck() {
   }, [challenge]);
 
   if (!challenge) return null;
-  const act = (action: 'reload' | 'skip') => void call('hosts:challenge-action', { id: challenge.id, action }).catch(() => undefined);
+  const act = (action: 'reload' | 'skip' | 'skip-all') => void call('hosts:challenge-action', { id: challenge.id, action }).catch(() => undefined);
   let shownHost = challenge.host;
   try {
     shownHost = new URL(challenge.url).host;
@@ -114,6 +114,11 @@ export function QuickCheck() {
         <footer className="flex items-center gap-3 border-t border-line bg-panel px-5 py-3">
           <span className="inline-flex size-2 shrink-0 rounded-full bg-accent" />
           <p className="mr-auto min-w-0 truncate text-[13px] text-ink-2" title={challenge.stage}>{challenge.stage}</p>
+          {challenge.waiting > 0 && (
+            <Button variant="ghost" icon={<SkipForward className="size-4" />} onClick={() => act('skip-all')}>
+              Skip all ({challenge.waiting + 1})
+            </Button>
+          )}
           <Button variant="ghost" icon={<SkipForward className="size-4" />} onClick={() => act('skip')}>Skip this file</Button>
         </footer>
       </section>

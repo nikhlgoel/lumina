@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, FolderOpen, Globe, LogOut, Puzzle, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Check, Copy, ExternalLink, FolderOpen, Globe, LogOut, Puzzle, ShieldAlert, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { ExtensionStatus, SiteAccountInfo, SpotifyStatus } from '@shared/ipc';
+import type { FirewallStatus } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from '@/stores/app';
 import { Badge, Button, Segmented, Select, Switch } from '@/components/ui';
@@ -28,12 +29,14 @@ export function AccountsSection({ s, set }: SectionProps) {
   const toast = useApp((x) => x.toast);
   const [accounts, setAccounts] = useState<SiteAccountInfo[] | null>(null);
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
+  const [firewall, setFirewall] = useState<FirewallStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [site, setSite] = useState('');
 
   useEffect(() => {
     void call('accounts:list').then(setAccounts);
     void call('spotify:status').then(setSpotify);
+    void call('firewall:status').then(setFirewall).catch(() => undefined);
   }, []);
 
   const run = async <T,>(key: string, fn: () => Promise<T>, done?: (v: T) => void) => {
@@ -53,6 +56,14 @@ export function AccountsSection({ s, set }: SectionProps) {
   return (
     <>
       <Group title="Sign in for private and members-only media" description="Sign in once inside Lumina. Your password goes only to the site; Lumina keeps the session on this computer and uses it for downloads.">
+        <div className="mb-1 flex items-start gap-2.5 rounded-lg border border-success/25 bg-success/8 px-3 py-2.5 text-[13px] leading-relaxed text-ink-2">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" />
+          <span>
+            <span className="font-semibold text-ink">Your privacy:</span> the sign-in window is the real site — your password
+            and 2-factor codes go straight to it, never to Lumina. Only the resulting session cookies are kept, on this
+            computer, and used to download as you (Lumina has no account and no server to send them to). “Sign out” deletes them.
+          </span>
+        </div>
         <Row id="youtubeAccount" label={<span className="flex items-center gap-2">YouTube {youtube && <Badge tone="success"><ShieldCheck className="size-3" /> Signed in</Badge>}</span>}
           description="For age-restricted, private, members-only videos and your own playlists. Also stops “confirm you’re not a bot” errors.">
           {youtube
@@ -107,6 +118,25 @@ export function AccountsSection({ s, set }: SectionProps) {
             onCommit={(v) => set({ accounts: { spotifyClientId: v } })} />
         </Row>
       </Group>
+
+      {firewall?.supported && (
+        <Group title="Network access (Windows Firewall)" description="Torrents need to accept incoming connections from other peers. Windows asks once — if it was denied, downloads still work but find far fewer peers. Use this to allow it again; Windows will ask for permission.">
+          {firewall.tools.map((t) => (
+            <Row key={t.key} id={`fw-${t.key}`}
+              label={<span className="flex items-center gap-2">{t.label} {t.granted
+                ? <Badge tone="success"><ShieldCheck className="size-3" /> Allowed</Badge>
+                : <Badge tone="warning"><ShieldAlert className="size-3" /> Not allowed</Badge>}</span>}
+              description={t.granted ? 'Incoming peer connections are allowed through the firewall.' : 'Incoming peer connections are blocked. Torrents will be slower to find peers.'}>
+              {!t.granted && (
+                <Button size="sm" variant="primary" loading={busy === 'fw'}
+                  onClick={() => run('fw', () => call('firewall:grant'), (st) => { setFirewall(st); if (st.tools.every((x) => x.granted)) toast('Allowed through the firewall', 'success'); })}>
+                  Allow through firewall
+                </Button>
+              )}
+            </Row>
+          ))}
+        </Group>
+      )}
     </>
   );
 }

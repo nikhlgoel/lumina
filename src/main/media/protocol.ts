@@ -103,6 +103,44 @@ function remux(id: string, startSec: number): Response {
   return new Response(stream, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
 }
 
+const VTT_HEADERS = { 'Content-Type': 'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin': '*' };
+
+/**
+ * Subtitles for the player, as WebVTT. Finds any English `.srt`/`.vtt` sidecar (whatever the lang-code variant),
+ * and if none exists falls back to extracting an embedded subtitle track with ffmpeg — so embed-only downloads and
+ * imported videos with baked-in subtitle streams still show captions.
+ */
+async function subtitles(id: string): Promise<Response> {
+  const item = library.getById(id);
+  if (!item || !fs.existsSync(item.path)) return new Response('Not found', { status: 404 });
+  const { parseCues, cuesToVtt } = await import('../../core/lyrics');
+  const { pickSubtitleSidecar } = await import('../../core/subtitleFiles');
+
+  const dir = path.dirname(item.path);
+  const stem = path.basename(item.path, path.extname(item.path));
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    // fall through to embedded extraction
+  }
+  const sidecar = pickSubtitleSidecar(stem, files);
+  if (sidecar) {
+    const text = fs.readFileSync(path.join(dir, sidecar), 'utf8');
+    const vtt = /\.vtt$/i.test(sidecar) ? text : cuesToVtt(parseCues(text));
+    return new Response(vtt, { headers: VTT_HEADERS });
+  }
+
+  // No sidecar: pull the first embedded subtitle track out as WebVTT (empty output → the file has none).
+  try {
+    const r = await runTool(tools.require('ffmpeg'), ['-v', 'error', '-i', item.path, '-map', '0:s:0?', '-f', 'webvtt', 'pipe:1'], { timeoutMs: 30_000 });
+    if (r.code === 0 && r.stdout.trim()) return new Response(r.stdout, { headers: VTT_HEADERS });
+  } catch (err) {
+    log.debug(`No embedded subtitles for ${item.path}`, err);
+  }
+  return new Response('Not found', { status: 404 });
+}
+
 export function handleMediaProtocol() {
   protocol.handle(MEDIA_SCHEME, async (request) => {
     try {
@@ -115,13 +153,7 @@ export function handleMediaProtocol() {
       }
       if (kind === 'remux') return remux(id, Number(url.searchParams.get('t') ?? 0));
       if (kind === 'art') return await artwork(id);
-      if (kind === 'subs') {
-        const item = library.getById(id);
-        const srt = item ? `${item.path.slice(0, -path.extname(item.path).length)}.en.srt` : '';
-        if (!item || !fs.existsSync(srt)) return new Response('Not found', { status: 404 });
-        const { parseCues, cuesToVtt } = await import('../../core/lyrics');
-        return new Response(cuesToVtt(parseCues(fs.readFileSync(srt, 'utf8'))), { headers: { 'Content-Type': 'text/vtt; charset=utf-8' } });
-      }
+      if (kind === 'subs') return await subtitles(id);
       return new Response('Not found', { status: 404 });
     } catch (err) {
       log.warn('Media request failed', err);

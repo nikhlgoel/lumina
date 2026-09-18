@@ -145,9 +145,15 @@ interface ActiveChallenge {
   unfollow: () => void;
 }
 
+/** A page blocked behind the active quick check: `resume` gives it its turn; `skip` makes it give up its file. */
+interface WaitingTurn {
+  resume: () => void;
+  skip: () => void;
+}
+
 let active: ActiveChallenge | null = null;
 /** Pages waiting for the person, in order. */
-const waitingTurns: (() => void)[] = [];
+const waitingTurns: WaitingTurn[] = [];
 
 function sendChallenge(c: ActiveChallenge) {
   if (!c.main.isDestroyed()) c.main.webContents.send('hosts:challenge', { ...c.info, waiting: waitingTurns.length });
@@ -228,10 +234,20 @@ export function placeChallenge(id: string, rect: { x: number; y: number; width: 
   placePage(active);
 }
 
-export function challengeAction(id: string, action: 'reload' | 'skip') {
+export function challengeAction(id: string, action: 'reload' | 'skip' | 'skip-all') {
   if (!active || active.info.id !== id) return;
-  if (action === 'skip') active.skip();
-  else if (!active.page.isDestroyed()) active.page.webContents.reload();
+  if (action === 'reload') {
+    if (!active.page.isDestroyed()) active.page.webContents.reload();
+    return;
+  }
+  if (action === 'skip-all') {
+    // Give up every file queued behind this one too, so a wall of captchas can be dismissed in one click.
+    // Drain first, then tell each to skip: a skipped page's own cleanup calls waitingTurns.shift(), which
+    // would otherwise resume a page we're about to skip.
+    const queued = waitingTurns.splice(0, waitingTurns.length);
+    for (const t of queued) t.skip();
+  }
+  active.skip();
 }
 
 /* ---------- helpers ---------- */
@@ -394,14 +410,23 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
         onStage('Needs you: waiting for your earlier quick check');
         if (active) sendChallenge(active);
         await new Promise<void>((resolve, reject) => {
-          waitingTurns.push(resolve);
-          signal.addEventListener('abort', () => {
-            const i = waitingTurns.indexOf(resolve);
+          const remove = () => {
+            const i = waitingTurns.indexOf(turn);
             if (i >= 0) waitingTurns.splice(i, 1);
+          };
+          const turn: WaitingTurn = {
+            resume: () => { remove(); resolve(); },
+            // Skip-all reached this page while it waited: mark it skipped, then let it wake and give up its file.
+            skip: () => { skipped = true; remove(); resolve(); },
+          };
+          waitingTurns.push(turn);
+          signal.addEventListener('abort', () => {
+            remove();
             reject(new Error('Cancelled'));
           }, { once: true });
         });
         if (caught) break;
+        if (skipped) throw new Error('Skipped: the download page needed a quick check. Retry to open it again.');
       }
       const info: HostChallenge = {
         id: randomUUID(), label: opts.label ?? 'Download', host: new URL(pageUrl).hostname.replace(/^www\./, ''), reason,
@@ -431,7 +456,7 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
     if (challenge) {
       closeChallenge(challenge);
       // Next page waiting for the person gets its turn.
-      waitingTurns.shift()?.();
+      waitingTurns.shift()?.resume();
     }
     if (page && !page.isDestroyed()) page.destroy();
     void s.clearStorageData().catch(() => undefined);

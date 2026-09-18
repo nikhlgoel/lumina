@@ -94,6 +94,33 @@ export interface BuildArgsInput {
   includeAutoSubs: boolean;
   windowsFilenames: boolean;
   extraArgs: string[];
+  /** Full path to the bundled aria2c. When set with `accelerate`, plain HTTP downloads use aria2's many connections. */
+  aria2cPath?: string | null;
+  /** Connections aria2 opens per server for accelerated downloads (1–16). */
+  connectionsPerServer?: number;
+  /** aria2 disk-cache size in MB (machine-adaptive; see core/tuning). Defaults to 64 when unset. */
+  diskCacheMb?: number;
+  /** Turn the aria2 accelerator on for progressive http/https/ftp downloads (fragmented HLS/DASH always stay native). */
+  accelerate?: boolean;
+}
+
+/**
+ * Route plain (progressive) http/https/ftp downloads through aria2c for multi-connection speed. Fragmented streams
+ * (HLS `m3u8`, DASH `http_dash_segments`) are keyed by their own protocol, so they keep yt-dlp's native
+ * `--concurrent-fragments` path and its progress reporting — only the single-connection direct downloads change.
+ */
+function accelerationArgs(i: BuildArgsInput): string[] {
+  if (!i.accelerate || !i.aria2cPath) return [];
+  const conns = Math.max(1, Math.min(16, i.connectionsPerServer ?? 16));
+  const a2 = [
+    `-x${conns}`, `-s${conns}`, '-k1M', '--min-split-size=1M', `--max-connection-per-server=${conns}`,
+    '--file-allocation=none', `--disk-cache=${i.diskCacheMb ?? 64}M`, '--console-log-level=warn', '--summary-interval=1',
+  ];
+  if (i.speedLimitKbps > 0) a2.push(`--max-overall-download-limit=${i.speedLimitKbps}K`);
+  return [
+    '--downloader', `http:${i.aria2cPath}`, '--downloader', `https:${i.aria2cPath}`, '--downloader', `ftp:${i.aria2cPath}`,
+    '--downloader-args', `aria2c:${a2.join(' ')}`,
+  ];
 }
 
 /** Network and identity options shared by inspect and download runs. */
@@ -120,7 +147,11 @@ export function buildDownloadArgs(i: BuildArgsInput): string[] {
     '--progress-template', `postprocess:${POSTPROCESS_PREFIX}%(progress.status)s|%(progress.postprocessor)s`,
     '--print', `before_dl:${ITEM_PREFIX}%(playlist_index)s|%(n_entries)s|%(title)s`,
     '--print', `after_move:${FILE_PREFIX}%(filepath)s`,
-    '-P', i.outputDir, '-P', `temp:${i.tempDir}`, '-o', i.outputTemplate,
+    '-P', i.outputDir,
+    // A separate temp dir only when it's on the same volume as the output; otherwise yt-dlp downloads straight
+    // into the output folder so finishing is an instant rename, not a slow cross-drive copy (empty tempDir = skip).
+    ...(i.tempDir ? ['-P', `temp:${i.tempDir}`] : []),
+    '-o', i.outputTemplate,
     '--ffmpeg-location', i.ffmpegDir,
     '--continue',
     '--retries', String(i.retries), '--fragment-retries', String(i.retries),
@@ -130,6 +161,7 @@ export function buildDownloadArgs(i: BuildArgsInput): string[] {
   if (i.jsRuntime) args.push('--js-runtimes', i.jsRuntime);
   if (i.windowsFilenames) args.push('--windows-filenames');
   if (i.speedLimitKbps > 0) args.push('--limit-rate', `${i.speedLimitKbps}K`);
+  args.push(...accelerationArgs(i));
   args.push(...requestArgs(i.request));
   if (i.archiveFile) args.push('--download-archive', i.archiveFile);
 

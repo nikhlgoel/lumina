@@ -11,9 +11,11 @@ import { mediaKindOf } from '../core/playlists';
 import { settings } from './settings';
 import { tools } from './tools';
 import { inspect } from './inspect';
+import { searchMulti } from './search';
 import { queue } from './jobs/queue';
 import { runTool } from './process';
 import { challengeAction, currentChallenge, placeChallenge } from './hosters';
+import { firewallStatus, grantFirewallAccess } from './firewall';
 import { browserBack, browserBounds, browserForward, browserGo, browserHide, browserReload, browserShow, browserStop } from './browser';
 import { queueConversion, queueSubtitleGeneration } from './jobs/cpu';
 import { library } from './library';
@@ -28,6 +30,9 @@ import { shortcutStatus } from './shortcuts';
 import { database } from './db';
 import { artworkCacheDir, extensionDir, logsDir } from './paths';
 import { logger } from './log';
+import {
+  addBookmark, createChain, initSync, joinChain, leaveChain, listBookmarks, removeBookmark, syncNow, syncStatus,
+} from './sync/syncManager';
 
 const log = logger('ipc');
 
@@ -143,6 +148,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'presets:list': () => BUILT_IN_PRESETS,
 
   'media:inspect': ({ url, request }: { url: string; request?: RequestInfo }) => inspect(url, request),
+  'search:query': ({ query }: { query: string }) => searchMulti(query),
 
   'jobs:list': () => queue.list(),
   'jobs:add': ({ url, info, options }: { url: string; info: MediaInfo; options: DownloadOptions }) => {
@@ -158,7 +164,9 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'jobs:clear-finished': () => queue.clearFinished(),
   'hosts:challenge-current': () => currentChallenge(),
   'hosts:challenge-frame': ({ id, ...rect }: { id: string; x: number; y: number; width: number; height: number }) => placeChallenge(id, rect),
-  'hosts:challenge-action': ({ id, action }: { id: string; action: 'reload' | 'skip' }) => challengeAction(id, action),
+  'hosts:challenge-action': ({ id, action }: { id: string; action: 'reload' | 'skip' | 'skip-all' }) => challengeAction(id, action),
+  'firewall:status': () => firewallStatus(),
+  'firewall:grant': () => grantFirewallAccess(),
   'browser:go': ({ url }: { url: string }) => browserGo(url),
   'browser:back': () => browserBack(),
   'browser:forward': () => browserForward(),
@@ -304,6 +312,38 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
     if (w) (w.isMaximized() ? w.unmaximize() : w.maximize());
   },
   'window:close': () => mainWindow()?.close(),
+
+  'sync:status': () => syncStatus(),
+  'sync:create-chain': () => {
+    const s = createChain();
+    broadcast('sync:changed', s);
+    return s;
+  },
+  'sync:join-chain': ({ code }: { code: string }) => {
+    const s = joinChain(code);
+    broadcast('sync:changed', s);
+    return s;
+  },
+  'sync:leave': () => {
+    const s = leaveChain();
+    broadcast('sync:changed', s);
+    return s;
+  },
+  'sync:now': async () => {
+    const s = await syncNow();
+    broadcast('sync:changed', s);
+    return s;
+  },
+  'bookmarks:list': () => listBookmarks(),
+  'bookmarks:add': ({ url, title }: { url: string; title: string }) => {
+    const b = addBookmark(url, title);
+    broadcast('sync:changed', syncStatus());
+    return b;
+  },
+  'bookmarks:remove': ({ id }: { id: string }) => {
+    removeBookmark(id);
+    broadcast('sync:changed', syncStatus());
+  },
 };
 
 export function registerIpc() {
@@ -330,6 +370,7 @@ export function registerIpc() {
     });
   }
 
+  initSync();
   queue.on('updated', (job) => broadcast('jobs:updated', job));
   queue.on('removed', (id) => broadcast('jobs:removed', { id }));
   settings.on('changed', (s) => broadcast('settings:changed', s));

@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { buildDownloadArgs, outputTemplate } from '../../core/ytdlpArgs';
+import { diskCacheMb } from '../../core/tuning';
 import { friendlyYtdlpError, isCookieReadError, parseYtdlpLine, postprocessLabel } from '../../core/progress';
 import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from '../cookieHealth';
 import { parseExtraArgs, speedLimitActive } from '../../shared/settings';
@@ -41,9 +43,51 @@ export const ytdlpRunner: Runner = (ctx) => {
   fs.mkdirSync(outputDir, { recursive: true });
   ctx.patch({ outputDir });
 
+  // If the work dir is on a different drive than the output, a separate temp forces a slow cross-drive copy when
+  // the download finishes. In that case download straight into the output folder (same-volume rename on finish).
+  const sameVolume = (a: string, b: string): boolean => {
+    try {
+      return fs.statSync(a).dev === fs.statSync(b).dev;
+    } catch {
+      return true; // can't tell → keep the default temp behaviour
+    }
+  };
+  const downloadTemp = sameVolume(ctx.workDir, outputDir) ? ctx.workDir : '';
+
   const { args: extraArgs } = parseExtraArgs(s.advanced.extraYtdlpArgs);
+  // The bundled aria2c powers the multi-connection accelerator for plain HTTP downloads (missing tool → native path).
+  let aria2cPath: string | null = null;
+  if (s.downloads.accelerate) {
+    try {
+      aria2cPath = tools.require('aria2c');
+    } catch {
+      aria2cPath = null;
+    }
+  }
+  // One structured line so a stuck/slow download can be diagnosed from the log alone: which engine, how many
+// connections, the RAM write-buffer size, whether we avoided a cross-drive copy, and — a real cause of
+// "stuck at N GB" — how much room is left on the destination volume.
+  const freeSpaceGb = (dir: string): number | null => {
+    try {
+      const { bavail, bsize } = fs.statfsSync(dir);
+      return Math.round((Number(bavail) * Number(bsize)) / 2 ** 30 * 10) / 10;
+    } catch {
+      return null;
+    }
+  };
+  log.info(`Download plan for ${job.title}`, {
+    engine: aria2cPath && s.downloads.accelerate ? 'yt-dlp+aria2c' : 'yt-dlp native',
+    accelerate: s.downloads.accelerate,
+    connectionsPerServer: s.network.connectionsPerServer,
+    diskCacheMb: diskCacheMb(os.totalmem()),
+    temp: downloadTemp ? 'same-volume temp' : 'direct-to-output (cross-drive avoided)',
+    outputDir,
+    freeSpaceGb: freeSpaceGb(outputDir),
+    speedLimitKbps: speedLimitActive(s) ? s.downloads.speedLimitKbps : 0,
+  });
+
   const buildArgs = (opts: { batchFile?: string; browserCookies: boolean }) => buildDownloadArgs({
-    url: job.url, batchFile: opts.batchFile, options: job.options, outputDir, tempDir: ctx.workDir, outputTemplate: template,
+    url: job.url, batchFile: opts.batchFile, options: job.options, outputDir, tempDir: downloadTemp, outputTemplate: template,
     ffmpegDir: tools.ffmpegDir(), jsRuntime: tools.jsRuntime(),
     archiveFile: isPlaylist && s.downloads.skipExisting ? archiveFile() : null,
     isPlaylist: isPlaylist && !needsMatching,
@@ -51,6 +95,10 @@ export const ytdlpRunner: Runner = (ctx) => {
     speedLimitKbps: speedLimitActive(s) ? s.downloads.speedLimitKbps : 0,
     retries: s.downloads.retries,
     concurrentFragments: s.downloads.concurrentFragments,
+    aria2cPath,
+    connectionsPerServer: s.network.connectionsPerServer,
+    diskCacheMb: diskCacheMb(os.totalmem()),
+    accelerate: s.downloads.accelerate,
     sponsorBlock: s.downloads.sponsorBlock,
     sponsorCategories: s.downloads.sponsorCategories,
     embedThumbnail: s.downloads.embedThumbnail,
@@ -161,6 +209,7 @@ export const ytdlpRunner: Runner = (ctx) => {
         if (errors.length && partial) {
           ctx.patch({ compat: { ...(ctx.job().compat ?? { tvSafe: false }), summary: `${errors.length} item(s) could not be downloaded: ${friendlyYtdlpError(errors[0]!)}` } });
         }
+        log.info(`Completed ${job.title}`, { files: outputs.length, partial, failedItems: errors.length });
         ctx.complete();
       } catch (err) {
         if (!stopped) ctx.fail(err instanceof Error ? err.message : String(err));

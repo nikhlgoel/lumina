@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { defaultSettings, mergeSettings, parseExtraArgs, settingsSchema, speedLimitActive } from '@shared/settings';
 import { assForceStyle } from '@core/subtitleStyle';
-import { classifyUrl, cleanUrl, extractLinks, isMusicSite } from '@core/url';
+import { classifyUrl, cleanUrl, extractLinks, isMusicSite, toInspectTarget, youtubeId, youtubeThumb } from '@core/url';
 import { parseStreams } from '@core/streams';
 import { audioFormatArgs, buildDownloadArgs, outputTemplate, previewTemplate, SQUARE_ARTWORK_PPA, videoFormatArgs, type BuildArgsInput } from '@core/ytdlpArgs';
 import { parseYtdlpLine, friendlyYtdlpError, friendlyAria2Error, isCookieReadError } from '@core/progress';
@@ -74,6 +74,21 @@ describe('urls', () => {
   it('extracts unique links from pasted text', () => {
     expect(extractLinks('a https://a.com/1.rar, b https://a.com/1.rar\nmagnet:?xt=urn:btih:1')).toHaveLength(2);
   });
+  it('turns typed text into a link, a URL, or a YouTube search', () => {
+    expect(toInspectTarget('https://youtube.com/watch?v=1')).toEqual({ target: 'https://youtube.com/watch?v=1', isSearch: false });
+    expect(toInspectTarget('magnet:?xt=urn:btih:abc')).toEqual({ target: 'magnet:?xt=urn:btih:abc', isSearch: false });
+    expect(toInspectTarget('example.com/path')).toEqual({ target: 'https://example.com/path', isSearch: false });
+    expect(toInspectTarget('big buck bunny')).toEqual({ target: 'ytsearch12:big buck bunny', isSearch: true });
+    expect(toInspectTarget('lofi')).toEqual({ target: 'ytsearch12:lofi', isSearch: true });
+    expect(toInspectTarget('   ')).toEqual({ target: '', isSearch: false });
+  });
+  it('reads the YouTube video id and builds a thumbnail url', () => {
+    expect(youtubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(youtubeId('https://music.youtube.com/watch?v=abc123')).toBe('abc123');
+    expect(youtubeId('https://youtu.be/xyz789')).toBe('xyz789');
+    expect(youtubeId('https://example.com/watch?v=nope')).toBeNull();
+    expect(youtubeThumb('abc123')).toBe('https://i.ytimg.com/vi/abc123/mqdefault.jpg');
+  });
 });
 
 describe('streams', () => {
@@ -129,6 +144,30 @@ describe('yt-dlp arguments', () => {
     const args = buildDownloadArgs(baseInput(music, { url: '-danger', jsRuntime: 'node:electron.exe', isPlaylist: true, extraArgs: ['--geo-bypass'] }));
     expect(args.slice(-3)).toEqual(['--geo-bypass', '--', '-danger']);
     expect(args).toEqual(expect.arrayContaining(['--playlist-items', '2,5', '--yes-playlist', '--js-runtimes', '--concurrent-fragments', '8']));
+  });
+  it('routes plain downloads through aria2 when accelerated, leaving fragmented streams native', () => {
+    const args = buildDownloadArgs(baseInput(music, { accelerate: true, aria2cPath: '/bin/aria2c', connectionsPerServer: 16 }));
+    const joined = args.join(' ');
+    expect(args).toEqual(expect.arrayContaining(['--downloader', 'http:/bin/aria2c', '--downloader', 'https:/bin/aria2c']));
+    expect(joined).toContain('--downloader-args aria2c:-x16 -s16');
+    expect(joined).toContain('--max-connection-per-server=16');
+    // No m3u8/dash downloader override — fragmented streams keep yt-dlp's native path.
+    expect(joined).not.toContain('m3u8:');
+    expect(joined).not.toContain('dash:');
+  });
+  it('does not accelerate when off or when aria2 is unavailable', () => {
+    expect(buildDownloadArgs(baseInput(music)).join(' ')).not.toContain('--downloader');
+    expect(buildDownloadArgs(baseInput(music, { accelerate: true, aria2cPath: null })).join(' ')).not.toContain('--downloader');
+    expect(buildDownloadArgs(baseInput(music, { accelerate: false, aria2cPath: '/bin/aria2c' })).join(' ')).not.toContain('--downloader');
+  });
+  it('passes the speed limit to aria2 when accelerating', () => {
+    const args = buildDownloadArgs(baseInput(music, { accelerate: true, aria2cPath: '/bin/aria2c', connectionsPerServer: 8, speedLimitKbps: 5000 }));
+    expect(args.join(' ')).toContain('--max-overall-download-limit=5000K');
+    expect(args.join(' ')).toContain('-x8 -s8');
+  });
+  it('adds a temp dir only when given one (cross-volume downloads go straight to the output folder)', () => {
+    expect(buildDownloadArgs(baseInput(music, { tempDir: 't' })).join(' ')).toContain('-P temp:t');
+    expect(buildDownloadArgs(baseInput(music, { tempDir: '' })).join(' ')).not.toContain('temp:');
   });
   it('crops music artwork to a square but leaves video thumbnails alone', () => {
     expect(buildDownloadArgs(baseInput(music))).toContain(SQUARE_ARTWORK_PPA);

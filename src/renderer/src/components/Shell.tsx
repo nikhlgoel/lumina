@@ -22,11 +22,33 @@ const NAV: NavItem[] = [
 const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };
 
 const COLLAPSE_KEY = 'lumina.sidebar.collapsed';
+const WIDTH_KEY = 'lumina.sidebar.width';
 // Auto-collapse sits above the window's 900px min width so the rail actually appears on smaller windows.
 const NARROW_QUERY = '(max-width: 1024px)';
+const COLLAPSED_W = 68;
+const MIN_W = 190;
+const MAX_W = 360;
+const DEFAULT_W = 236;
+// Dragging the edge narrower than this snaps the sidebar shut to the icon-only rail.
+const SNAP_W = 150;
+const clampW = (n: number) => Math.max(MIN_W, Math.min(MAX_W, n));
 
-/** Collapsed when the user has pinned it collapsed, or (on 'auto') when the window is too narrow to spare the room. */
-function useSidebarCollapsed(): [boolean, () => void] {
+interface SidebarLayout {
+  collapsed: boolean;
+  /** Pixel width of the expanded sidebar (ignored while collapsed). */
+  width: number;
+  /** True during an active edge-drag, so width transitions are suspended for a 1:1 feel. */
+  dragging: boolean;
+  toggle: () => void;
+  beginResize: (e: React.PointerEvent) => void;
+}
+
+/**
+ * Sidebar sizing: collapses to an icon rail (pinned, or on 'auto' when the window is narrow), and its expanded
+ * width is drag-adjustable from the right edge. Dragging below SNAP_W snaps it shut; dragging back out reopens it.
+ * All state is per-viewer (localStorage), wrapped so private windows/cleared storage still render.
+ */
+function useSidebar(): SidebarLayout {
   const [pref, setPref] = useState<'auto' | 'expanded' | 'collapsed'>(() => {
     try {
       const v = localStorage.getItem(COLLAPSE_KEY);
@@ -36,6 +58,15 @@ function useSidebarCollapsed(): [boolean, () => void] {
     }
   });
   const [narrow, setNarrow] = useState(() => matchMedia(NARROW_QUERY).matches);
+  const [width, setWidth] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(WIDTH_KEY));
+      return v >= MIN_W && v <= MAX_W ? v : DEFAULT_W;
+    } catch {
+      return DEFAULT_W;
+    }
+  });
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     const mq = matchMedia(NARROW_QUERY);
@@ -45,8 +76,7 @@ function useSidebarCollapsed(): [boolean, () => void] {
   }, []);
 
   const collapsed = pref === 'collapsed' || (pref === 'auto' && narrow);
-  const toggle = () => {
-    const next = collapsed ? 'expanded' : 'collapsed';
+  const setPrefPersist = (next: 'expanded' | 'collapsed') => {
     setPref(next);
     try {
       localStorage.setItem(COLLAPSE_KEY, next);
@@ -54,7 +84,37 @@ function useSidebarCollapsed(): [boolean, () => void] {
       // per-viewer convenience only
     }
   };
-  return [collapsed, toggle];
+  const toggle = () => setPrefPersist(collapsed ? 'expanded' : 'collapsed');
+
+  const beginResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    let last = width;
+    // The sidebar is flush with the window's left edge, so the pointer's x is the target width.
+    const onMove = (ev: PointerEvent) => {
+      if (ev.clientX < SNAP_W) {
+        setPrefPersist('collapsed');
+        return;
+      }
+      setPrefPersist('expanded');
+      last = clampW(ev.clientX);
+      setWidth(last);
+    };
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      try {
+        localStorage.setItem(WIDTH_KEY, String(last));
+      } catch {
+        // per-viewer convenience only
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  return { collapsed, width, dragging, toggle, beginResize };
 }
 
 /** Live totals for the sidebar: active jobs and combined speed. */
@@ -86,7 +146,7 @@ export function Sidebar() {
   const brokenTools = tools.filter((t) => !t.ok && t.name !== 'aria2c');
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
+  const { collapsed, width, dragging, toggle: toggleCollapsed, beginResize } = useSidebar();
 
   useLayoutEffect(() => {
     const el = refs.current[view];
@@ -123,8 +183,11 @@ export function Sidebar() {
 
   return (
     <aside
-      style={{ width: collapsed ? 68 : 236 }}
-      className="flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-[width] duration-300 ease-out-soft"
+      style={{ width: collapsed ? COLLAPSED_W : width }}
+      className={cn(
+        'relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-panel ease-out-soft',
+        !dragging && 'transition-[width] duration-300',
+      )}
     >
       {/* Brand — divided from the pages below so the app mark reads as a header, not a nav item. */}
       <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center border-b border-line', collapsed ? 'justify-center px-0' : 'px-4', isMac && !collapsed && 'pl-[84px]')}>
@@ -182,6 +245,18 @@ export function Sidebar() {
           {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
           {!collapsed && <span>Collapse</span>}
         </button>
+      </div>
+
+      {/* Drag the right edge to resize; drag it narrow enough and it snaps to the icon rail. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        onPointerDown={beginResize}
+        onDoubleClick={toggleCollapsed}
+        className="group absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize"
+      >
+        <span className={cn('absolute inset-y-0 right-0 w-px bg-transparent transition-colors duration-150 group-hover:bg-accent', dragging && 'bg-accent')} />
       </div>
     </aside>
   );

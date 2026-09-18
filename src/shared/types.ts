@@ -313,6 +313,67 @@ export interface BrowserState {
   canGoForward: boolean;
 }
 
+/* ---------- Multi-source search ---------- */
+
+export interface SearchHit {
+  /** Where it came from — drives the section it's shown in and its default download format. */
+  source: 'ytmusic' | 'youtube';
+  kind: 'audio' | 'video';
+  /** The URL to inspect/download (music.youtube.com for songs → audio defaults; youtube.com for videos). */
+  url: string;
+  title: string;
+  /** Artist(s) for songs, uploader/channel for videos. */
+  subtitle: string;
+  durationSec: number | null;
+  thumbnail: string | null;
+}
+
+export interface SearchResults {
+  query: string;
+  songs: SearchHit[];
+  videos: SearchHit[];
+}
+
+/* ---------- Sync (Lumina chain) ---------- */
+
+export interface Bookmark {
+  /** Stable id — the URL itself, so saving the same page twice updates rather than duplicates. */
+  id: string;
+  url: string;
+  title: string;
+  addedAt: number;
+}
+
+export interface SyncStatus {
+  /** Whether a chain seed exists on this device. */
+  hasChain: boolean;
+  /** Whether the OS can securely store the seed (safeStorage/DPAPI). If false, sync can't be enabled here. */
+  encryptionAvailable: boolean;
+  /** The chain's recovery code to show/enter on other devices — only present when hasChain. */
+  recoveryCode: string | null;
+  deviceId: string;
+  deviceLabel: string;
+  folder: string;
+  bookmarkCount: number;
+  /** Epoch ms of the last successful sync this session, or 0. */
+  lastSyncedAt: number;
+}
+
+/* ---------- Windows Firewall access for bundled tools ---------- */
+
+export interface FirewallTool {
+  key: string;
+  label: string;
+  /** True when Lumina's allow rule is in place for this tool. */
+  granted: boolean;
+}
+
+export interface FirewallStatus {
+  /** False off Windows, or when no bundled tool needs inbound access — the UI hides the section. */
+  supported: boolean;
+  tools: FirewallTool[];
+}
+
 /* ---------- File-host pages that need a person ---------- */
 
 export interface HostChallenge {

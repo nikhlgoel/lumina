@@ -65,6 +65,37 @@ export function siteName(raw: string): string {
   }
 }
 
+/**
+ * Turn whatever the person typed into something the inspector can open:
+ * a real link/magnet/torrent stays as-is (cleaned); a bare domain gains `https://`; anything else becomes a
+ * YouTube search (`ytsearchN:query`). Pure, so the download bar can treat typed text as a search, not an error.
+ */
+export function toInspectTarget(input: string, searchCount = 12): { target: string; isSearch: boolean } {
+  const text = input.trim();
+  if (!text) return { target: '', isSearch: false };
+  if (classifyUrl(text) !== 'invalid') return { target: cleanUrl(text), isSearch: false };
+  // A bare domain like "example.com" or "example.com/path" (no spaces, has a dot) → treat as a web address.
+  if (!/\s/.test(text) && /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(text)) return { target: `https://${text}`, isSearch: false };
+  return { target: `ytsearch${searchCount}:${text}`, isSearch: true };
+}
+
+/** The YouTube / YouTube-Music video id from a watch URL (or youtu.be short link), or null. */
+export function youtubeId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1) || null;
+    if (/(^|\.)youtube\.com$/.test(u.hostname)) return u.searchParams.get('v');
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** A medium (320×180) thumbnail URL for a YouTube video id — usable for both YouTube and YT-Music results. */
+export function youtubeThumb(id: string): string {
+  return `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+}
+
 /** Pull every http(s)/magnet link out of pasted text (for multi-link and repack pastes). */
 export function extractLinks(text: string): string[] {
   const found = text.match(/(https?:\/\/[^\s"'<>()]+|magnet:\?[^\s"'<>]+)/gi) ?? [];
