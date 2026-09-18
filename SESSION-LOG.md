@@ -5,27 +5,12 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
-## ⚠ UNCOMMITTED STATE (as of 2026-09-18, HEAD `acecbc2`)
+## ✅ COMMITTED (2026-09-18) — HEAD `c49cec6`
 
-**Nothing from sessions (1)–(6) below is committed yet** — the user's standing rule is *ask before committing*
-(memory `lumina-commit-permission.md`). Everything is verified green (tsc · vitest 154 · vite build · self-test) but
-sits in the working tree. When the user says go, suggest either one squashed commit or grouped commits
-(sync / download-engine / UI-findings). Full working tree:
-
-- **Modified:** `HANDOVER.md`, `SESSION-LOG.md`, `src/core/url.ts`, `src/core/ytdlpArgs.ts`, `src/main/hosters.ts`,
-  `src/main/ipc.ts`, `src/main/jobs/aria2.ts`, `src/main/jobs/ytdlp.ts`, `src/main/media/protocol.ts`,
-  `src/renderer/src/components/QuickCheck.tsx`, `src/renderer/src/components/Shell.tsx`,
-  `src/renderer/src/styles.css`, `src/renderer/src/views/download/DownloadView.tsx`,
-  `src/renderer/src/views/settings/SettingsView.tsx`, `.../sections/connections.tsx`,
-  `.../sections/downloading.tsx`, `src/shared/channels.ts`, `src/shared/ipc.ts`, `src/shared/settings.ts`,
-  `src/shared/types.ts`, `tests/core.test.ts`.
-- **New (untracked):** `docs/11_*`, `docs/12_*`, `docs/13_*`; `src/core/{base32,subtitleFiles,syncCrypto,`
-  `syncCryptoWeb,syncDocument,syncEngine,syncMerge,tuning}.ts`; `src/main/firewall.ts`, `src/main/search.ts`,
-  `src/main/sync/` (bookmarks, syncFile, syncManager); `src/renderer/src/views/download/{SearchResults,`
-  `SearchSuggestions}.tsx` + `recentSearches.ts`; `src/renderer/src/views/settings/sections/sync.tsx`;
-  `tests/{bookmarks,subtitleFiles,syncCrypto,syncCryptoWeb,syncDocument,syncEngine,syncFile,syncMerge,tuning}.test.ts`.
-
-What each change is and why: see the dated entries below + HANDOVER §7 (32-item status) and §11 (Lumina Sync).
+All of sessions (1)–(6) below — Lumina Sync core, the download-speed engine work, subtitles/search/sidebar, and
+the testing-feedback fixes (#6, #7, #11, #15, #30 and more) — landed in **one commit `c49cec6`** on `main`
+(50 files, +3592/−68). Verified green before commit (tsc · vitest 154 · vite build · host self-test).
+**Not pushed** — the user asked to commit, not push; `git push` when they say so.
 
 ---
 
@@ -70,7 +55,7 @@ Electron and `recentSearches.ts` uses `localStorage`, neither runs in the node v
 ⚠ Live test needed: a wall of file-host captchas → "Skip all" clears them; recent-searches menu appears/persists;
 sign-in panel reads right; logs show the plan line under "Open logs"; **firewall grant → UAC → torrents allowed**.
 
-**Commit(s):** _not yet committed_ — ask first.
+**Commit(s):** `c49cec6` (with sessions 1–5; on `main`, not pushed).
 
 **Next:** the bigger deferred items — #3/#9 repack-as-one grouping, #10 torrent detail page, #14/#19/#22 USB,
 #17 likes/playlists, #23 auto-update, #29 other file types. Browser/IDE = the browser workday.
