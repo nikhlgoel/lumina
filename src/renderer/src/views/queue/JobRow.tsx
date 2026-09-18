@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { ChevronDown, CircleCheck, CirclePause, FolderOpen, PackageOpen, Play, RotateCw, Trash2, TriangleAlert, Tv, X } from 'lucide-react';
+import { ChevronDown, CircleCheck, CirclePause, FolderOpen, ListTree, PackageOpen, Play, RotateCw, Trash2, TriangleAlert, Tv, X } from 'lucide-react';
 import type { Job } from '@shared/types';
 import { formatBytes, formatEta, formatSpeed } from '@core/format';
 import { mediaKindOf } from '@core/mediaKind';
@@ -10,6 +10,7 @@ import { queuePosition, useJobs } from '@/stores/jobs';
 import { usePlayer } from '@/stores/player';
 import { Artwork } from '@/components/Artwork';
 import { Badge, IconButton, ProgressBar } from '@/components/ui';
+import { TorrentDetail } from './TorrentDetail';
 
 const STATUS_LABEL: Record<Job['status'], string> = {
   queued: 'Queued', running: 'Downloading', paused: 'Paused', processing: 'Processing', completed: 'Done', failed: 'Failed', cancelled: 'Cancelled',
@@ -27,7 +28,11 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
   const setMode = useApp((s) => s.setMode);
   const playQueue = usePlayer((s) => s.playQueue);
   const [showDetail, setShowDetail] = useState(false);
+  const [showTorrent, setShowTorrent] = useState(false);
   if (!job) return null;
+
+  // Torrents get a live panel: swarm, speed graph and which files inside to actually download.
+  const isTorrent = job.source.sourceKind === 'torrent';
 
   const active = job.status === 'running' || job.status === 'processing';
   const p = job.progress;
@@ -121,6 +126,11 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
           {(job.outputPaths.length > 0 || job.outputDir) && job.status === 'completed' && <IconButton label="Show in folder" onClick={reveal}><FolderOpen /></IconButton>}
           {!compact && (active || job.status === 'queued' || job.status === 'paused') && <IconButton label="Cancel" onClick={() => act(id, 'cancel')}><X /></IconButton>}
           {!compact && !(active || job.status === 'queued') && <IconButton label="Remove from list" onClick={() => act(id, 'remove')}><Trash2 /></IconButton>}
+          {!compact && isTorrent && (
+            <IconButton label={showTorrent ? 'Hide torrent details' : 'Torrent details and files'} onClick={() => setShowTorrent(!showTorrent)}>
+              <ListTree className={cn('transition-transform', showTorrent && 'text-accent')} />
+            </IconButton>
+          )}
           {!compact && (job.error?.detail || (job.compat && !job.compat.tvSafe && job.compat.summary.includes('—'))) && (
             <IconButton label={showDetail ? 'Hide details' : 'Show details'} onClick={() => setShowDetail(!showDetail)}>
               <ChevronDown className={cn('transition-transform', showDetail && 'rotate-180')} />
@@ -128,6 +138,8 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
           )}
         </div>
       </div>
+
+      {showTorrent && !compact && <TorrentDetail id={job.id} />}
 
       {showDetail && !compact && (
         <div className="mt-3 ml-[86px] rounded-lg border border-line bg-sunken p-3 text-xs leading-relaxed text-ink-2 animate-rise">

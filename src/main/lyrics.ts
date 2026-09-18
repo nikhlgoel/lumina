@@ -4,6 +4,8 @@ import { parseFile } from 'music-metadata';
 import type { Lyrics } from '../shared/types';
 import { cleanTrackMetadata, parseLrc, parsePlainLyrics, relaxTitle, scoreLyricsMatch } from '../core/lyrics';
 import { database } from './db';
+import { askAi } from './ai';
+import { settings } from './settings';
 import { logger } from './log';
 
 const log = logger('lyrics');
@@ -110,6 +112,27 @@ export async function getLyrics(q: { title: string; artist: string | null; durat
   if (!result && artist) {
     const ovh = await getJson<{ lyrics?: string }>(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`);
     if (ovh?.lyrics?.trim()) result = { title, artist, synced: false, lines: parsePlainLyrics(ovh.lyrics), plain: ovh.lyrics, source: 'lyrics.ovh' };
+  }
+
+  // Last resort, off by default and only with the user's own key: ask their AI provider. A model
+  // recalls lyrics imperfectly, so this is marked source:'ai' and the player labels it as unverified.
+  if (!result && settings.get().lyrics.aiFallback) {
+    try {
+      const answer = await askAi(
+        `Give the lyrics of the song "${title}"${artist ? ` by ${artist}` : ''}.
+` +
+        'Reply with the lyric lines only — no title, no commentary, no timestamps. ' +
+        'If you are not confident you know this exact song, reply with only: UNKNOWN',
+      );
+      const text = answer?.trim();
+      if (text && !/^unknown$/i.test(text)) {
+        result = { title, artist, synced: false, lines: parsePlainLyrics(text), plain: text, source: 'ai' };
+        log.info(`AI fallback supplied lyrics for ${artist} – ${title}`);
+      }
+    } catch (err) {
+      // A bad key or a rate limit shouldn't break playback; the player just shows no lyrics.
+      log.warn('AI lyrics fallback failed', err);
+    }
   }
 
   db.prepare('INSERT OR REPLACE INTO lyrics_cache (key, data, fetched_at) VALUES (?, ?, ?)').run(key, result ? JSON.stringify(result) : null, Date.now());

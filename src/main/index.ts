@@ -11,6 +11,9 @@ import { aria2, aria2Runner } from './jobs/aria2';
 import { convertRunner, subtitlesRunner } from './jobs/cpu';
 import { extractRunner, watchReleases } from './jobs/release';
 import { library } from './library';
+import { routeFinishedToDrive } from './usb';
+import { shutdownMcp } from './ide/mcp';
+import { shutdownTerminals } from './ide/terminal';
 import { handleMediaProtocol, registerMediaScheme } from './media/protocol';
 import { broadcast, extensionStatus, registerIpc } from './ipc';
 import { createWindow, mainWindow, refreshWindowChrome, setQuitting, showWindow, type AppMode } from './window';
@@ -132,7 +135,13 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
 
-    const win = createWindow({ show: !hidden, mode });
+    // Screenshot runs render offscreen and never show a window. The user was watching something while
+    // earlier capture runs kept popping Lumina over it. A plain hidden window is not enough: it stops
+    // painting after the first frame, so the screenshots came back stale (see createWindow).
+    const capturing = !app.isPackaged && !!process.env.LUMINA_CAPTURE;
+    // Metrics runs use a plain hidden window (not offscreen), so memory reflects a normal window.
+    const measuring = !app.isPackaged && !!process.env.LUMINA_METRICS;
+    const win = createWindow({ show: !hidden && !capturing && !measuring, mode, offscreen: capturing });
     createTray();
 
     if (!app.isPackaged && process.env.LUMINA_CAPTURE) {
@@ -144,6 +153,16 @@ if (!app.requestSingleInstanceLock()) {
       win.webContents.once('did-finish-load', async () => {
         const { runCapture } = await import('./capture');
         await runCapture(win, dir).catch((err) => log.error('Capture failed', err));
+        setQuitting();
+        app.quit();
+      });
+    }
+    if (measuring) {
+      const file = process.env.LUMINA_METRICS!;
+      win.setSize(1360, 860);
+      win.webContents.once('did-finish-load', async () => {
+        const { runMetrics } = await import('./metrics');
+        await runMetrics(win, file).catch((err) => log.error('Metrics failed', err));
         setQuitting();
         app.quit();
       });
@@ -184,6 +203,9 @@ if (!app.requestSingleInstanceLock()) {
     queue.on('completed', (job) => {
       markFromInternet(job);
       for (const p of job.outputPaths) void library.ingest(p);
+      // With "send new downloads to the drive" on, copy the finished file across now that it's
+      // whole — never during the download, which a USB stick is too slow to keep up with.
+      void routeFinishedToDrive(job.outputPaths).catch(() => {});
       const cur = settings.get();
       const target = job.outputPaths[0] ?? job.outputDir;
       const quietBrowserFile = job.origin === 'browser' && (job.progress.totalBytes ?? 0) < 25 * 1024 * 1024;
@@ -239,7 +261,7 @@ if (!app.requestSingleInstanceLock()) {
   let confirmedQuit = false;
   app.on('before-quit', (event) => {
     const active = queue.list().filter((j) => j.status === 'running' || j.status === 'processing').length;
-    if (!confirmedQuit && active > 0 && settings.get().general.confirmQuitWithDownloads && !process.env.LUMINA_CAPTURE) {
+    if (!confirmedQuit && active > 0 && settings.get().general.confirmQuitWithDownloads && !process.env.LUMINA_CAPTURE && !process.env.LUMINA_METRICS) {
       event.preventDefault();
       const win = mainWindow();
       const opts = {
@@ -260,5 +282,10 @@ if (!app.requestSingleInstanceLock()) {
     bridge.stop();
   });
 
-  app.on('will-quit', () => closeDatabase());
+  app.on('will-quit', () => {
+    // MCP servers are real child processes; kill them so quitting Lumina doesn't orphan them.
+    shutdownMcp();
+    shutdownTerminals();
+    closeDatabase();
+  });
 }

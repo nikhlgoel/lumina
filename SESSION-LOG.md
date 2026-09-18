@@ -5,12 +5,269 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## ⏸ HANDOFF (2026-09-18, after entry 12) — continuing on another account
+
+- **Uncommitted:** ~85 files from entries 8–12. HEAD is still `65c3f55` (= `origin/main`). Ask the user before
+  committing; don't push unless asked.
+- **Green at handoff:** tsc clean · vitest **529 passed** · vite build ok · all 48 offscreen capture steps render.
+- **Waiting on the user's choice of next step** — the five options are listed in HANDOVER **§0**.
+- Start with HANDOVER §0 (current state + gotchas), then entries 12 → 8 below.
+
+---
+
+## 2026-09-18 (12) — Tray: mute, volume, seek, shuffle, repeat, pause/resume all downloads
+
+**Context:** User (screenshot of the tray menu): "Add mute & other controls also here, it's required."
+
+- Menu model is pure and tested: `src/core/trayMenu.ts` (**22 tests**, incl. a 10,000-state property test that the
+  menu never contradicts the player). `tray.ts` just maps it to Electron. New: **Mute** (checkbox), **Volume**
+  submenu (Louder/Quieter ±10%, presets 100/75/50/25/10 with the active one marked, title reads "Volume — muted"
+  when muted), **Back/Forward 10 seconds**, **Shuffle** (checkbox), **Repeat** (Off/All/One radio), and **Pause
+  all / Resume all downloads**. Pause-all pauses *waiting* jobs before running ones — otherwise each freed slot
+  would just start the next download.
+- The player now reports volume/mute/shuffle/repeat to main (debounced 250 ms; the tray coalesces rebuilds), so
+  ticks are always true. "Like" was deliberately left out: playable items don't carry a reliable liked flag, and a
+  tray tick that might be wrong is worse than none.
+- **Verified through the real player** (offscreen capture step `tray-roundtrip`, sends the exact command each
+  menu item carries and reads back what the tray believes): Mute on/off, 25%, Louder → 35%, Shuffle, Repeat
+  one/all all round-trip correctly; Forward 10 s moved playback 10 → 21 s. The native menu itself can't be
+  screenshotted — its *appearance* still needs a look from the user.
+- Harness lesson (again): backslashes in capture scripts get mangled somewhere between the shell, Python and TS
+  string literals. Use backslash-free patterns (`[0-9]`) in capture scripts.
+
+**Verification:** tsc clean · vitest **529 passed** · vite build ok.
+
+---
+
+## 2026-09-18 (11) — Measured RAM/CPU, two optimisations, and deep property tests
+
+**Context:** User asked whether the app is stable with everything running, what its RAM/CPU use is (it must run
+on low-spec machines — optimise by better engineering, not by cutting features), and asked for deep testing,
+"even 1000s of tests".
+
+- **Measurement harness** `src/main/metrics.ts` (`LUMINA_METRICS`, dev only, hidden window). Full method,
+  caveats and the baseline table are in **HANDOVER §15**. Headline, private memory on a fresh profile: ~365 MB at
+  startup, ~475–530 MB after visiting every screen; idle CPU ~0–0.5% (a lower bound — hidden windows don't paint).
+- **Lazy-loaded the code editor and in-app browser** — startup bundle **4,832 KB → 637 KB**, renderer at startup
+  **65 → 41 MB** (stable across runs, so real).
+- **Cover art served at display size** (`core/artwork.ts`): ~250 KB → ~7 KB per row cover. **GPU saving NOT
+  demonstrated** — GPU memory varies ±20–40 MB between identical runs, more than the effect; claimed only as sound
+  in principle until measured on a visible window.
+- **Property tests** (`tests/properties.test.ts`, HANDOVER §16): 200k+ generated cases over the path guard (vs
+  `node:path` oracle), MCP validator/framing, parsers and the layout state machines. They **found two real bugs**:
+  Quick Open crashed on filenames containing `İ`, and mis-highlighted after emoji. Fixed; regressions kept.
+
+**Verification:** tsc clean · vitest **507 passed** (was 466) · vite build ok · **full offscreen regression run of
+all 48 capture steps**: every screen renders. Errors seen were all harness-side and were fixed or explained —
+three Download steps had been silently failing since commit `c49cec6` renamed the input to "Link to download or
+search" (selectors now prefix-match; re-run clean, and the steps really inspect a live link and expand a
+23-part release); the commit step needs the git profile (correct "not a repository" state otherwise); one benign
+"Transition was skipped" from fast navigation.
+
+---
+
+## 2026-09-18 (10) — Offscreen capture (no more pop-ups) and the VS Code-style IDE shell
+
+**Context:** User said they continued on another account; checked for that work first. **Nothing had landed** —
+local `main` and `origin/main` both at `65c3f55`, no stash, no other worktree, no file newer than entry (9). So
+this session resumed from HANDOVER §14 in order.
+
+**Shipped**
+
+- **§14.0 — capture runs no longer show a window.** `LUMINA_CAPTURE` now builds the window with
+  `webPreferences.offscreen: true`, and `showWindow()` is a no-op during capture (guarded centrally).
+  **First attempt failed honestly:** a plain hidden window hid itself but its screenshots came back stale (hidden
+  windows stop painting and stop firing rAF after the first frame). Offscreen keeps painting — verified with real
+  terminal output and a full settings page captured while nothing was on screen.
+- **§14.1 — the IDE shell** (`src/core/ideLayout.ts`, **34 tests**; `IdeChrome.tsx`; `IdeView` relaid out;
+  `TerminalPanel` rewritten). Left sidebar (Explorer/Search) and **right sidebar** (Open Editors/Search), both
+  toggleable and drag-resizable with snap-to-close; bottom panel resizable and maximizable; top-strip view
+  switcher; top-right layout toggles; **split terminals side by side**. App sidebar's Collapse moved to the header.
+  Layout persists in `settings.ide.layout`.
+
+**Bugs caught before they shipped:** terminal groups keyed by content would remount on split and orphan the
+xterm; the old panel re-opened an xterm on every tab switch (unsupported). Capture scripts share one page scope,
+so each step's helpers now live in an IIFE (a `const` clash had silently skipped a step).
+
+- **Terminals and Monaco now follow light/dark switches.** Both read their colours once at creation, so a
+  terminal opened in dark mode stayed a black box after the app went light. They now watch `<html data-theme>`
+  (which also catches the OS flipping under colour mode "system"). Verified by capture `08c-ide-theme-follow`.
+
+**Harness notes:** layouts persist to the scratch profile, so capture steps must be idempotent (a persisted
+maximized panel made two captures pixel-identical — caught by md5, not by eye). The `08a` restore-click delay
+was fixed after the last run and **has not been re-run**.
+
+**Verification:** tsc clean · vitest **466 passed** (was 384) · vite build ok · offscreen captures `08a`–`08c`, `09a`, `10a`–`10c`.
+
+**Commit(s):** none — still uncommitted, awaiting the user's go-ahead.
+
+- **"Freedom" — resize everything** (user: *"resizing between different windows should be there so the user can
+  adjust everything to exactly as he wants"*). Shared `resizeBetween` rule (9 tests) drives draggable sashes
+  between split terminals and between the new **editor groups** (`core/editorGroups.ts`, 17 tests): up to 3
+  editors side by side with shared buffers and per-file unsaved state. Sash drags verified by measured widths in
+  capture `09a`. `Sash` now tracks its own drag rather than trusting pointer capture (best-effort).
+
+- **Source control** (HANDOVER §14.3.1): porcelain-v2 parser tested on *real captured* git output (21 tests);
+  main-process git with no shell, `--` before paths, the workspace guard, and no push/pull/reset/delete; Source
+  Control view, Monaco diff view on the live buffer, branch in the status bar. **Proven:** a commit made by
+  clicking through the UI appears in `git log` (`77e0998`). Two bugs caught: a double model attach in the diff
+  pane, and a template-literal regex escape in the harness that I first misread as a timing issue.
+
+**Next (§14):** themes (§14.2), then the media-native editor (§14.4); gutter change markers and branch switching
+for source control; editor-group widths should also persist.
+
+---
+
+## 2026-09-18 (9) — MCP settings UI, a real MCP handshake, and the integrated terminal
+
+**Context:** User installed the **ECC plugin** (`ecc@ecc` v2.2.1 — 292 skills / 68 agents / 94 commands) and asked
+me to use it, then continue. Checked it honestly against this project: its `windows-desktop-e2e` skill explicitly
+excludes Electron and `mcp-server-patterns` is about *building* a server (we write a client), so the useful
+surfaces here are `security-review`, `typescript-reviewer` and `react-reviewer`. Its **gateguard hook is live** and
+fired on every new file and on a recursive-delete command; complied each time rather than working around it.
+
+**Shipped**
+
+- **MCP settings UI** — Settings › Connections › **Connected tools**. Status dot, exact command line, on/off switch
+  (the only thing that starts a process), expandable list of advertised tools, add/edit sheet with a
+  **"Lumina will run"** argv breakdown, and **Import JSON** for the `mcpServers` block from a README.
+  New pure helpers with 12 tests: `parseCommandLine` (quote-aware, *no* shell semantics — `$VARS`, pipes and `;`
+  stay literal) and `parseMcpJson` (re-validates everything, forces `enabled: false`).
+- **The MCP client completed a real handshake** against a minimal stdio server (`scripts/echo-mcp-server.js`):
+  `[mcp] MCP server "echo-test" ready with 2 tool(s)`. The "synthetic frames only" caveat is retired for
+  initialize → notifications/initialized → tools/list. `tools/call` is still unit-tests only.
+- **Integrated terminal** — the `node-pty` gate is **cleared**: `@lydell/node-pty` ships Node-API prebuilds and
+  loads in Electron 44 with no rebuild (`PTY_OK exit=0 sawHello=true`, proved *before* any UI was written).
+  xterm.js 6 + `src/main/ide/terminal.ts`: tabs, shell picker, `MAX_SESSIONS = 8`, clamped resize,
+  `shutdownTerminals()` on quit, Ctrl+`. node-pty is `external` in the main build and `asarUnpack`ed.
+  **Typing is proven here** — a command was written to the pty and its output screenshotted.
+
+**Bugs only launching could find** (tsc, vitest and vite build were green through all of them)
+
+- `capture.ts`'s re-applied `goto()` emitted the literal text `${JSON.stringify(label)}` into the page — a syntax
+  error, so every nav click silently did nothing.
+- `Dialog` **clipped its own header** whenever content exceeded the viewport: plain centring splits the overflow
+  top and bottom. Now safe-centred (fixed in the shared component, so every dialog benefits). Took two attempts —
+  the first tried scrolling the overlay and broke the backdrop.
+- Settings `Field` is a two-column row with a `shrink-0` control, so full-width inputs collapsed.
+- **The terminal rendered blank.** A shell prints its prompt milliseconds after spawn, before React has built the
+  xterm, so that output was dropped. Now buffered per session and replayed on mount; `fit()` moved to the next
+  frame because the host is zero-height on the frame it is attached.
+
+**Verification:** `npx tsc --noEmit` clean · `npx vitest run` **384 passed** (was 372) · `npx vite build` ok.
+
+**Commit(s):** none — 66 files changed/added, still uncommitted pending the user's go-ahead.
+
+**Process failure to not repeat:** the user asked a **second** time to stop the app window popping up over what
+they were watching. Every `LUMINA_CAPTURE` run shows a window. **Fix it in code before any more feature work** —
+see HANDOVER §14.0: create the capture window with `show: false` + `paintWhenInitiallyHidden: true`
+(`capturePage()` works hidden), and iterate UI against one long-lived `pnpm dev` instance with HMR instead of
+repeated cold launches.
+
+**Next:** HANDOVER **§14** is the agreed Phase 3 plan — windowless capture + live dev loop, then the VS Code-style
+shell (activity bar, collapsible primary/secondary sidebars, bottom panel, editor **and terminal** splits with
+draggable sashes), then source control, then themes incl. importing Open VSX **theme-only** extensions, then the
+differentiator: a **media-native editor** (video/waveform-synced subtitle editing) and a terminal that already has
+ffmpeg/yt-dlp/whisper on PATH.
+
+---
+
 ## ✅ COMMITTED (2026-09-18) — HEAD `c49cec6`
 
 All of sessions (1)–(6) below — Lumina Sync core, the download-speed engine work, subtitles/search/sidebar, and
 the testing-feedback fixes (#6, #7, #11, #15, #30 and more) — landed in **one commit `c49cec6`** on `main`
 (50 files, +3592/−68). Verified green before commit (tsc · vitest 154 · vite build · host self-test).
 **Not pushed** — the user asked to commit, not push; `git push` when they say so.
+
+---
+
+## 2026-09-18 (8) — Remaining testing items finished, then the embedded IDE (Monaco) + MCP
+
+**Context:** User: finish the remaining items, then start the IDE. Mid-session they interrupted because repeated
+Electron capture runs kept stealing focus over a film — saved as a standing rule
+[[lumina-no-foreground-app-launches]]: **never launch the app without asking; batch everything into one
+backgrounded run.** Followed for the rest of the session.
+
+**Testing items finished (all verified live with screenshots / engine logs):** #17 likes + local playlists,
+#29 Files tab, #23 update check + restart, #18 on-device AI switch + model RAM/disk table, #21 BYO AI key,
+#14/#19/#22 USB portable drive (a real 102-file / 801 MB export, then re-imported into an empty profile),
+#10 torrent detail page (real Big Buck Bunny torrent; `select-file: 2` confirmed reaching aria2 in the log).
+#20 Chrome Web Store: steps written for the user; submission is theirs.
+
+**Honest audit of the 32:** 10 fully verified by me, 14 built + machine-checked but needing the user's live test,
+3 genuinely open (#4 captcha is mitigation not a fix; #5's "reposition verify button" half is undone and I asked
+what they actually saw rather than guessing; #12 is a decision not a build), #20 theirs. Every earlier-session
+"done" claim was re-checked against the code — none was a phantom, but nine have only ever been read, not run.
+
+**Embedded IDE — decision: Monaco now, `openvscode-server` later (user's call).**
+- `core/ide.ts` (**51 tests**): the `isInsideWorkspace` traversal guard, language ids, tree sorting, the tab
+  model, shell selection, and fuzzy ranking for quick-open.
+- `main/ide/workspace.ts`: every read/write/list re-checked against the root, symlinks not followed, binaries
+  refused, temp-file+rename saves with an mtime check, bounded find-in-files.
+- `views/ide/`: file tree, tabs, Monaco themed from Lumina's CSS variables, Quick Open, Command Palette,
+  Find in Files. New **Code** sidebar item (Ctrl+5).
+- **Bug only a launch could find:** the editor mounted *blank* — `editor.api` is types/API only, with no
+  contributions and no CSS. Fixed by importing `editor.main`. tsc, vitest and vite build were all green the
+  whole time it was broken.
+- Monaco/Vite/CSP notes: the package `exports` map breaks `esm/vs/...` paths; TS defaults moved to a language
+  contribution in 0.56; Vite `?worker` emits real same-origin worker files, so the strict `script-src 'self'`
+  CSP needed **no** change. `dist` ~1 MB → 15 MB (6.7 MB is the ts.worker, loaded only when a .ts/.js opens).
+
+**MCP client (the answer to "mcps / plugins / skills / connectors"):** `core/mcp.ts` (**28 tests**) +
+`main/ide/mcp.ts`. stdio + http, JSON-RPC 2.0, full handshake, `tools/call`. Nothing auto-discovers or
+auto-starts; `shell: false` with an argv array and shell metacharacters refused outright; http restricted to
+http/https; 30s timeouts; server output treated as data with descriptions truncated so a hostile server can't
+crowd out a model's instructions; `callTool` refuses unadvertised tools; children killed on `will-quit`.
+Open VSX / VS Code extensions stay out of scope until `openvscode-server` — Monaco cannot run them.
+
+**Verification:** `tsc` clean · `vitest` **372 passed** · `vite build` ok · host self-test 14/14.
+⚠ Not done: integrated terminal (needs `node-pty` — confirm it rebuilds for Electron first), git/source control,
+split panes, an MCP settings UI, and wiring MCP tools into the #21 assistant. ⚠ The MCP client has **never
+talked to a real server**.
+
+**Commit(s):** _not yet committed_ — ask first (standing rule).
+
+**Next:** MCP settings UI, terminal, git panel; then the browser workday (docs/11, docs/12).
+
+---
+
+## 2026-09-18 (7) — #3/#9: a pasted repack is now ONE download in the Queue and Recent
+
+**Context:** Next of the bigger deferred findings. A multi-part repack filled the Queue with a row per volume
+(the self-test's mock release = **13 rows**); the user wants one download.
+
+**Built — renderer-only, no engine/scheduler change (so no download-path risk):**
+- **`src/core/jobGroups.ts` (pure, testable).** `groupJobs` collapses jobs sharing `options.release.id` — which
+  covers both the downloaded volumes *and* the `extract` job `advanceRelease` spawns, since that job inherits the
+  same release tag. A release with a single job stays ungrouped; input order is preserved; standalone jobs are
+  groups of one. `summarizeGroup` rolls members up into one status/progress: status by rank
+  (running > processing > queued > paused > failed > cancelled > completed — so a live part outranks an earlier
+  failure, and a failure surfaces once nothing is in flight); progress **byte-weighted** when every member knows
+  its size, else the mean percent; a `completed` part counts as 100% even if its last tick lagged; speed = sum of
+  the parts running *now* (a finished part's stale speed is excluded); ETA derived from remaining bytes.
+  `groupActionTargets` maps a group action to the members it validly applies to.
+- **UI `views/queue/ReleaseRow.tsx`.** One row: lead thumbnail, release title, an `N files` badge, one status line
+  ("Downloading · 4 of 13 done · speed · ETA · bytes"), one progress bar, and group-level Pause / Resume /
+  Retry-failed / Cancel / Show-in-folder / Remove. A chevron expands to the individual parts (compact `JobRow`s).
+- **Wiring.** `selectQueueRows` / `selectRecentRows` + `parseQueueRows` in `stores/jobs.ts` encode rows as strings
+  ("key»id,id") so the list selector still only re-renders on *shape* change — progress ticks keep flowing
+  straight to the rows, as before. `QueueView` groups across the whole list (not per active/done section, so a
+  half-finished release stays one row) and the Queue subtitle now counts rows, not parts; `RecentStrip` takes the
+  newest 3 *groups*, so a repack no longer swallows the strip.
+
+**Verification:** `tsc` clean · `vitest` **177 passed** (23 new in `tests/jobGroups.test.ts`) · `vite build` ok ·
+host self-test **14/14**. **Visually verified**, not just claimed: seeded a scratch profile by running the hosts
+self-test (13 real release jobs persist in its sqlite), then re-launched it under the capture harness — the Queue
+shows **one** "Mock Release · 13 files" row, and expanding it lists all 13 parts. That screenshot caught two real
+bugs, both fixed: a finished-but-failed group rendered a full red progress bar (now the bar shows only while
+active/queued/paused, matching `JobRow`), and "Show in folder" was hidden when any part failed (now shown whenever
+something landed and nothing is still running).
+⚠ Still the maintainer's live test: a **real** multi-part repack from a file host — group speed/ETA look sane
+while several parts run in parallel, and group Pause/Resume/Cancel behave across them.
+
+**Commit(s):** _not yet committed_ — ask first (standing rule).
+
+**Next:** #10 torrent detail page, #14/#19/#22 USB, #17 likes/playlists, #23 auto-update, #29 other file types.
 
 ---
 

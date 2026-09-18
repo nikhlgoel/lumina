@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { errorMessage } from '@/lib/bridge';
 import { initAudio } from '@/lib/audio';
@@ -14,7 +14,13 @@ import { QueueView } from '@/views/queue/QueueView';
 import { LibraryView } from '@/views/library/LibraryView';
 import { SettingsView } from '@/views/settings/SettingsView';
 import { AboutView } from '@/views/about/AboutView';
-import { BrowserView } from '@/views/browser/BrowserView';
+
+// The code editor (Monaco + xterm, ~4.8 MB of JavaScript) and the in-app browser load on first use
+// instead of at every launch. Measured on 2026-09-18: Monaco sat in the startup bundle, so every
+// launch paid to parse and compile it even for people who never open Code. Keep these two imports
+// lazy — a single static import of either anywhere pulls the whole editor back into startup.
+const BrowserView = lazy(() => import('@/views/browser/BrowserView').then((m) => ({ default: m.BrowserView })));
+const IdeView = lazy(() => import('@/views/ide/IdeView').then((m) => ({ default: m.IdeView })));
 import { PlayerView } from '@/views/player/PlayerView';
 
 function useAppearance() {
@@ -42,13 +48,14 @@ function useAppearance() {
   }, [appearance, systemDark]);
 }
 
-const VIEWS: Record<View, () => React.JSX.Element | null> = {
+const VIEWS: Record<View, React.ComponentType> = {
   download: DownloadView,
   queue: QueueView,
   library: LibraryView,
   settings: SettingsView,
   about: AboutView,
   browser: BrowserView,
+  ide: IdeView,
 };
 
 export function App() {
@@ -75,7 +82,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || useApp.getState().mode === 'player') return;
-      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', '4': 'browser', ',': 'settings' };
+      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', '4': 'browser', '5': 'ide', ',': 'settings' };
       const target = map[e.key];
       if (target) {
         e.preventDefault();
@@ -108,7 +115,9 @@ export function App() {
         <div className="flex min-h-0 flex-1">
           <Sidebar />
           <main className="vt-page min-w-0 flex-1 bg-ground">
-            <Current />
+            <Suspense fallback={<div className="grid h-full place-items-center"><LoaderCircle className="size-5 animate-spin text-ink-3" /></div>}>
+              <Current />
+            </Suspense>
           </main>
         </div>
         <MiniBar />

@@ -38,6 +38,11 @@ export default defineConfig({
             emptyOutDir: true,
             sourcemap: true,
             lib: { entry: r('src/main/index.ts'), formats: ['es'], fileName: () => 'index.js' },
+            rollupOptions: {
+              // node-pty ships a real .node binary, so it has to stay a runtime require rather
+              // than be inlined. electron-builder packs the package itself (see asarUnpack).
+              external: [/^@lydell\/node-pty/],
+            },
           },
         },
       },

@@ -55,7 +55,13 @@ export function currentMode(): AppMode {
   return mode;
 }
 
-export function createWindow(opts: { show: boolean; mode: AppMode }): BrowserWindow {
+/**
+ * `offscreen` renders into a bitmap with no native window at all. It exists for the dev screenshot
+ * harness: a merely hidden window stops producing frames after its first paint (and stops firing
+ * requestAnimationFrame), so capturePage() returns a stale frame. Offscreen keeps painting and
+ * cannot appear on screen even by accident.
+ */
+export function createWindow(opts: { show: boolean; mode: AppMode; offscreen?: boolean }): BrowserWindow {
   mode = opts.mode;
   nativeTheme.themeSource = settings.get().appearance.colorMode;
   const bounds = savedBounds();
@@ -79,6 +85,7 @@ export function createWindow(opts: { show: boolean; mode: AppMode }): BrowserWin
       sandbox: true,
       spellcheck: false,
       backgroundThrottling: false,
+      offscreen: opts.offscreen === true,
     },
   });
 
@@ -145,7 +152,18 @@ export function setMode(next: AppMode) {
   w.webContents.send('app:mode', { mode: next });
 }
 
+/**
+ * True during a dev screenshot run. Guarded here, in the one function everything goes through, so
+ * that no path — opening a link, a hoster challenge, a finished-download notification — can pop the
+ * window over whatever the person at the computer is doing.
+ */
+const capturing = () => !app.isPackaged && (!!process.env.LUMINA_CAPTURE || !!process.env.LUMINA_METRICS);
+
 export function showWindow(next?: AppMode) {
+  if (capturing()) {
+    if (next && next !== mode) setMode(next);
+    return;
+  }
   const w = mainWindow() ?? createWindow({ show: true, mode: next ?? mode });
   if (next && next !== mode) setMode(next);
   if (w.isMinimized()) w.restore();

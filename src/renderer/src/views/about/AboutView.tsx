@@ -4,6 +4,7 @@ import type { ToolName } from '@shared/types';
 import { useApp } from '@/stores/app';
 import { BrandMark, TitleBar } from '@/components/Shell';
 import { SupportedSites } from '@/components/SupportedSites';
+import { UpdateCard } from './UpdateCard';
 
 const REPO_URL = 'https://github.com/nikhlgoel/lumina';
 const ISSUES_URL = `${REPO_URL}/issues/new`;
@@ -87,7 +88,9 @@ export function AboutView() {
             </div>
           </div>
 
-          <p className="max-w-[64ch] text-[15px] leading-relaxed text-ink-2">
+          <UpdateCard />
+
+          <p className="mt-8 max-w-[64ch] text-[15px] leading-relaxed text-ink-2">
             Lumina brings anything worth keeping down to your machine — one link, the best quality, no paywalls or
             speed caps. It picks the right sources and formats for you, so downloading stays simple even when the
             web makes it complicated.

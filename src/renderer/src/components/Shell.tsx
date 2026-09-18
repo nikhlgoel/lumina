@@ -1,5 +1,6 @@
+import { withArtSize } from '@core/artwork';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowDownToLine, ChevronUp, CircleCheck, CircleX, Globe, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
+import { ArrowDownToLine, ChevronUp, Code2, CircleCheck, CircleX, Globe, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatSpeed, plural } from '@core/format';
 import { cn } from '@/lib/cn';
@@ -17,6 +18,7 @@ const NAV: NavItem[] = [
   { view: 'queue', label: 'Queue', icon: <ListTodo />, shortcut: `${mod}2` },
   { view: 'library', label: 'Library', icon: <Library />, shortcut: `${mod}3` },
   { view: 'browser', label: 'Browser', icon: <Globe />, shortcut: `${mod}4` },
+  { view: 'ide', label: 'Code', icon: <Code2 />, shortcut: `${mod}5` },
   { view: 'settings', label: 'Settings', icon: <Settings />, shortcut: `${mod},` },
 ];
 const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };
@@ -190,8 +192,18 @@ export function Sidebar() {
       )}
     >
       {/* Brand — divided from the pages below so the app mark reads as a header, not a nav item. */}
-      <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center border-b border-line', collapsed ? 'justify-center px-0' : 'px-4', isMac && !collapsed && 'pl-[84px]')}>
-        {(!isMac || collapsed) && <Brand collapsed={collapsed} />}
+      {/* The collapse toggle lives up here beside the brand, where people look for it — it used to sit
+          at the very bottom of the sidebar, under the library stats, and was easy to miss. */}
+      <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center border-b border-line', collapsed ? 'justify-center px-0' : 'gap-2 px-4', isMac && !collapsed && 'pl-[84px]')}>
+        {!collapsed && !isMac && <Brand collapsed={false} />}
+        <button
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={cn('no-drag grid size-8 shrink-0 place-items-center rounded-lg text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink [&_svg]:size-[18px]', !collapsed && 'ml-auto')}
+        >
+          {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+        </button>
       </div>
       {isMac && !collapsed && <div className="border-b border-line px-4 py-2"><Brand collapsed={false} /></div>}
 
@@ -233,18 +245,6 @@ export function Sidebar() {
             {stats.scanning ? 'Scanning library…' : `${plural(stats.audio, 'song')} · ${plural(stats.video, 'video')}`}
           </div>
         )}
-        <button
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={cn(
-            'flex h-8 items-center rounded-lg text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink [&_svg]:size-[18px]',
-            collapsed ? 'w-full justify-center' : 'w-full gap-2 px-2.5 font-semibold',
-          )}
-        >
-          {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-          {!collapsed && <span>Collapse</span>}
-        </button>
       </div>
 
       {/* Drag the right edge to resize; drag it narrow enough and it snaps to the icon rail. */}
@@ -292,11 +292,16 @@ function Brand({ collapsed }: { collapsed: boolean }) {
 }
 
 /** Top drag strip above page content; leaves room for Windows/Linux caption buttons. */
-export function TitleBar({ children }: { children?: ReactNode }) {
+/**
+ * The draggable strip across the top of a view. `right` sits at the far end, clear of the window
+ * controls on Windows/Linux (the 150px reserve) — the IDE puts its layout toggles there.
+ */
+export function TitleBar({ children, right, className }: { children?: ReactNode; right?: ReactNode; className?: string }) {
   const isMac = window.lumina.platform === 'darwin';
   return (
-    <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center gap-2 px-6', !isMac && 'pr-[150px]')}>
-      <div className="no-drag flex items-center gap-2">{children}</div>
+    <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center gap-2 px-6', !isMac && 'pr-[150px]', className)}>
+      <div className="no-drag flex min-w-0 items-center gap-2">{children}</div>
+      {right && <div className="no-drag ml-auto flex shrink-0 items-center gap-2">{right}</div>}
     </div>
   );
 }
@@ -327,7 +332,7 @@ export function MiniBar() {
     >
       <span className="absolute top-0 left-0 h-px bg-accent transition-[width] duration-500 ease-linear" style={{ width: `${pct}%` }} />
       <div style={{ viewTransitionName: inPlayer ? undefined : 'now-playing-art' }} className="rounded-md">
-        <Artwork src={item.artworkUrl} seed={item.album ?? item.title} kind={item.kind} className="size-11 shadow-sm transition-transform duration-200 group-hover:scale-[1.04]" rounded="rounded-md" />
+        <Artwork src={withArtSize(item.artworkUrl, 44)} seed={item.album ?? item.title} kind={item.kind} className="size-11 shadow-sm transition-transform duration-200 group-hover:scale-[1.04]" rounded="rounded-md" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold">{item.title}</div>

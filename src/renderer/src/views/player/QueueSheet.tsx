@@ -1,3 +1,4 @@
+import { withArtSize } from '@core/artwork';
 import { useEffect, useState } from 'react';
 import { Film, ListMusic, X } from 'lucide-react';
 import { formatDuration } from '@core/format';
@@ -46,7 +47,7 @@ export function QueueSheet({ open, onClose }: { open: boolean; onClose: () => vo
         {tab === 'queue' && queue.map((item, i) => (
           <button key={`${item.id}-${i}`} tabIndex={open ? 0 : -1} onClick={() => jump(i)} aria-current={i === index}
             className={cn('grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-white/6', i === index && 'bg-white/10')}>
-            <Artwork src={item.artworkUrl} seed={item.album ?? item.title} kind={item.kind} className="size-11" rounded="rounded-lg" />
+            <Artwork src={withArtSize(item.artworkUrl, 44)} seed={item.album ?? item.title} kind={item.kind} className="size-11" rounded="rounded-lg" />
             <span className="min-w-0">
               <b className="block truncate text-sm font-semibold">{item.title}</b>
               <small className="block truncate text-xs text-[var(--p-ink-3)]">{item.artist ?? (item.kind === 'video' ? 'Video' : 'Unknown artist')}</small>

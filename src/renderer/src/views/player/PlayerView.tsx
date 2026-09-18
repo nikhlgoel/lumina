@@ -1,3 +1,4 @@
+import { withArtSize } from '@core/artwork';
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronLeft, Library, Maximize2, Minimize2, Palette } from 'lucide-react';
 import { PLAYER_THEMES, type PlayerTheme } from '@shared/settings';
@@ -43,7 +44,7 @@ export function PlayerView() {
   useEffect(() => {
     if (!item) return;
     let alive = true;
-    void extractPalette(item.artworkUrl, item.album ?? item.title).then((p) => alive && setColors(p));
+    void extractPalette(withArtSize(item.artworkUrl, 64) ?? item.artworkUrl, item.album ?? item.title).then((p) => alive && setColors(p));
     return () => { alive = false; };
   }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

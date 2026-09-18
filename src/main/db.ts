@@ -59,6 +59,16 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // 2 — the offline collection: liked songs. Keyed by path (like play_positions) so a like survives
+  // a rescan, a re-index, or the row being dropped and found again. User playlists reuse the
+  // existing `playlists` table with source='user', which the scanner already refuses to delete.
+  `
+  CREATE TABLE likes (
+    path TEXT PRIMARY KEY,
+    liked_at INTEGER NOT NULL
+  );
+  CREATE INDEX likes_liked_at ON likes(liked_at DESC);
+  `,
 ];
 
 let db: DatabaseSync | null = null;

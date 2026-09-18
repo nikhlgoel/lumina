@@ -101,6 +101,12 @@ export function LyricsView({ off }: { off: boolean }) {
 
   return (
     <div className="p-view absolute inset-0 grid place-items-center" data-off={off || undefined}>
+      {/* Lyrics recalled by a language model can be wrong or paraphrased — never present them as the real thing. */}
+      {lyrics?.source === 'ai' && !body && (
+        <p className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[var(--p-ink-3)]">
+          AI, unverified — these may be wrong
+        </p>
+      )}
       {body ?? (
         synced ? (
           <div ref={container} className="p-lyrics relative h-full w-[min(900px,100%)] overflow-hidden">

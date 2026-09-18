@@ -1,6 +1,7 @@
+import { withArtSize } from '@core/artwork';
 import { useEffect, useMemo, useState } from 'react';
 import { Captions, Film, FolderOpen, LayoutGrid, ListMusic, Music, Play, Rows3, RefreshCw, Search, Tv } from 'lucide-react';
-import type { LibraryItem, LibraryPlaylist } from '@shared/types';
+import type { LibraryItem } from '@shared/types';
 import { formatDuration, plural } from '@core/format';
 import { presetById } from '@core/presets';
 import { call, errorMessage } from '@/lib/bridge';
@@ -12,9 +13,12 @@ import { Artwork } from '@/components/Artwork';
 import { Badge, Button, EmptyState, IconButton, PageHeader, Segmented } from '@/components/ui';
 import { TitleBar } from '@/components/Shell';
 import { VirtualList } from '@/components/VirtualList';
+import { AddToPlaylistButton, LikeButton, PlaylistDetail, PlaylistGrid } from './Collection';
+import { FilesTab } from './FilesTab';
 
-type Tab = 'music' | 'videos' | 'playlists';
-const art = (id: string) => `lumina-media://art/${id}`;
+type Tab = 'music' | 'videos' | 'playlists' | 'files';
+// Rows draw covers at 28–36px; asking for more would only fill GPU memory (see core/artwork).
+const art = (id: string, cssPx = 36) => withArtSize(`lumina-media://art/${id}`, cssPx)!;
 
 function qualityTag(item: LibraryItem): string | null {
   if (item.kind === 'video') return item.height ? `${item.height >= 2160 ? '4K' : `${item.height}p`}` : null;
@@ -27,6 +31,7 @@ type VideoView = 'grid' | 'list';
 
 export function LibraryView() {
   const [tab, setTab] = useState<Tab>('music');
+  const [openPlaylist, setOpenPlaylist] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const { items, playlists, loaded, load, loadPlaylists, rescan, stats } = useLibrary();
   const musicView = useApp((s) => s.settings?.library.musicView ?? 'details');
@@ -53,12 +58,13 @@ export function LibraryView() {
       <div className="mx-auto flex min-h-0 w-full max-w-[1180px] flex-1 flex-col px-8">
         <PageHeader
           title="Library"
-          subtitle={stats ? `${plural(stats.audio, 'song')} · ${plural(stats.video, 'video')} · ${plural(stats.playlists, 'playlist')}` : undefined}
+          subtitle={stats ? `${plural(stats.audio, 'song')} · ${plural(stats.video, 'video')} · ${plural(stats.liked, 'like')}` : undefined}
           actions={<Button variant="ghost" size="sm" icon={<RefreshCw className={cn('size-3.5', stats?.scanning && 'animate-spin')} />} disabled={stats?.scanning} onClick={rescan}>{stats?.scanning ? 'Scanning' : 'Rescan'}</Button>}
         />
         <div className="mb-4 flex items-center gap-3">
           <Segmented label="Library section" value={tab} onChange={setTab} options={[
-            { value: 'music', label: 'Music' }, { value: 'videos', label: 'Videos' }, { value: 'playlists', label: 'Playlists on this PC' },
+            { value: 'music', label: 'Music' }, { value: 'videos', label: 'Videos' },
+            { value: 'playlists', label: 'Playlists' }, { value: 'files', label: 'Files' },
           ]} />
           {tab === 'music' && (
             <ViewToggle
@@ -84,7 +90,10 @@ export function LibraryView() {
         <div className="min-h-0 flex-1 pb-4">
           {tab === 'music' && <MusicList items={music} loaded={loaded.audio} searching={!!q} view={musicView} />}
           {tab === 'videos' && <VideoGrid items={videos} loaded={loaded.video} searching={!!q} view={videoView} />}
-          {tab === 'playlists' && <PlaylistGrid lists={lists} loaded={loaded.playlists} searching={!!q} />}
+          {tab === 'playlists' && (openPlaylist
+            ? <PlaylistDetail id={openPlaylist} onBack={() => setOpenPlaylist(null)} />
+            : <PlaylistGrid lists={lists} loaded={loaded.playlists} searching={!!q} onOpen={setOpenPlaylist} />)}
+          {tab === 'files' && <FilesTab query={query} />}
         </div>
       </div>
     </div>
@@ -94,7 +103,10 @@ export function LibraryView() {
 function useItemActions() {
   const toast = useApp((s) => s.toast);
   const setView = useApp((s) => s.setView);
+  // With on-device AI off no model is ever loaded, so the action shouldn't be offered at all.
+  const localAi = useApp((s) => s.settings?.subtitles.localAi ?? true);
   return {
+    localAi,
     reveal: (p: string) => void call('shell:show-in-folder', { path: p }).catch((e) => toast(errorMessage(e), 'error')),
     makeTvSafe: async (p: string) => {
       try {
@@ -152,11 +164,11 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
     });
   };
   const compact = view === 'compact';
-  const cols = compact ? 'grid-cols-[32px_1fr_52px_32px]' : 'grid-cols-[44px_1fr_1fr_110px_64px_40px]';
+  const cols = compact ? 'grid-cols-[32px_1fr_52px_104px]' : 'grid-cols-[44px_1fr_1fr_110px_64px_112px]';
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
       {!compact && (
-        <div className="grid grid-cols-[44px_1fr_1fr_110px_64px_40px] items-center gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
+        <div className="grid grid-cols-[44px_1fr_1fr_110px_64px_112px] items-center gap-3 border-b border-line px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
           <span /><span>Title</span><span>Album</span><span>Quality</span><span className="text-right">Time</span><span />
         </div>
       )}
@@ -197,7 +209,11 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
                 </>
               )}
               <span className="text-right text-[13px] text-ink-3 tabular">{formatDuration(item.durationSec)}</span>
-              <IconButton label="Show in folder" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
+              <div className="flex items-center">
+                <LikeButton item={item} />
+                <AddToPlaylistButton item={item} />
+                <IconButton label="Show in folder" size="sm" className="opacity-0 group-hover:opacity-100" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
+              </div>
             </div>
           );
         }}
@@ -210,7 +226,7 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
 function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; loaded: boolean; searching: boolean; view: VideoView }) {
   const playIds = usePlayer((s) => s.playIds);
   const setMode = useApp((s) => s.setMode);
-  const { reveal, makeTvSafe, generateSubs } = useItemActions();
+  const { reveal, makeTvSafe, generateSubs, localAi } = useItemActions();
 
   if (!loaded) return <ListSkeleton />;
   if (!items.length) return <EmptyState icon={<Film />} title={searching ? 'No videos match' : 'No videos yet'}>{searching ? 'Try a different search.' : 'Downloaded videos and anything in your Videos folder shows up here.'}</EmptyState>;
@@ -234,7 +250,7 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
                 className="group grid h-full grid-cols-[96px_1fr_auto] items-center gap-3 px-3 transition-colors hover:bg-hover"
               >
                 <button aria-label={`Play ${item.title}`} className="relative overflow-hidden rounded-md" onClick={(e) => { e.stopPropagation(); openAt(i); }}>
-                  <Artwork src={art(item.id)} seed={item.title} kind="video" className="aspect-video w-24" rounded="rounded-md" />
+                  <Artwork src={art(item.id, 96)} seed={item.title} kind="video" className="aspect-video w-24" rounded="rounded-md" />
                   <span className="absolute inset-0 grid place-items-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"><Play className="size-4 fill-white text-white" /></span>
                 </button>
                 <div className="min-w-0">
@@ -244,7 +260,7 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
                 <div className="flex items-center gap-1">
                   <span className="mr-1 text-[13px] text-ink-3 tabular">{formatDuration(item.durationSec)}</span>
                   <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <IconButton label="Generate English subtitles" size="sm" onClick={() => generateSubs(item.path)}><Captions /></IconButton>
+                    {localAi && <IconButton label="Generate English subtitles" size="sm" onClick={() => generateSubs(item.path)}><Captions /></IconButton>}
                     {item.codec !== 'h264' && <IconButton label="Make a TV-ready copy" size="sm" onClick={() => makeTvSafe(item.path)}><Tv /></IconButton>}
                     <IconButton label="Show in folder" size="sm" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
                   </div>
@@ -262,7 +278,7 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
       {items.slice(0, 600).map((item, i) => (
         <article key={item.id} className="group">
           <button onClick={() => { void playIds(items.map((x) => x.id), i); setMode('player'); }} className="relative block w-full overflow-hidden rounded-xl border border-line bg-sunken shadow-sm transition-transform duration-200 hover:-translate-y-0.5" aria-label={`Play ${item.title}`}>
-            <Artwork src={art(item.id)} seed={item.title} kind="video" className="aspect-video w-full" rounded="rounded-none" />
+            <Artwork src={art(item.id, 256)} seed={item.title} kind="video" className="aspect-video w-full" rounded="rounded-none" />
             <span className="absolute right-2 bottom-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white tabular">{formatDuration(item.durationSec)}</span>
             {qualityTag(item) && <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white">{qualityTag(item)}</span>}
           </button>
@@ -272,45 +288,12 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
               <p className="mt-0.5 text-xs text-ink-3">{item.codec?.toUpperCase()}</p>
             </div>
             <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <IconButton label="Generate English subtitles" size="sm" onClick={() => generateSubs(item.path)}><Captions /></IconButton>
+              {localAi && <IconButton label="Generate English subtitles" size="sm" onClick={() => generateSubs(item.path)}><Captions /></IconButton>}
               {item.codec !== 'h264' && <IconButton label="Make a TV-ready copy" size="sm" onClick={() => makeTvSafe(item.path)}><Tv /></IconButton>}
               <IconButton label="Show in folder" size="sm" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
             </div>
           </div>
         </article>
-      ))}
-    </div>
-  );
-}
-
-function PlaylistGrid({ lists, loaded, searching }: { lists: LibraryPlaylist[]; loaded: boolean; searching: boolean }) {
-  const playIds = usePlayer((s) => s.playIds);
-  const setMode = useApp((s) => s.setMode);
-  const toast = useApp((s) => s.toast);
-
-  if (!loaded) return <ListSkeleton />;
-  if (!lists.length) return <EmptyState icon={<ListMusic />} title={searching ? 'No playlists match' : 'No playlists found'}>{searching ? 'Try a different search.' : 'Lumina finds .m3u, .pls and .xspf playlists and any folder of songs in your library folders.'}</EmptyState>;
-
-  const play = async (pl: LibraryPlaylist) => {
-    const items = await call('library:items', { playlistId: pl.id });
-    if (!items.length) return toast('None of this playlist’s files could be found.', 'error');
-    await playIds(items.map((i) => i.id));
-    setMode('player');
-  };
-
-  return (
-    <div className="grid h-full auto-rows-min grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 overflow-auto pb-4">
-      {lists.map((pl) => (
-        <button key={pl.id} onClick={() => play(pl)} className="group flex items-center gap-3 rounded-xl border border-line bg-panel p-3 text-left shadow-sm transition-[transform,background-color] duration-150 hover:-translate-y-0.5 hover:bg-raised active:scale-[0.99]">
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg text-white/85" style={{ background: `linear-gradient(135deg, oklch(58% 0.11 ${(pl.name.length * 47) % 360}), oklch(36% 0.08 ${(pl.name.length * 47 + 50) % 360}))` }}>
-            {pl.kind === 'video' ? <Film className="size-5" /> : <ListMusic className="size-5" />}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{pl.name}</span>
-            <span className="block truncate text-xs text-ink-3">{pl.location} · {pl.source === 'folder' ? 'folder' : `.${pl.path.split('.').pop()} file`}</span>
-          </span>
-          <span className="text-xs font-semibold text-ink-3 tabular">{pl.itemCount}</span>
-        </button>
       ))}
     </div>
   );

@@ -235,8 +235,10 @@ export function Dialog({ open, onClose, title, children, footer, width = 520 }: 
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-6">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-rise" onClick={onClose} />
+    // Safe centring: a panel taller than the viewport overflows downward only, so its header and
+    // first field stay reachable. Plain centring splits the overflow and cuts the title off.
+    <div className="fixed inset-0 z-50 grid p-6 [justify-items:center] [align-items:safe_center]">
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] animate-rise" onClick={onClose} />
       <div ref={panel} role="dialog" aria-modal="true" aria-label={title} style={{ width }} className="relative max-h-[86vh] max-w-full overflow-hidden rounded-2xl border border-line bg-overlay shadow-lg animate-rise flex flex-col">
         <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <h2 className="text-[15px] font-semibold">{title}</h2>

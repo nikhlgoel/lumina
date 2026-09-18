@@ -4,7 +4,7 @@ import path from 'node:path';
 import {
   inputSchemas, type DiskUsage, type EventChannel, type EventPayloads, type ExtensionStatus, type InvokeChannel, type InvokeOutputs, type SpotifyStatus,
 } from '../shared/ipc';
-import type { DownloadOptions, FormatChoice, MediaInfo, PlayableItem, RequestInfo } from '../shared/types';
+import type { DownloadOptions, FormatChoice, MediaInfo, PlayableItem, PortableTransfer, RequestInfo } from '../shared/types';
 import type { SettingsPatch } from '../shared/settings';
 import { applyFormatPreferences, BUILT_IN_PRESETS } from '../core/presets';
 import { mediaKindOf } from '../core/playlists';
@@ -23,10 +23,26 @@ import { getLyrics } from './lyrics';
 import { MEDIA_SCHEME } from './media/protocol';
 import { currentMode, mainWindow, setMode } from './window';
 import { setAudioOutputs, updateTrayPlayback } from './tray';
+import type { TrayPlayback } from '../core/trayMenu';
 import { listAccounts, signIn, signOut } from './services/accounts';
 import { connectSpotify, disconnectSpotify, SPOTIFY_REDIRECT, spotifyStatus } from './services/spotify';
 import { bridge, pairedBrowsers, revokeBrowser } from './bridge/server';
 import { shortcutStatus } from './shortcuts';
+import { aiModelStatus, removeAiModel } from './subtitles';
+import { selectTorrentFiles, torrentDetail } from './jobs/aria2';
+import {
+  allFiles, closeWorkspace, createFile, listDirectory, openWorkspace, readTextFile, renameEntry, restoreWorkspace,
+  searchInFiles, workspaceInfo, writeTextFile,
+} from './ide/workspace';
+import { callTool, initMcp, listServers, onMcpChanged, removeServer, saveServer, setServerEnabled } from './ide/mcp';
+import {
+  availableShells, listTerminals, resizeTerminal, setTerminalListeners, startTerminal, stopTerminal, writeTerminal,
+} from './ide/terminal';
+import { commit as gitCommit, discard as gitDiscard, gitStatus, init as gitInit, original as gitOriginal, stage as gitStage, unstage as gitUnstage } from './ide/git';
+import { commitMessageProblem } from '../core/git';
+import { aiKeyStatus, clearAiKey, openKeyPage, setAiKey, testAiKey } from './ai';
+import { exportToDrive, importFromDrive, initUsb, listDrives, onDrivesChanged, prepareDrive, scanDriveForImport, type TransferHandle } from './usb';
+import { checkForUpdate, initUpdates, onUpdateState, openReleasePage, restartApp, skipVersion, updateState } from './update';
 import { database } from './db';
 import { artworkCacheDir, extensionDir, logsDir } from './paths';
 import { logger } from './log';
@@ -110,6 +126,30 @@ function dirSize(dir: string): number {
   return total;
 }
 
+/**
+ * One portable-drive transfer at a time: a second request is refused rather than queued, because
+ * two copies onto the same stick would just fight for its write bandwidth. Progress is broadcast
+ * as it goes; the resolved value is the final state.
+ */
+let activeTransfer: (TransferHandle & { cancelled?: boolean }) | null = null;
+
+async function runTransfer(
+  run: (onProgress: (t: PortableTransfer) => void, handle: TransferHandle & { cancelled?: boolean }) => Promise<PortableTransfer>,
+): Promise<PortableTransfer> {
+  if (activeTransfer) throw new Error('A drive transfer is already running.');
+  const handle: TransferHandle & { cancelled?: boolean } = { cancel: () => { handle.cancelled = true; } };
+  activeTransfer = handle;
+  try {
+    return await run((t) => broadcast('usb:transfer', t), handle);
+  } finally {
+    activeTransfer = null;
+  }
+}
+
+function cancelTransfer() {
+  activeTransfer?.cancel();
+}
+
 const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'app:info': () => ({ version: app.getVersion(), platform: process.platform, isPackaged: app.isPackaged, startMode: currentMode() }),
   'app:open-logs': async () => {
@@ -186,8 +226,73 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   },
 
   'library:stats': () => library.stats(),
-  'library:items': (q: { kind?: 'audio' | 'video'; playlistId?: string; query?: string }) => library.items(q),
+  'library:items': (q: { kind?: 'audio' | 'video'; playlistId?: string; query?: string; liked?: boolean }) => library.items(q),
   'library:playlists': () => library.playlists(),
+  'library:files': () => library.otherFiles(),
+  'ai:models': () => aiModelStatus(),
+  'ai:key-status': () => aiKeyStatus(),
+  'ai:set-key': ({ provider, key }: { provider: 'openai' | 'anthropic' | 'gemini' | 'openrouter'; key: string }) => setAiKey(provider, key),
+  'ai:clear-key': () => clearAiKey(),
+  'ai:test-key': () => testAiKey(),
+  'ai:open-key-page': ({ provider }: { provider: 'openai' | 'anthropic' | 'gemini' | 'openrouter' }) => openKeyPage(provider),
+  'ai:remove-model': ({ id }: { id: 'base' | 'small' }) => removeAiModel(id),
+  'ide:open': ({ folder }: { folder?: string }) => openWorkspace(folder),
+  'ide:close': () => closeWorkspace(),
+  'ide:info': () => workspaceInfo(),
+  'ide:list': ({ path: p }: { path?: string }) => listDirectory(p ?? ''),
+  'ide:read': ({ path: p }: { path: string }) => readTextFile(p),
+  'ide:write': ({ path: p, text, mtimeMs }: { path: string; text: string; mtimeMs?: number }) => writeTextFile(p, text, mtimeMs),
+  'ide:create': ({ path: p, directory }: { path: string; directory?: boolean }) => createFile(p, directory ?? false),
+  'ide:rename': ({ from, to }: { from: string; to: string }) => renameEntry(from, to),
+  'ide:files': () => allFiles(),
+  'git:status': () => gitStatus(),
+  'git:stage': ({ paths }: { paths: string[] }) => gitStage(paths),
+  'git:unstage': ({ paths }: { paths: string[] }) => gitUnstage(paths),
+  'git:discard': ({ paths }: { paths: string[] }) => gitDiscard(paths),
+  'git:commit': ({ message }: { message: string }) => {
+    const problem = commitMessageProblem(message);
+    if (problem) throw new Error(problem);
+    return gitCommit(message.trim());
+  },
+  'git:original': ({ path }: { path: string }) => gitOriginal(path),
+  'git:init': () => gitInit(),
+  'ide:term-shells': () => availableShells(),
+  'ide:term-list': () => listTerminals(),
+  'ide:term-start': ({ shellId }: { shellId?: string }) => startTerminal(shellId),
+  'ide:term-write': ({ id, data }: { id: string; data: string }) => writeTerminal(id, data),
+  'ide:term-resize': ({ id, cols, rows }: { id: string; cols: number; rows: number }) => resizeTerminal(id, cols, rows),
+  'ide:term-stop': ({ id }: { id: string }) => stopTerminal(id),
+  'mcp:list': () => listServers(),
+  'mcp:save': (cfg: Parameters<typeof saveServer>[0]) => saveServer(cfg),
+  'mcp:remove': ({ id }: { id: string }) => removeServer(id),
+  'mcp:enable': ({ id, enabled }: { id: string; enabled: boolean }) => setServerEnabled(id, enabled),
+  'mcp:call': ({ serverId, name, args }: { serverId: string; name: string; args?: unknown }) => callTool(serverId, name, args),
+  'ide:search': ({ query, caseSensitive }: { query: string; caseSensitive?: boolean }) => searchInFiles(query, { caseSensitive }),
+  'torrent:detail': ({ id }: { id: string }) => torrentDetail(id),
+  'torrent:select-files': ({ id, indices }: { id: string; indices: number[] }) => selectTorrentFiles(id, indices),
+  'usb:drives': () => listDrives(),
+  'usb:prepare': ({ root }: { root: string }) => prepareDrive(root),
+  'usb:export': ({ root, kinds }: { root: string; kinds: ('audio' | 'video')[] }) =>
+    runTransfer((onProgress, handle) => exportToDrive(root, kinds, onProgress, handle)),
+  'usb:import': ({ root }: { root: string }) =>
+    runTransfer((onProgress, handle) => importFromDrive(root, onProgress, handle)),
+  'usb:import-preview': ({ root }: { root: string }) => {
+    const found = scanDriveForImport(root);
+    return { files: found.length, bytes: found.reduce((n, f) => n + f.sizeBytes, 0) };
+  },
+  'usb:cancel': () => cancelTransfer(),
+  'update:status': () => updateState(),
+  'update:check': () => checkForUpdate(true),
+  'update:skip': ({ version }: { version: string }) => skipVersion(version),
+  'update:open-release': () => openReleasePage(),
+  'app:restart': () => restartApp(),
+  'library:like': ({ path, liked }: { path: string; liked: boolean }) => library.setLiked(path, liked),
+  'library:playlist-create': ({ name, paths }: { name: string; paths?: string[] }) => library.createPlaylist(name, paths ?? []),
+  'library:playlist-rename': ({ id, name }: { id: string; name: string }) => library.renamePlaylist(id, name),
+  'library:playlist-delete': ({ id }: { id: string }) => library.deletePlaylist(id),
+  'library:playlist-add': ({ id, paths }: { id: string; paths: string[] }) => library.addToPlaylist(id, paths),
+  'library:playlist-remove': ({ id, index, paths }: { id: string; index?: number; paths?: string[] }) => library.removeFromPlaylist(id, { index, paths }),
+  'library:playlist-move': ({ id, from, to }: { id: string; from: number; to: number }) => library.movePlaylistItem(id, from, to),
   'library:rescan': () => {
     void library.scan();
   },
@@ -200,7 +305,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
     if (!playable) throw new Error('This file can’t be played.');
     return playable;
   },
-  'player:state': (state: { playing: boolean; title: string | null; artist: string | null }) => updateTrayPlayback(state),
+  'player:state': (state: TrayPlayback) => updateTrayPlayback(state),
   'player:save-position': ({ id, positionSec }: { id: string; positionSec: number }) => {
     const item = library.getById(id);
     if (item) library.savePosition(item.path, positionSec);
@@ -375,6 +480,18 @@ export function registerIpc() {
   queue.on('removed', (id) => broadcast('jobs:removed', { id }));
   settings.on('changed', (s) => broadcast('settings:changed', s));
   library.on('changed', (stats) => broadcast('library:changed', stats));
+  onUpdateState((s) => broadcast('update:changed', s));
+  onDrivesChanged((drives) => broadcast('usb:drives-changed', drives));
+  initUpdates();
+  initUsb();
+  restoreWorkspace();
+  onMcpChanged((states) => broadcast('mcp:changed', states));
+  // Terminal output is a firehose; it goes straight out as an event rather than through invoke.
+  setTerminalListeners(
+    (id, chunk) => broadcast('ide:term-data', { id, chunk }),
+    (id, exitCode) => broadcast('ide:term-exit', { id, exitCode }),
+  );
+  initMcp();
   tools.on('changed', (list) => broadcast('tools:changed', list));
   void bridge;
 }

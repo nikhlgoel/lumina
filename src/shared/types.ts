@@ -1,3 +1,12 @@
+import type { McpServerConfig, McpTool } from '../core/mcp';
+import type { ShellChoice, TreeEntry } from '../core/ide';
+import type { GitFile, GitStatus } from '../core/git';
+
+export type { ShellChoice };
+import type { SpeedSample } from '../core/speedHistory';
+import type { TorrentFile } from '../core/torrentFiles';
+import type { ReleaseInfo } from '../core/version';
+
 // Domain types shared by main, preload and renderer. No runtime code here.
 
 export type ContentType = 'music' | 'video' | 'series';
@@ -238,6 +247,8 @@ export interface LibraryItem {
   width: number | null;
   height: number | null;
   hasArtwork: boolean;
+  /** In the user's Liked songs. */
+  liked: boolean;
   sizeBytes: number;
   mtimeMs: number;
   addedAt: number;
@@ -255,10 +266,138 @@ export interface LibraryPlaylist {
   location: string;
 }
 
+export interface AiKeyStatus {
+  provider: 'none' | 'openai' | 'anthropic' | 'gemini' | 'openrouter';
+  model: string;
+  /** Whether a key is stored. The key itself never crosses IPC. */
+  hasKey: boolean;
+  /** Last four characters, so the user can tell which key is stored. */
+  hint: string | null;
+}
+
+/* ---------- On-device AI models ---------- */
+
+export interface AiModelStatus {
+  id: 'base' | 'small';
+  label: string;
+  /** On disk right now. */
+  present: boolean;
+  /** Bytes it occupies (actual when present, expected when not). */
+  sizeBytes: number;
+  /** Roughly how much memory it needs while a job runs. */
+  ramHintBytes: number;
+  /** Shipped inside Lumina, so it can't be removed. */
+  bundled: boolean;
+  /** The one Settings is currently set to use. */
+  selected: boolean;
+}
+
+/* ---------- Embedded IDE ---------- */
+
+export type { McpServerConfig, McpTool };
+
+/** An MCP server's live state: what it is, whether it's running, and what it offers. */
+export interface McpServerState {
+  config: McpServerConfig;
+  status: 'stopped' | 'starting' | 'ready' | 'error';
+  tools: McpTool[];
+  error: string | null;
+}
+
+export interface WorkspaceInfo {
+  root: string;
+  name: string;
+  recent: string[];
+}
+
+export interface FileContent {
+  path: string;
+  text: string;
+  sizeBytes: number;
+  large: boolean;
+  mtimeMs: number;
+}
+
+/** One match from the IDE's find-in-files (distinct from the web SearchHit above). */
+export interface CodeSearchHit {
+  path: string;
+  line: number;
+  column: number;
+  text: string;
+}
+
+/* ---------- Torrents ---------- */
+
+export interface TorrentDetail {
+  jobId: string;
+  files: TorrentFile[];
+  seeds: number;
+  peers: number;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  uploadedBytes: number;
+  downloadedBytes: number;
+  /** Uploaded ÷ downloaded; null before anything has come down. */
+  ratio: number | null;
+  /** Rolling speed samples, oldest first, for the graph. */
+  history: SpeedSample[];
+}
+
+/* ---------- Portable (USB) drives ---------- */
+
+export interface PortableDrive {
+  /** Mount root, e.g. "E:\\" or "/media/me/STICK". */
+  root: string;
+  label: string;
+  totalBytes: number;
+  freeBytes: number;
+  /** A LuminaMedia folder already exists on it. */
+  ready: boolean;
+}
+
+export interface PortableTransfer {
+  /** What's happening right now — a file name while copying, otherwise a word like "Finished". */
+  stage: string;
+  direction: 'export' | 'import';
+  root: string;
+  files: number;
+  totalFiles: number;
+  bytes: number;
+  totalBytes: number;
+  done: boolean;
+  error: string | null;
+  /** Files that were already on the other side and didn't need copying. */
+  skipped: number;
+}
+
+/* ---------- App updates ---------- */
+
+export interface UpdateState {
+  /** The release to offer, or null when the running build is current (or nothing has been checked). */
+  available: ReleaseInfo | null;
+  currentVersion: string;
+  checking: boolean;
+  lastCheckAt: number;
+  /** Set when the last check couldn't complete (offline, rate-limited). Not fatal. */
+  error: string | null;
+}
+
+/** A download that isn't music or video: a document, archive, installer, image… */
+export interface LibraryFile {
+  path: string;
+  name: string;
+  /** Folder it sits in, relative to the downloads folder ('' = the folder itself). */
+  folder: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}
+
 export interface LibraryStats {
   audio: number;
   video: number;
   playlists: number;
+  /** Songs the user has liked — the collection's own list. */
+  liked: number;
   scanning: boolean;
   lastScanAt: number | null;
 }
@@ -276,7 +415,7 @@ export interface Lyrics {
   synced: boolean;
   lines: LyricLine[];
   plain: string | null;
-  source: 'embedded' | 'lrc-file' | 'lrclib' | 'lyrics.ovh';
+  source: 'embedded' | 'lrc-file' | 'lrclib' | 'lyrics.ovh' | 'ai';
 }
 
 /* ---------- Player ---------- */
@@ -314,6 +453,8 @@ export interface BrowserState {
 }
 
 /* ---------- Multi-source search ---------- */
+
+export type { TreeEntry };
 
 export interface SearchHit {
   /** Where it came from — drives the section it's shown in and its default download format. */
@@ -389,4 +530,28 @@ export interface HostChallenge {
   stage: string;
   /** Pages waiting behind this one. */
   waiting: number;
+}
+
+/** One live shell in the IDE's terminal panel. */
+export interface TerminalSession {
+  id: string;
+  shellId: string;
+  label: string;
+  cwd: string;
+}
+
+/** A changed file plus where it lives in the open folder — null when it is outside it (read-only). */
+export interface GitFileView extends GitFile {
+  workspacePath: string | null;
+}
+
+/** Everything the Source Control view needs in one round trip. */
+export interface GitView {
+  /** false when git is not installed — the view says so rather than failing. */
+  available: boolean;
+  version: string | null;
+  /** null when the open folder is not inside a repository. */
+  repo: { top: string; prefix: string } | null;
+  status: GitStatus | null;
+  files: GitFileView[];
 }

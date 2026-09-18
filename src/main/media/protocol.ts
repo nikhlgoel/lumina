@@ -1,9 +1,10 @@
-import { protocol } from 'electron';
+import { nativeImage, protocol } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { parseFile, selectCover } from 'music-metadata';
 import { library } from '../library';
+import { artBucket, artCacheName, fitWithin } from '../../core/artwork';
 import { artworkCacheDir } from '../paths';
 import { runTool, spawnTool, killTree } from '../process';
 import { tools } from '../tools';
@@ -48,40 +49,70 @@ function fileResponse(file: string, request: Request): Response {
   return new Response(stream, { status: 200, headers: { ...headers, 'Content-Length': String(stat.size) } });
 }
 
-async function artwork(id: string): Promise<Response> {
-  const item = library.getById(id);
-  if (!item || !fs.existsSync(item.path)) return new Response(null, { status: 404 });
-  const cached = path.join(artworkCacheDir(), `${id}-${item.mtimeMs}.jpg`);
-  if (fs.existsSync(cached)) return new Response(fs.readFileSync(cached), { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=86400' } });
+/** The original artwork bytes for an item — embedded cover, folder image or a video frame — cached once. */
+async function sourceArt(item: NonNullable<ReturnType<typeof library.getById>>): Promise<Buffer | null> {
+  const full = path.join(artworkCacheDir(), artCacheName(item.id, item.mtimeMs, 'full'));
+  if (fs.existsSync(full)) return fs.readFileSync(full);
 
-  try {
-    if (item.kind === 'audio') {
-      const meta = await parseFile(item.path, { duration: false });
-      const cover = selectCover(meta.common.picture);
-      if (cover) {
-        fs.writeFileSync(cached, cover.data);
-        return new Response(Buffer.from(cover.data), { headers: { 'Content-Type': cover.format || 'image/jpeg', 'Cache-Control': 'max-age=86400' } });
-      }
-      for (const name of ['cover.jpg', 'folder.jpg', 'front.jpg', 'cover.png', 'folder.png']) {
-        const p = path.join(path.dirname(item.path), name);
-        if (fs.existsSync(p)) return fileResponse(p, new Request('lumina-media://x'));
-      }
-      return new Response(null, { status: 404 });
+  if (item.kind === 'audio') {
+    const meta = await parseFile(item.path, { duration: false });
+    const cover = selectCover(meta.common.picture);
+    if (cover) {
+      const bytes = Buffer.from(cover.data);
+      fs.writeFileSync(full, bytes);
+      return bytes;
     }
-    // Video: embedded cover if present, otherwise a frame from 10% in.
-    const at = item.durationSec ? Math.max(1, item.durationSec * 0.1) : 5;
-    const args = item.hasArtwork
-      ? ['-v', 'error', '-i', item.path, '-map', '0:v:m:disposition:attached_pic', '-frames:v', '1', '-y', cached]
-      : ['-v', 'error', '-ss', String(at), '-i', item.path, '-frames:v', '1', '-vf', 'scale=640:-2', '-y', cached];
-    const r = await runTool(tools.require('ffmpeg'), args, { timeoutMs: 30_000 });
-    if (r.code === 0 && fs.existsSync(cached)) return new Response(fs.readFileSync(cached), { headers: { 'Content-Type': 'image/jpeg' } });
-  } catch (err) {
-    log.debug(`No artwork for ${item.path}`, err);
+    for (const name of ['cover.jpg', 'folder.jpg', 'front.jpg', 'cover.png', 'folder.png']) {
+      const p = path.join(path.dirname(item.path), name);
+      if (fs.existsSync(p)) return fs.readFileSync(p);
+    }
+    return null;
   }
-  return new Response(null, { status: 404 });
+  // Video: embedded cover if present, otherwise a frame from 10% in.
+  const at = item.durationSec ? Math.max(1, item.durationSec * 0.1) : 5;
+  const args = item.hasArtwork
+    ? ['-v', 'error', '-i', item.path, '-map', '0:v:m:disposition:attached_pic', '-frames:v', '1', '-y', full]
+    : ['-v', 'error', '-ss', String(at), '-i', item.path, '-frames:v', '1', '-vf', 'scale=640:-2', '-y', full];
+  const r = await runTool(tools.require('ffmpeg'), args, { timeoutMs: 30_000 });
+  return r.code === 0 && fs.existsSync(full) ? fs.readFileSync(full) : null;
 }
 
-/** Repackage media Chromium can't open (AVI, WMV, MKV with AC-3…) into fragmented MP4 on the fly. */
+const imageType = (b: Buffer) => (b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : 'image/jpeg');
+
+const imageResponse = (bytes: Buffer) =>
+  new Response(new Uint8Array(bytes), { headers: { 'Content-Type': imageType(bytes), 'Cache-Control': 'max-age=86400' } });
+
+/**
+ * Artwork at the size it will be shown (see core/artwork.ts for why this matters so much for GPU
+ * memory). Every request goes through here — with or without `?s=` — so no request can hand the
+ * renderer an image larger than ART_MAX.
+ */
+async function artwork(id: string, requested: string | null): Promise<Response> {
+  const item = library.getById(id);
+  if (!item || !fs.existsSync(item.path)) return new Response(null, { status: 404 });
+
+  const size = artBucket(requested);
+  const sized = path.join(artworkCacheDir(), artCacheName(item.id, item.mtimeMs, size));
+  if (fs.existsSync(sized)) return imageResponse(fs.readFileSync(sized));
+
+  try {
+    const source = await sourceArt(item);
+    if (!source) return new Response(null, { status: 404 });
+    const image = nativeImage.createFromBuffer(source);
+    // An image Chromium can't decode is passed through untouched rather than dropped.
+    if (image.isEmpty()) return imageResponse(source);
+    const { width, height } = image.getSize();
+    const fit = fitWithin(width, height, size);
+    if (!fit) return imageResponse(source);
+    const resized = image.resize({ width: fit.width, height: fit.height, quality: 'good' }).toJPEG(84);
+    fs.writeFileSync(sized, resized);
+    return imageResponse(resized);
+  } catch (err) {
+    log.debug(`No artwork for ${item.path}`, err);
+    return new Response(null, { status: 404 });
+  }
+}
+
 function remux(id: string, startSec: number): Response {
   const item = library.getById(id);
   if (!item || !fs.existsSync(item.path)) return new Response(null, { status: 404 });
@@ -152,7 +183,7 @@ export function handleMediaProtocol() {
         return fileResponse(item.path, request);
       }
       if (kind === 'remux') return remux(id, Number(url.searchParams.get('t') ?? 0));
-      if (kind === 'art') return await artwork(id);
+      if (kind === 'art') return await artwork(id, url.searchParams.get('s'));
       if (kind === 'subs') return await subtitles(id);
       return new Response('Not found', { status: 404 });
     } catch (err) {

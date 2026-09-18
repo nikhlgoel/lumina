@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Job } from '@shared/types';
+import { groupJobs, summarizeGroup } from '@core/jobGroups';
 import { queuePosition } from '@core/jobOrder';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from './app';
@@ -61,7 +62,42 @@ export const useJobs = create<JobsState>((set) => ({
 }));
 
 export const isActive = (j: Job) => j.status === 'running' || j.status === 'processing';
-export const isFinished = (j: Job) => j.status === 'completed' || j.status === 'failed' || j.status === 'cancelled';
+export const isFinishedStatus = (s: Job['status']) => s === 'completed' || s === 'failed' || s === 'cancelled';
+export const isFinished = (j: Job) => isFinishedStatus(j.status);
+
+/** One row of the Queue: either a single job, or a pasted release collapsed into one download. */
+export interface QueueRow { key: string; ids: string[] }
+
+/**
+ * Selector: the Queue's rows, split into in-progress and finished. Encoded as strings ("key»id,id"
+ * joined by "|") so the selector only re-renders the list when its *shape* changes — progress ticks
+ * flow straight to the individual rows, as they did before grouping. Ids are UUIDs, so the
+ * separators can't collide with them.
+ */
+export const selectQueueRows = (s: JobsState): { active: string; done: string } => {
+  const jobs = s.order.map((id) => s.byId[id]).filter((j): j is Job => Boolean(j));
+  const active: string[] = [];
+  const done: string[] = [];
+  for (const group of groupJobs(jobs)) {
+    const members = group.ids.map((id) => s.byId[id]).filter((j): j is Job => Boolean(j));
+    const entry = `${group.key}»${group.ids.join(',')}`;
+    (isFinishedStatus(summarizeGroup(members).status) ? done : active).push(entry);
+  }
+  return { active: active.join('|'), done: done.join('|') };
+};
+
+/** Selector: the newest `n` Recent rows, grouped the same way — a repack counts as one entry, not n. */
+export const selectRecentRows = (n: number) => (s: JobsState): string => {
+  const jobs = s.order.map((id) => s.byId[id]).filter((j): j is Job => Boolean(j));
+  return groupJobs(jobs).slice(0, n).map((g) => `${g.key}»${g.ids.join(',')}`).join('|');
+};
+
+/** Decode what {@link selectQueueRows} encoded. */
+export const parseQueueRows = (encoded: string): QueueRow[] =>
+  encoded ? encoded.split('|').map((entry) => {
+    const [key = '', ids = ''] = entry.split('»');
+    return { key, ids: ids.split(',') };
+  }) : [];
 
 /** Selector: counts for the sidebar badge. */
 export const selectActiveCount = (s: JobsState) =>

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { SubtitleOutput } from '../shared/types';
+import type { AiModelStatus, SubtitleOutput } from '../shared/types';
 import { killTree, onLines, spawnTool } from './process';
 import { tools } from './tools';
 import { settings } from './settings';
@@ -40,8 +40,60 @@ export function findEnglishSidecar(mediaPath: string): string | null {
 }
 
 export const whisperModelSizes = { base: 147_951_465, small: 487_601_967 } as const;
+/**
+ * Working memory whisper.cpp needs while transcribing, measured from the model's own requirements.
+ * Only ever used while a subtitle job runs — nothing is resident when Lumina is idle.
+ */
+export const whisperRamHints = { base: 500 << 20, small: 1024 << 20 } as const;
+
+/** What's on disk, what it costs, and which one is selected — for the Settings model manager. */
+export function aiModelStatus(): AiModelStatus[] {
+  const selected = settings.get().subtitles.whisperModel;
+  return (['base', 'small'] as const).map((id) => {
+    const p = tools.whisperModelPath(id);
+    let sizeBytes: number = whisperModelSizes[id];
+    if (p) {
+      try {
+        sizeBytes = fs.statSync(p).size;
+      } catch {
+        // Fall back to the expected size; a stat failure isn't worth failing the whole list.
+      }
+    }
+    return {
+      id,
+      label: id === 'base' ? 'Base' : 'Small',
+      present: Boolean(p),
+      sizeBytes,
+      ramHintBytes: whisperRamHints[id],
+      // Base ships inside Lumina; only a downloaded copy can be removed.
+      bundled: id === 'base' && Boolean(p) && !p!.startsWith(downloadedModelsDir()),
+      selected: id === selected,
+    };
+  });
+}
+
+/** Delete a downloaded model to reclaim the disk. Bundled models are refused, not silently ignored. */
+export function removeAiModel(id: 'base' | 'small'): boolean {
+  const dest = path.join(downloadedModelsDir(), `ggml-${id}.bin`);
+  if (!fs.existsSync(dest)) return false;
+  fs.rmSync(dest, { force: true });
+  log.info(`Removed the ${id} speech model`);
+  // Fall back to a model that still exists so the next job doesn't fail on a missing file.
+  if (settings.get().subtitles.whisperModel === id && tools.whisperModelPath('base')) {
+    settings.update({ subtitles: { whisperModel: 'base' } });
+  }
+  return true;
+}
+
+/** Thrown before any model is touched when the user has turned on-device AI off. */
+export function assertLocalAiEnabled() {
+  if (!settings.get().subtitles.localAi) {
+    throw new Error('On-device subtitle generation is turned off. Turn it back on in Settings › Subtitles.');
+  }
+}
 
 export function whisperModelPath(): string {
+  assertLocalAiEnabled();
   const model = settings.get().subtitles.whisperModel;
   const p = tools.whisperModelPath(model) ?? (model === 'small' ? null : tools.whisperModelPath('base'));
   if (!p) throw new Error(model === 'small'

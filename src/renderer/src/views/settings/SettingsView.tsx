@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Captions, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Puzzle, RefreshCw, Search, Settings2, Shield, UserRound, Wrench, X,
+  Captions, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Plug, Puzzle, RefreshCw, Search, Settings2, Shield, Sparkles, Usb, UserRound, Wrench, X,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -9,6 +9,9 @@ import { AppearanceSection, GeneralSection, PlayerSection } from './sections/app
 import { DownloadsSection, FormatsSection, SubtitlesSection, TorrentsSection } from './sections/downloading';
 import { AccountsSection, ExtensionSection, NetworkSection } from './sections/connections';
 import { SyncSection } from './sections/sync';
+import { AiSection } from './sections/ai';
+import { McpSection } from './sections/mcp';
+import { PortableSection } from './sections/portable';
 import { AdvancedSection, PrivacySection, StorageSection } from './sections/system';
 import type { SectionProps } from './controls';
 
@@ -53,6 +56,8 @@ const SECTIONS: SectionDef[] = [
     ['encodeQuality', 'Conversion quality'], ['keepOriginal', 'Keep the original after converting'], ['mp3Bitrate', 'MP3 quality', 'bitrate 320'],
   ] },
   { id: 'subtitles', label: 'Subtitles', icon: <Captions />, group: 'Downloading', component: SubtitlesSection, index: [
+    ['localAi', 'On-device AI', 'whisper model ram memory gpu offline speech'],
+    ['aiModels', 'Models on this PC', 'whisper disk space remove ram'],
     ['subFont', 'Subtitle font'], ['subSize', 'Subtitle size'], ['subColor', 'Subtitle text color'], ['subBackground', 'Subtitle readability', 'outline box shadow'],
     ['subPosition', 'Subtitle position'], ['subDefault', 'English subtitles for every video', 'captions'], ['subAuto', 'Auto-generated captions'],
     ['subOutput', 'Save subtitles as', 'burn embed srt'], ['whisperModel', 'Speech model', 'whisper generate'], ['whisperGpu', 'Use the graphics card for subtitles'],
@@ -64,6 +69,12 @@ const SECTIONS: SectionDef[] = [
   { id: 'storage', label: 'Storage & library', icon: <HardDrive />, group: 'Places', component: StorageSection, index: [
     ['musicDir', 'Music folder', 'location path'], ['videoDir', 'Videos folder'], ['otherDir', 'Files and torrents folder'], ['tempDir', 'Work-in-progress folder', 'temp'],
     ['addLibrary', 'Add a library folder'], ['watch', 'Watch folders for changes'], ['minAudio', 'Hide short sounds'],
+  ] },
+  { id: 'portable', label: 'Portable drive', icon: <Usb />, group: 'Places', component: PortableSection, index: [
+    ['usbPrepare', 'Set up this drive', 'usb pendrive stick memory card luminamedia folders structure'],
+    ['usbExport', 'Copy library to the drive', 'export backup car stereo tv'],
+    ['usbImport', 'Bring the drive’s media into this PC', 'import sync'],
+    ['usbRouting', 'Send new downloads here while it’s plugged in', 'route storage'],
   ] },
   { id: 'accounts', label: 'Accounts', icon: <UserRound />, group: 'Connections', component: AccountsSection, index: [
     ['youtubeAccount', 'Sign in to YouTube', 'login members age-restricted private bot'], ['otherSite', 'Sign in to another site'],
@@ -82,6 +93,14 @@ const SECTIONS: SectionDef[] = [
     ['createChain', 'Start a sync chain', 'devices phone android luminabr brave chain'], ['joinChain', 'Join a sync chain', 'recovery code pair'],
     ['recoveryCode', 'Recovery code', 'seed encrypt e2e'], ['syncFolder', 'Sync folder', 'usb shared cloud'],
     ['syncBookmarks', 'Sync bookmarks'], ['syncNow', 'Sync now'],
+  ] },
+  { id: 'ai', label: 'AI key', icon: <Sparkles />, group: 'Connections', component: AiSection, index: [
+    ['aiProvider', 'AI provider', 'openai anthropic claude gemini google openrouter bring your own key byok'],
+    ['aiModel', 'Model'], ['aiKey', 'API key', 'token secret keychain'],
+    ['aiLyrics', 'Ask your AI for lyrics as a last resort', 'lyrics fallback'],
+  ] },
+  { id: 'mcp', label: 'Connected tools', icon: <Plug />, group: 'Connections', component: McpSection, index: [
+    ['mcpServers', 'Connected tools (MCP)', 'mcp model context protocol server connector plugin skill tools integration'],
   ] },
   { id: 'privacy', label: 'Privacy', icon: <Shield />, group: 'System', component: PrivacySection, index: [
     ['keepHistory', 'Keep a list of finished downloads', 'history'], ['historyDays', 'Forget finished downloads after'],

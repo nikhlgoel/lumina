@@ -4,7 +4,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { aria2Progress, friendlyAria2Error, type Aria2Status } from '../../core/progress';
+import { aria2Progress, friendlyAria2Error, isDiskCacheFailure, type Aria2Status } from '../../core/progress';
+import { toSelectFileSpec, toTorrentFiles, type TorrentFile } from '../../core/torrentFiles';
+import { pushSample, shareRatio, type SpeedSample } from '../../core/speedHistory';
+import type { TorrentDetail } from '../../shared/types';
 import { diskCacheMb } from '../../core/tuning';
 import { formatBytes } from '../../core/format';
 import { speedLimitActive, type Settings } from '../../shared/settings';
@@ -175,7 +178,65 @@ class Aria2Daemon {
 
 export const aria2 = new Aria2Daemon();
 
-const FIELDS = ['gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed', 'uploadSpeed', 'connections', 'numSeeders', 'seeder', 'errorMessage', 'files', 'bittorrent', 'followedBy'];
+const FIELDS = ['gid', 'status', 'totalLength', 'completedLength', 'downloadSpeed', 'uploadSpeed', 'uploadLength', 'connections', 'numSeeders', 'seeder', 'errorMessage', 'files', 'bittorrent', 'followedBy'];
+
+/**
+ * Live per-job torrent state for the detail page: the gid to talk to aria2 about, the files, and a
+ * rolling speed history. Kept here (not in the Job record) because it is transient and high-churn —
+ * persisting 90 samples per job on every tick would be pointless write traffic.
+ */
+interface LiveTorrent {
+  gid: string | null;
+  files: TorrentFile[];
+  history: SpeedSample[];
+  seeds: number;
+  peers: number;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  uploadedBytes: number;
+  downloadedBytes: number;
+}
+
+const live = new Map<string, LiveTorrent>();
+
+const blankLive = (): LiveTorrent => ({
+  gid: null, files: [], history: [], seeds: 0, peers: 0,
+  downloadSpeed: 0, uploadSpeed: 0, uploadedBytes: 0, downloadedBytes: 0,
+});
+
+/** What the Queue's torrent detail panel reads. Returns null for a job with no live torrent. */
+export function torrentDetail(jobId: string): TorrentDetail | null {
+  const t = live.get(jobId);
+  if (!t) return null;
+  return {
+    jobId,
+    files: t.files,
+    seeds: t.seeds,
+    peers: t.peers,
+    downloadSpeed: t.downloadSpeed,
+    uploadSpeed: t.uploadSpeed,
+    uploadedBytes: t.uploadedBytes,
+    downloadedBytes: t.downloadedBytes,
+    ratio: shareRatio(t.uploadedBytes, t.downloadedBytes),
+    history: t.history,
+  };
+}
+
+/**
+ * Choose which files inside a torrent to fetch. aria2 applies `select-file` to a running download,
+ * so this takes effect immediately; an empty selection is refused rather than silently meaning
+ * "everything", which is what aria2 would do with an empty string.
+ */
+export async function selectTorrentFiles(jobId: string, indices: number[]): Promise<boolean> {
+  const t = live.get(jobId);
+  if (!t?.gid) throw new Error('That torrent isn’t running right now.');
+  const spec = toSelectFileSpec(indices);
+  if (!spec) throw new Error('Pick at least one file to download.');
+  await aria2.call('aria2.changeOption', t.gid, { 'select-file': spec });
+  log.info(`Torrent file selection for ${jobId}: ${spec}`);
+  t.files = t.files.map((f) => ({ ...f, selected: indices.includes(f.index) }));
+  return true;
+}
 
 export const aria2Runner: Runner = (ctx) => {
   const job = ctx.job();
@@ -219,6 +280,24 @@ export const aria2Runner: Runner = (ctx) => {
   let addSpec: { url: string; torrentPath: string | null; opts: Record<string, string | string[]> } | null = null;
   let pollFails = 0;
   let recoveries = 0;
+  let cacheRetried = false;
+
+  /** Keep the detail page's view of this torrent current from the status we already polled. */
+  const recordLive = (status: Aria2Status, downloadedBytes: number) => {
+    const t = live.get(job.id) ?? blankLive();
+    const down = Number(status.downloadSpeed) || 0;
+    const up = Number(status.uploadSpeed) || 0;
+    t.gid = gid;
+    t.files = toTorrentFiles((status.files ?? []).filter((f) => !f.path.startsWith('[METADATA]')));
+    t.history = pushSample(t.history, { down, up });
+    t.seeds = Number(status.numSeeders) || 0;
+    t.peers = Number(status.connections) || 0;
+    t.downloadSpeed = down;
+    t.uploadSpeed = up;
+    t.uploadedBytes = Number(status.uploadLength) || 0;
+    t.downloadedBytes = downloadedBytes;
+    live.set(job.id, t);
+  };
 
   // (Re)issue the download to aria2. After a daemon restart the old gid is gone, so we add again;
   // aria2's --continue plus the .aria2 control file resume from the bytes already on disk.
@@ -245,10 +324,28 @@ export const aria2Runner: Runner = (ctx) => {
       const name = status.bittorrent?.info?.name;
       if (name && name !== ctx.job().title) ctx.patch({ title: name });
 
+      if (isTorrent) recordLive(status, p.downloadedBytes);
+
       // A torrent is done for the user once all data is here, even while aria2 keeps seeding.
       const dataComplete = Boolean(p.totalBytes) && p.downloadedBytes >= p.totalBytes!;
       if (status.status === 'complete' || (isTorrent && dataComplete && status.seeder === 'true')) return finish(status);
       if (status.status === 'error' || status.status === 'removed') {
+        // A disk-cache flush failure is usually the RAM write buffer being too big for the target
+        // volume (a stick, a network share, a nearly-full disk). Turning the cache off and resuming
+        // fixes it far more often than telling the user to free space — so try that once first.
+        if (!cacheRetried && isDiskCacheFailure(status.errorMessage)) {
+          cacheRetried = true;
+          log.warn('Disk cache flush failed; retrying this download with the cache off');
+          ctx.progress({ stage: 'Disk write problem — retrying without the write cache…', speedBps: null, etaSec: null }, 'running');
+          try {
+            await aria2.call('aria2.changeGlobalOption', { 'disk-cache': '0' });
+            await addToAria();
+            timer = setTimeout(poll, 1000);
+            return;
+          } catch (e) {
+            log.warn('Could not retry with the cache off', e);
+          }
+        }
         ctx.fail(friendlyAria2Error(status.errorMessage));
         return;
       }

@@ -90,6 +90,19 @@ export function friendlyYtdlpError(message: string): string {
   return message.replace(/^\[[^\]]+\]\s*/, '').replace(/\s*See\s+https?:\/\/\S+\s+for more info\.?/i, '').slice(0, 300);
 }
 
+/**
+ * A write/flush failure rather than a network one — worth retrying with aria2's RAM write cache
+ * turned off before giving up, because an over-large cache is the usual cause on a slow stick, a
+ * network share, or a nearly-full disk. A genuinely full disk is excluded: no cache size fixes that.
+ */
+export function isDiskCacheFailure(message?: string): boolean {
+  const m = (message ?? '').toLowerCase();
+  if (!m) return false;
+  if (m.includes('no space') || m.includes('disk full')) return false;
+  return m.includes('flush') || m.includes('disk cache') || m.includes('cannot write')
+    || m.includes('write to file') || m.includes('file i/o');
+}
+
 /** Make aria2's error text readable for people. */
 export function friendlyAria2Error(message?: string): string {
   const m = (message ?? '').toLowerCase();
@@ -111,8 +124,10 @@ export interface Aria2Status {
   downloadSpeed: string;
   connections?: string;
   numSeeders?: string;
+  uploadSpeed?: string;
+  uploadLength?: string;
   errorMessage?: string;
-  files?: { path: string }[];
+  files?: { index: string; path: string; length: string; completedLength: string; selected: string }[];
   bittorrent?: { info?: { name?: string } };
   followedBy?: string[];
 }

@@ -1,8 +1,11 @@
+import { useEffect, useState } from 'react';
 import { SPONSOR_CATEGORIES } from '@shared/settings';
 import { previewTemplate, outputTemplate } from '@core/ytdlpArgs';
-import type { DownloadOptions } from '@shared/types';
+import type { AiModelStatus, DownloadOptions } from '@shared/types';
+import { formatBytes } from '@core/format';
+import { call, errorMessage } from '@/lib/bridge';
 import { useApp } from '@/stores/app';
-import { Segmented, Select, Switch } from '@/components/ui';
+import { Button, Segmented, Select, Switch } from '@/components/ui';
 import { Chips, Group, NumberInput, Row, TextInput, TimeInput, type SectionProps } from '../controls';
 import { SubtitlePreview } from '../SubtitlePreview';
 
@@ -203,11 +206,21 @@ export function SubtitlesSection({ s, set }: SectionProps) {
         </Row>
       </Group>
 
-      <Group title="Generating subtitles">
-        <Row id="whisperModel" label="Speech model" description={x.whisperModel === 'base' ? 'Base is fast and included with Lumina.' : 'Small is more accurate for accents and noisy audio (about 470 MB, downloaded when first used).'}>
-          <Segmented label="Whisper model" value={x.whisperModel} onChange={(v) => set({ subtitles: { whisperModel: v } })} options={[{ value: 'base', label: 'Base' }, { value: 'small', label: 'Small' }]} />
+      <Group title="Generating subtitles" description="Speech-to-text runs entirely on this PC — nothing is uploaded.">
+        <Row id="localAi" label="On-device AI" description="Off means no speech model is ever loaded: no memory or graphics-card use, and the “Generate English subtitles” buttons disappear. Subtitles that come from the site still work.">
+          <Switch label="On-device AI" checked={x.localAi} onChange={(v) => set({ subtitles: { localAi: v } })} />
         </Row>
-        <Row id="whisperGpu" label="Use the graphics card"><Switch label="Use GPU for subtitles" checked={x.useGpu} onChange={(v) => set({ subtitles: { useGpu: v } })} /></Row>
+        {x.localAi && (
+          <>
+            <Row id="whisperModel" label="Speech model" description={x.whisperModel === 'base' ? 'Base is fast and included with Lumina.' : 'Small is more accurate for accents and noisy audio (about 470 MB, downloaded when first used).'}>
+              <Segmented label="Whisper model" value={x.whisperModel} onChange={(v) => set({ subtitles: { whisperModel: v } })} options={[{ value: 'base', label: 'Base' }, { value: 'small', label: 'Small' }]} />
+            </Row>
+            <Row id="whisperGpu" label="Use the graphics card"><Switch label="Use GPU for subtitles" checked={x.useGpu} onChange={(v) => set({ subtitles: { useGpu: v } })} /></Row>
+            <Row id="aiModels" label="Models on this PC" description="Each model only uses memory while subtitles are being generated." stacked>
+              <AiModels />
+            </Row>
+          </>
+        )}
       </Group>
     </>
   );
@@ -244,5 +257,45 @@ export function TorrentsSection({ s, set }: SectionProps) {
         </Row>
       </Group>
     </>
+  );
+}
+
+/** What each speech model costs on disk and in memory, with a way to reclaim a downloaded one. */
+function AiModels() {
+  const toast = useApp((s) => s.toast);
+  const [models, setModels] = useState<AiModelStatus[] | null>(null);
+  const load = () => void call('ai:models').then(setModels).catch((err) => toast(errorMessage(err), 'error'));
+  useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!models) return <p className="text-[13px] text-ink-3">Checking…</p>;
+
+  const remove = async (m: AiModelStatus) => {
+    try {
+      await call('ai:remove-model', { id: m.id });
+      load();
+      toast(`Removed the ${m.label} model · ${formatBytes(m.sizeBytes)} freed`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    }
+  };
+
+  return (
+    <div className="w-full overflow-hidden rounded-lg border border-line">
+      {models.map((m) => (
+        <div key={m.id} className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-b-0">
+          <span className="min-w-0 flex-1 text-[13px]">
+            <span className="font-semibold">{m.label}</span>
+            {m.selected && <span className="ml-1.5 text-ink-3">· in use</span>}
+            <span className="block text-ink-3">
+              {m.present ? `${formatBytes(m.sizeBytes)} on disk` : `${formatBytes(m.sizeBytes)} to download`}
+              {' · about '}{formatBytes(m.ramHintBytes)} of memory while it runs
+            </span>
+          </span>
+          {m.present && !m.bundled && <Button variant="ghost" size="sm" onClick={() => void remove(m)}>Remove</Button>}
+          {m.bundled && <span className="text-[13px] text-ink-3">Included</span>}
+          {!m.present && <span className="text-[13px] text-ink-3">Not downloaded</span>}
+        </div>
+      ))}
+    </div>
   );
 }

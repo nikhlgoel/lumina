@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AudioOutputDevice } from '../shared/ipc';
 import { EQ_PROFILES } from '../core/equalizer';
+import {
+  downloadItems, idlePlayback, pauseAllOrder, playbackItems, type TrayItem, type TrayPlayback,
+} from '../core/trayMenu';
 import { iconPath } from './paths';
 import { settings } from './settings';
 import { mainWindow, showWindow } from './window';
@@ -12,7 +15,7 @@ import { logger } from './log';
 
 const log = logger('tray');
 let tray: Tray | null = null;
-let playback = { playing: false, title: null as string | null, artist: null as string | null };
+let playback: TrayPlayback = idlePlayback();
 let audioOutputs: AudioOutputDevice[] = [];
 let lastActive = -1;
 let rebuildTimer: NodeJS.Timeout | null = null;
@@ -71,8 +74,36 @@ function trayImage(name: string): NativeImage {
 
 const baseName = (active: boolean) => (process.platform === 'darwin' ? 'trayTemplate' : active ? 'tray-active' : 'tray');
 
-function sendCommand(command: 'toggle' | 'next' | 'previous') {
-  mainWindow()?.webContents.send('player:command', { command });
+/** Run a tray item: player commands go to the renderer, download actions are done here. */
+function run(item: TrayItem) {
+  const r = item.run;
+  if (!r) return;
+  if ('command' in r) {
+    mainWindow()?.webContents.send('player:command', r);
+    return;
+  }
+  if (r.action === 'downloads-pause-all') {
+    for (const id of pauseAllOrder(queue.list())) queue.pause(id);
+    log.info('Paused all downloads from the tray');
+  } else {
+    for (const j of queue.list()) if (j.status === 'paused') queue.resume(j.id);
+    log.info('Resumed all downloads from the tray');
+  }
+}
+
+/** Turn the pure menu model (core/trayMenu) into Electron menu items. */
+function toMenu(items: TrayItem[]): MenuItemConstructorOptions[] {
+  return items.map((i): MenuItemConstructorOptions => {
+    if (i.type === 'separator') return { type: 'separator' };
+    return {
+      label: i.label,
+      type: i.submenu ? 'submenu' : (i.type ?? 'normal'),
+      checked: i.checked,
+      enabled: i.enabled ?? true,
+      submenu: i.submenu ? toMenu(i.submenu) : undefined,
+      click: i.run ? () => run(i) : undefined,
+    };
+  });
 }
 
 function activeJobs() {
@@ -100,23 +131,22 @@ function rebuild() {
 
   if ((active > 0) !== (lastActive > 0) || lastActive === -1) tray.setImage(trayImage(baseName(active > 0)));
   const nowPlaying = playback.title ? `${playback.title}${playback.artist ? ` — ${playback.artist}` : ''}` : null;
+  const all = queue.list();
+  const waiting = all.filter((j) => j.status === 'queued').length;
+  const paused = all.filter((j) => j.status === 'paused').length;
   const lines = ['Lumina', nowPlaying && `♪ ${nowPlaying}`, active && `${active} download${active > 1 ? 's' : ''} in progress`].filter(Boolean);
   tray.setToolTip(lines.join('\n').slice(0, 127));
 
   lastActive = active;
 
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: nowPlaying ? (nowPlaying.length > 48 ? `${nowPlaying.slice(0, 45)}…` : nowPlaying) : 'Nothing playing', enabled: false },
-    { label: playback.playing ? 'Pause' : 'Play', enabled: Boolean(playback.title), click: () => sendCommand('toggle') },
-    { label: 'Next', enabled: Boolean(playback.title), click: () => sendCommand('next') },
-    { label: 'Previous', enabled: Boolean(playback.title), click: () => sendCommand('previous') },
-    { type: 'separator' },
+    ...toMenu(playbackItems(playback)),
     { label: 'Audio output', submenu: audioOutputSubmenu() },
     { label: 'Equalizer', submenu: equalizerSubmenu() },
     { type: 'separator' },
     { label: 'Open player', click: () => showWindow('player') },
     { label: 'Open Lumina', click: () => showWindow('downloader') },
-    { label: active ? `${active} download${active > 1 ? 's' : ''} in progress` : 'No active downloads', enabled: false },
+    ...toMenu(downloadItems({ active, waiting, paused })),
     { type: 'separator' },
     { label: 'Quit Lumina', role: 'quit', click: () => app.quit() },
   ]));
@@ -151,9 +181,16 @@ export function createTray() {
   log.info('Tray ready');
 }
 
-export function updateTrayPlayback(state: typeof playback) {
+/** What the tray currently believes about playback — read by the dev capture harness to verify it. */
+export const trayPlayback = (): TrayPlayback => playback;
+
+/** The tray's own playback items, exactly as the menu is built from them (dev harness only). */
+export const trayPlaybackItems = () => playbackItems(playback);
+
+export function updateTrayPlayback(state: TrayPlayback) {
   playback = state;
-  rebuild();
+  // Coalesced like download progress: a menu that isn't open doesn't need every intermediate state.
+  scheduleRebuild();
 }
 
 /** The renderer reports the machine's audio outputs so the tray can offer them. */

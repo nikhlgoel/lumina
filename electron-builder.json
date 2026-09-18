@@ -6,7 +6,16 @@
     "output": "release",
     "buildResources": "build"
   },
-  "files": ["dist", "dist-electron", "package.json", "!node_modules/**", "!**/*.map"],
+  "files": [
+    "dist",
+    "dist-electron",
+    "package.json",
+    "!node_modules/**",
+    "node_modules/@lydell/**",
+    "!**/*.map"
+  ],
+  "//asarUnpack": "node-pty's prebuilt .node binaries cannot be loaded from inside an asar archive.",
+  "asarUnpack": ["node_modules/@lydell/**"],
   "extraResources": [
     { "from": "resources/bin/${platform}-${arch}", "to": "bin", "filter": ["**/*"] },
     { "from": "resources/models", "to": "models", "filter": ["**/*"] },

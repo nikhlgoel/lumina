@@ -1,11 +1,15 @@
 import { ArrowRight } from 'lucide-react';
-import { useShallow } from 'zustand/react/shallow';
+import { useMemo } from 'react';
 import { useApp } from '@/stores/app';
-import { useJobs } from '@/stores/jobs';
+import { parseQueueRows, selectRecentRows, useJobs } from '@/stores/jobs';
 import { JobRow } from '@/views/queue/JobRow';
+import { ReleaseRow } from '@/views/queue/ReleaseRow';
+
+const recentRows = selectRecentRows(3);
 
 export function RecentStrip() {
-  const ids = useJobs(useShallow((s) => s.order.slice(0, 3)));
+  const encoded = useJobs(recentRows);
+  const rows = useMemo(() => parseQueueRows(encoded), [encoded]);
   const setView = useApp((s) => s.setView);
   return (
     <section className="mt-14 animate-rise" aria-label="Recent downloads">
@@ -16,7 +20,9 @@ export function RecentStrip() {
         </button>
       </div>
       <div className="overflow-hidden rounded-xl border border-line bg-panel">
-        {ids.map((id) => <JobRow key={id} id={id} compact />)}
+        {rows.map((row) => (row.ids.length > 1
+          ? <ReleaseRow key={row.key} ids={row.ids} compact />
+          : <JobRow key={row.key} id={row.ids[0]!} compact />))}
       </div>
     </section>
   );

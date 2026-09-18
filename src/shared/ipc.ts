@@ -1,7 +1,8 @@
+import type { PlayerCommand } from '../core/trayMenu';
 import { z } from 'zod';
 import type {
-  AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryItem, LibraryPlaylist, LibraryStats,
-  Lyrics, MediaInfo, PlayableItem, Preset, RequestInfo, SearchResults, SyncStatus, ToolStatus,
+  AiKeyStatus, AiModelStatus, AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats,
+  Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchResults, GitView, ShellChoice, SyncStatus, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
 } from './types';
 import type { Settings, SettingsPatch } from './settings';
 
@@ -94,14 +95,116 @@ export const inputSchemas = {
   'browser:bounds': z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
   'jobs:convert': z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(2000), format: formatChoiceSchema }),
   'subtitles:generate': path,
+  'ai:models': z.void(),
+  'ai:key-status': z.void(),
+  'ai:set-key': z.object({
+    provider: z.enum(['openai', 'anthropic', 'gemini', 'openrouter']),
+    key: z.string().min(8).max(400),
+  }),
+  'ai:clear-key': z.void(),
+  'ai:test-key': z.void(),
+  'ai:open-key-page': z.object({ provider: z.enum(['openai', 'anthropic', 'gemini', 'openrouter']) }),
+  'ai:remove-model': z.object({ id: z.enum(['base', 'small']) }),
   'library:stats': z.void(),
   'library:items': z.object({
     kind: z.enum(['audio', 'video']).optional(),
     playlistId: z.string().max(200).optional(),
     query: z.string().max(200).optional(),
+    liked: z.boolean().optional(),
   }),
   'library:playlists': z.void(),
+  'library:files': z.void(),
+  'ide:open': z.object({ folder: z.string().max(1024).optional() }),
+  'ide:close': z.void(),
+  'ide:info': z.void(),
+  'ide:list': z.object({ path: z.string().max(1024).optional() }),
+  'ide:read': z.object({ path: z.string().min(1).max(1024) }),
+  'ide:write': z.object({
+    path: z.string().min(1).max(1024),
+    text: z.string().max(8_000_000),
+    mtimeMs: z.number().optional(),
+  }),
+  'ide:create': z.object({ path: z.string().min(1).max(1024), directory: z.boolean().optional() }),
+  'ide:rename': z.object({ from: z.string().min(1).max(1024), to: z.string().min(1).max(1024) }),
+  'ide:files': z.void(),
+  'git:status': z.void(),
+  // Paths are workspace-relative and re-checked by the workspace guard in main before git sees them.
+  'git:stage': z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(5000) }),
+  'git:unstage': z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(5000) }),
+  'git:discard': z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(5000) }),
+  'git:commit': z.object({ message: z.string().min(1).max(20_000) }),
+  'git:original': z.object({ path: z.string().min(1).max(1024) }),
+  'git:init': z.void(),
+  'ide:term-shells': z.void(),
+  'ide:term-list': z.void(),
+  'ide:term-start': z.object({ shellId: z.string().max(40).optional() }),
+  // Keystrokes. Capped so one IPC message can't be a megabyte of paste.
+  'ide:term-write': z.object({ id: z.string().max(16), data: z.string().max(100_000) }),
+  'ide:term-resize': z.object({ id: z.string().max(16), cols: z.number(), rows: z.number() }),
+  'ide:term-stop': z.object({ id: z.string().max(16) }),
+  'mcp:list': z.void(),
+  'mcp:save': z.object({
+    id: z.string().min(1).max(64),
+    name: z.string().max(80).optional(),
+    transport: z.enum(['stdio', 'http']),
+    command: z.string().max(512).optional(),
+    args: z.array(z.string().max(512)).max(64).optional(),
+    env: z.record(z.string().max(64), z.string().max(2048)).optional(),
+    url: z.string().max(1024).optional(),
+    enabled: z.boolean().optional(),
+  }),
+  'mcp:remove': z.object({ id: z.string().min(1).max(64) }),
+  'mcp:enable': z.object({ id: z.string().min(1).max(64), enabled: z.boolean() }),
+  'mcp:call': z.object({
+    serverId: z.string().min(1).max(64),
+    name: z.string().min(1).max(120),
+    args: z.unknown().optional(),
+  }),
+  'ide:search': z.object({
+    query: z.string().min(1).max(500),
+    caseSensitive: z.boolean().optional(),
+  }),
+  'torrent:detail': z.object({ id: z.string().min(1).max(200) }),
+  'torrent:select-files': z.object({
+    id: z.string().min(1).max(200),
+    indices: z.array(z.number().int().min(1).max(100000)).min(1).max(20000),
+  }),
+  'usb:drives': z.void(),
+  'usb:prepare': z.object({ root: z.string().min(2).max(1024) }),
+  'usb:export': z.object({
+    root: z.string().min(2).max(1024),
+    kinds: z.array(z.enum(['audio', 'video'])).min(1).max(2),
+  }),
+  'usb:import': z.object({ root: z.string().min(2).max(1024) }),
+  'usb:import-preview': z.object({ root: z.string().min(2).max(1024) }),
+  'usb:cancel': z.void(),
+  'update:status': z.void(),
+  'update:check': z.void(),
+  'update:skip': z.object({ version: z.string().min(1).max(60) }),
+  'update:open-release': z.void(),
+  'app:restart': z.void(),
   'library:rescan': z.void(),
+  'library:like': z.object({ path: z.string().min(1).max(4096), liked: z.boolean() }),
+  'library:playlist-create': z.object({
+    name: z.string().max(200),
+    paths: z.array(z.string().min(1).max(4096)).max(20000).optional(),
+  }),
+  'library:playlist-rename': z.object({ id: z.string().min(1).max(200), name: z.string().max(200) }),
+  'library:playlist-delete': z.object({ id: z.string().min(1).max(200) }),
+  'library:playlist-add': z.object({
+    id: z.string().min(1).max(200),
+    paths: z.array(z.string().min(1).max(4096)).min(1).max(20000),
+  }),
+  'library:playlist-remove': z.object({
+    id: z.string().min(1).max(200),
+    index: z.number().int().min(0).max(100000).optional(),
+    paths: z.array(z.string().min(1).max(4096)).max(20000).optional(),
+  }),
+  'library:playlist-move': z.object({
+    id: z.string().min(1).max(200),
+    from: z.number().int().min(0).max(100000),
+    to: z.number().int().min(0).max(100000),
+  }),
   'player:resolve': z.object({ ids: z.array(z.string().max(200)).max(5000) }),
   'player:resolve-path': path,
   'lyrics:get': z.object({
@@ -122,6 +225,10 @@ export const inputSchemas = {
     playing: z.boolean(),
     title: z.string().max(500).nullable(),
     artist: z.string().max(300).nullable(),
+    volume: z.number().min(0).max(1),
+    muted: z.boolean(),
+    shuffle: z.boolean(),
+    repeat: z.enum(['off', 'all', 'one']),
   }),
   'player:save-position': z.object({ id: z.string().min(1).max(200), positionSec: z.number().min(0).max(1e7) }),
   'audio:report-devices': z.object({
@@ -202,10 +309,66 @@ export interface InvokeOutputs {
   'firewall:grant': FirewallStatus;
   'jobs:convert': Job[];
   'subtitles:generate': Job;
+  'ai:models': AiModelStatus[];
+  'ai:key-status': AiKeyStatus;
+  'ai:set-key': AiKeyStatus;
+  'ai:clear-key': AiKeyStatus;
+  'ai:test-key': string;
+  'ai:open-key-page': void;
+  'ai:remove-model': boolean;
   'library:stats': LibraryStats;
   'library:items': LibraryItem[];
   'library:playlists': LibraryPlaylist[];
+  'library:files': LibraryFile[];
+  'ide:open': WorkspaceInfo | null;
+  'ide:close': WorkspaceInfo;
+  'ide:info': WorkspaceInfo;
+  'ide:list': TreeEntry[];
+  'ide:read': FileContent;
+  'ide:write': FileContent;
+  'ide:create': TreeEntry;
+  'ide:rename': TreeEntry;
+  'ide:files': string[];
+  'git:status': GitView;
+  'git:stage': GitView;
+  'git:unstage': GitView;
+  'git:discard': GitView;
+  'git:commit': GitView;
+  'git:original': string;
+  'git:init': GitView;
+  'ide:term-shells': ShellChoice[];
+  'ide:term-list': TerminalSession[];
+  'ide:term-start': TerminalSession;
+  'ide:term-write': void;
+  'ide:term-resize': void;
+  'ide:term-stop': void;
+  'mcp:list': McpServerState[];
+  'mcp:save': McpServerState[];
+  'mcp:remove': McpServerState[];
+  'mcp:enable': McpServerState[];
+  'mcp:call': { text: string; isError: boolean };
+  'ide:search': CodeSearchHit[];
+  'torrent:detail': TorrentDetail | null;
+  'torrent:select-files': boolean;
+  'usb:drives': PortableDrive[];
+  'usb:prepare': PortableDrive | null;
+  'usb:export': PortableTransfer;
+  'usb:import': PortableTransfer;
+  'usb:import-preview': { files: number; bytes: number };
+  'usb:cancel': void;
+  'update:status': UpdateState;
+  'update:check': UpdateState;
+  'update:skip': void;
+  'update:open-release': void;
+  'app:restart': void;
   'library:rescan': void;
+  'library:like': boolean;
+  'library:playlist-create': LibraryPlaylist;
+  'library:playlist-rename': boolean;
+  'library:playlist-delete': boolean;
+  'library:playlist-add': number;
+  'library:playlist-remove': boolean;
+  'library:playlist-move': boolean;
   'player:resolve': PlayableItem[];
   'player:resolve-path': PlayableItem;
   'lyrics:get': Lyrics | null;
@@ -270,12 +433,18 @@ export interface EventPayloads {
   'jobs:removed': { id: string };
   'settings:changed': Settings;
   'library:changed': LibraryStats;
+  'update:changed': UpdateState;
+  'mcp:changed': McpServerState[];
+  'ide:term-data': { id: string; chunk: string };
+  'ide:term-exit': { id: string; exitCode: number };
+  'usb:drives-changed': PortableDrive[];
+  'usb:transfer': PortableTransfer;
   'tools:changed': ToolStatus[];
   'app:mode': { mode: 'downloader' | 'player' };
   'app:open-url': { url: string; request?: RequestInfo; source?: 'extension' | 'clipboard' | 'system' };
   'app:clipboard-link': { url: string };
   'app:navigate': { view: 'download' | 'queue' | 'library' | 'settings'; section?: string };
-  'player:command': { command: 'toggle' | 'next' | 'previous' };
+  'player:command': PlayerCommand;
   'extension:changed': ExtensionStatus;
   'hosts:challenge': HostChallenge;
   'hosts:challenge-done': { id: string };

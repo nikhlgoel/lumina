@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Lyrics, PlayableItem } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from './app';
+import { nextVolume } from '@core/trayMenu';
 
 export type Repeat = 'off' | 'all' | 'one';
 export type StageView = 'art' | 'lyrics';
@@ -122,10 +123,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       .catch(() => undefined);
   };
 
-  const reportState = () => {
-    const item = get().current();
-    void call('player:state', { playing: get().playing, title: item?.title ?? null, artist: item?.artist ?? null }).catch(() => undefined);
-  };
+  const reportState = () => reportPlayback(get());
 
   const advance = (step: 1 | -1, fromEnded: boolean) => {
     const { queue, index, shuffle, repeat } = get();
@@ -193,10 +191,21 @@ export const usePlayer = create<PlayerState>((set, get) => {
     navigator.mediaSession.setActionHandler('seekto', (d) => d.seekTime != null && get().seek(d.seekTime));
   }
 
-  on('player:command', ({ command }) => {
-    if (command === 'toggle') get().toggle();
-    else if (command === 'next') get().next();
-    else get().previous();
+  // Commands from the tray (and anything else in main). Every branch reuses the same action the
+  // in-app controls use, so the tray can never put the player in a state the UI couldn't.
+  on('player:command', (cmd) => {
+    const p = get();
+    switch (cmd.command) {
+      case 'toggle': p.toggle(); break;
+      case 'next': p.next(); break;
+      case 'previous': p.previous(); break;
+      case 'seek-by': if (p.current()) p.seek(Math.max(0, p.time + cmd.value)); break;
+      case 'mute': p.toggleMute(); break;
+      case 'volume': p.setVolume(cmd.value); break;
+      case 'volume-by': p.setVolume(nextVolume(p.volume, cmd.value)); break;
+      case 'shuffle': p.toggleShuffle(); break;
+      case 'repeat': set({ repeat: cmd.mode }); break;
+    }
   });
 
   const settingsVolume = useApp.getState().settings?.player.volume ?? 0.8;
@@ -291,6 +300,32 @@ export const usePlayer = create<PlayerState>((set, get) => {
       set({ subtitles: on });
     },
   };
+});
+
+/**
+ * Tell the main process what the tray should show. Called on play/pause/track change, and whenever
+ * volume, mute, shuffle or repeat change — from the tray or from the app — so its ticks never lie.
+ */
+function reportPlayback(s: PlayerState) {
+  const item = s.current();
+  void call('player:state', {
+    playing: s.playing,
+    title: item?.title ?? null,
+    artist: item?.artist ?? null,
+    volume: s.volume,
+    muted: s.muted,
+    shuffle: s.shuffle,
+    repeat: s.repeat,
+  }).catch(() => undefined);
+}
+
+// Dragging the volume slider changes volume dozens of times a second; the tray only needs the value
+// the drag settles on, so these reports are debounced rather than sent per pixel.
+let settingsReportTimer: ReturnType<typeof setTimeout> | null = null;
+usePlayer.subscribe((s, prev) => {
+  if (s.volume === prev.volume && s.muted === prev.muted && s.shuffle === prev.shuffle && s.repeat === prev.repeat) return;
+  if (settingsReportTimer) clearTimeout(settingsReportTimer);
+  settingsReportTimer = setTimeout(() => reportPlayback(usePlayer.getState()), 250);
 });
 
 /** Persist volume changes, debounced. */
