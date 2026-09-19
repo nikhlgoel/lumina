@@ -147,7 +147,7 @@ export function PlayerView() {
       {!isVideo && <AuroraCanvas colors={colors} mode={MODE_VALUE[theme]} still={reduced || settings.player.effects === 'still'} />}
       {!isVideo && <div className="scrim pointer-events-none absolute inset-0 -z-10" />}
 
-      <header className={cn('p-top drag flex items-center justify-between px-[clamp(16px,3vw,32px)] pt-3', window.lumina.platform !== 'darwin' && !fullscreen && 'pr-[150px]')}>
+      <header className={cn('p-top drag flex items-center justify-between px-[clamp(16px,3vw,32px)] pt-3', isVideo && 'relative z-10', window.lumina.platform !== 'darwin' && !fullscreen && 'pr-[150px]')}>
         <button onClick={exit} title="Exit player (Esc)" className={cn('p-btn no-drag flex items-center gap-2 rounded-xl py-2 pr-3 pl-2 text-sm font-medium', window.lumina.platform === 'darwin' && !fullscreen && 'ml-[70px]')}>
           <ChevronLeft className="size-5" /> Exit
         </button>
@@ -178,7 +178,15 @@ export function PlayerView() {
         </div>
       </header>
 
-      <section className="relative mx-[clamp(16px,4vw,48px)] my-3 min-h-0" aria-live="polite">
+      {/*
+        Video fills the whole player and the chrome floats over it. Keeping video in the middle grid
+        row with margins was why it stayed a small rectangle even in full screen: the row could never
+        be taller than the space left by the header and the dock.
+      */}
+      <section
+        className={cn(isVideo ? 'absolute inset-0 z-0' : 'relative mx-[clamp(16px,4vw,48px)] my-3 min-h-0')}
+        aria-live="polite"
+      >
         {!item ? (
           <div className="grid h-full place-items-center text-center">
             <div>
@@ -200,7 +208,13 @@ export function PlayerView() {
         )}
       </section>
 
-      {item ? <Dock item={item} stage={view} onStage={setStage} queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)} /> : <div className="h-6" />}
+      {item
+        ? (
+          <div className={cn(isVideo && 'relative z-10')}>
+            <Dock item={item} stage={view} onStage={setStage} queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)} />
+          </div>
+        )
+        : <div className="h-6" />}
 
       <QueueSheet open={queueOpen} onClose={() => setQueueOpen(false)} />
     </div>

@@ -69,3 +69,40 @@ export function withArtSize(url: string | null | undefined, cssPx: number, dpr =
     return url;
   }
 }
+
+/**
+ * Images that count as the cover for the folder they sit in — the usual convention for a library
+ * of ripped or organised albums, where the art is a file beside the tracks rather than a tag.
+ */
+export const FOLDER_IMAGE_NAMES = ['cover.jpg', 'folder.jpg', 'front.jpg', 'cover.png', 'folder.png'] as const;
+
+/* ---------- Video thumbnails ---------- */
+
+/**
+ * The ffmpeg runs that get a picture out of a video, in the order to try them.
+ *
+ * Lives in core so the stream specifier is pinned by a test. It was wrong for a long time and
+ * nothing noticed: `0:v:m:disposition:attached_pic` looks like it selects the attached cover, but
+ * `m:` selects by *metadata tag*, so it read as "metadata key 'disposition' equals 'attached_pic'"
+ * and matched no stream. ffmpeg exited with "Stream map '' matches no streams", artwork came back
+ * empty, and every video with an embedded thumbnail — which is every video yt-dlp downloads — showed
+ * a placeholder gradient in the Library. The disposition specifier is `disp:`.
+ *
+ * The frame grab is always appended, never replaced: a cover that is missing, mislabelled or corrupt
+ * still ends up with a picture rather than nothing.
+ */
+export function videoThumbnailAttempts(o: {
+  input: string;
+  output: string;
+  durationSec: number | null;
+  hasArtwork: boolean;
+}): string[][] {
+  const attempts: string[][] = [];
+  if (o.hasArtwork) {
+    attempts.push(['-v', 'error', '-i', o.input, '-map', '0:v:disp:attached_pic', '-frames:v', '1', '-y', o.output]);
+  }
+  // A tenth of the way in, so a title card or a fade from black is not what represents the video.
+  const at = o.durationSec && o.durationSec > 0 ? Math.max(1, o.durationSec * 0.1) : 5;
+  attempts.push(['-v', 'error', '-ss', String(at), '-i', o.input, '-frames:v', '1', '-vf', 'scale=640:-2', '-y', o.output]);
+  return attempts;
+}

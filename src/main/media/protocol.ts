@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { parseFile, selectCover } from 'music-metadata';
 import { library } from '../library';
-import { artBucket, artCacheName, fitWithin } from '../../core/artwork';
+import { FOLDER_IMAGE_NAMES, artBucket, artCacheName, fitWithin, videoThumbnailAttempts } from '../../core/artwork';
 import { artworkCacheDir } from '../paths';
 import { runTool, spawnTool, killTree } from '../process';
 import { tools } from '../tools';
@@ -52,7 +52,9 @@ function fileResponse(file: string, request: Request): Response {
 /** The original artwork bytes for an item — embedded cover, folder image or a video frame — cached once. */
 async function sourceArt(item: NonNullable<ReturnType<typeof library.getById>>): Promise<Buffer | null> {
   const full = path.join(artworkCacheDir(), artCacheName(item.id, item.mtimeMs, 'full'));
-  if (fs.existsSync(full)) return fs.readFileSync(full);
+  // Size-checked, not merely existence-checked: a truncated cache entry (a write interrupted by a
+  // full disk or a kill) would otherwise be served as a broken image for ever.
+  if (fs.existsSync(full) && fs.statSync(full).size > 0) return fs.readFileSync(full);
 
   if (item.kind === 'audio') {
     const meta = await parseFile(item.path, { duration: false });
@@ -62,19 +64,21 @@ async function sourceArt(item: NonNullable<ReturnType<typeof library.getById>>):
       fs.writeFileSync(full, bytes);
       return bytes;
     }
-    for (const name of ['cover.jpg', 'folder.jpg', 'front.jpg', 'cover.png', 'folder.png']) {
+    for (const name of FOLDER_IMAGE_NAMES) {
       const p = path.join(path.dirname(item.path), name);
       if (fs.existsSync(p)) return fs.readFileSync(p);
     }
     return null;
   }
-  // Video: embedded cover if present, otherwise a frame from 10% in.
-  const at = item.durationSec ? Math.max(1, item.durationSec * 0.1) : 5;
-  const args = item.hasArtwork
-    ? ['-v', 'error', '-i', item.path, '-map', '0:v:m:disposition:attached_pic', '-frames:v', '1', '-y', full]
-    : ['-v', 'error', '-ss', String(at), '-i', item.path, '-frames:v', '1', '-vf', 'scale=640:-2', '-y', full];
-  const r = await runTool(tools.require('ffmpeg'), args, { timeoutMs: 30_000 });
-  return r.code === 0 && fs.existsSync(full) ? fs.readFileSync(full) : null;
+  // Video: the embedded cover if there is one, otherwise a frame from 10% in. The commands (and the
+  // reason the specifier is spelled the way it is) live in core/artwork.ts, where a test pins them.
+  for (const args of videoThumbnailAttempts({ input: item.path, output: full, durationSec: item.durationSec, hasArtwork: item.hasArtwork })) {
+    const r = await runTool(tools.require('ffmpeg'), args, { timeoutMs: 30_000 });
+    // A zero-byte file counts as a failure: ffmpeg can create the output before it gives up.
+    if (r.code === 0 && fs.existsSync(full) && fs.statSync(full).size > 0) return fs.readFileSync(full);
+    fs.rmSync(full, { force: true });
+  }
+  return null;
 }
 
 const imageType = (b: Buffer) => (b[0] === 0x89 && b[1] === 0x50 ? 'image/png' : 'image/jpeg');

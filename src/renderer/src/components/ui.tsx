@@ -153,14 +153,33 @@ export function Segmented<T extends string>({ value, onChange, options, label, s
 
 /* ---------- Progress ---------- */
 
+/**
+ * A progress bar that reads as progress.
+ *
+ * The fill carries a light-to-dark ramp anchored to the *track*, not to itself, so the colour
+ * deepens as the bar advances: a glance at the shade says roughly how far along it is, without
+ * reading the number. Early progress is pale and tentative; finishing is full strength.
+ *
+ * `indeterminate` is for when nothing is known yet, and nothing else. A looping bar shown over
+ * real progress reads as "stuck", which is the opposite of what it is there to say.
+ */
 export function ProgressBar({ value, tone = 'accent', indeterminate, className }: { value: number; tone?: 'accent' | 'success' | 'danger' | 'muted'; indeterminate?: boolean; className?: string }) {
-  const color = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', muted: 'bg-ink-3' }[tone];
+  const color = { accent: 'var(--accent)', success: 'var(--success)', danger: 'var(--danger)', muted: 'var(--ink-3)' }[tone];
+  const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+  // The ramp is drawn at the width of the whole track and then clipped to `pct` by its parent —
+  // which is what ties the visible shade to how far along the bar is rather than to its own length.
+  const rampWidth = pct > 0.5 ? (100 / pct) * 100 : 100;
   return (
-    <div className={cn('relative h-1.5 overflow-hidden rounded-full bg-sunken', className)} role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
+    <div className={cn('relative h-1.5 overflow-hidden rounded-full bg-sunken', className)} role="progressbar" aria-valuenow={indeterminate ? undefined : Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       {indeterminate ? (
-        <span className={cn('absolute inset-y-0 w-2/5 rounded-full', color)} style={{ animation: 'indeterminate 1.3s var(--ease) infinite' }} />
+        <span className="absolute inset-y-0 w-2/5 rounded-full" style={{ background: color, animation: 'indeterminate 1.3s var(--ease) infinite' }} />
       ) : (
-        <span className={cn('absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out', color)} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+        <span className="absolute inset-y-0 left-0 overflow-hidden rounded-full transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }}>
+          <span
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{ width: `${rampWidth}%`, background: `linear-gradient(90deg, color-mix(in oklab, ${color} 40%, transparent), ${color})` }}
+          />
+        </span>
       )}
     </div>
   );

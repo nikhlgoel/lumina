@@ -18,6 +18,10 @@ import { mediaKindOf } from '../core/playlists';
 import { itemId as libraryIdOf, library } from './library';
 import { settings } from './settings';
 import { logger } from './log';
+import { ensureArtwork } from './coverArt';
+import { factsOf, probe } from './media/probe';
+import { convertAudio, transcodeTvSafe } from './media/ffmpeg';
+import { TV_PROFILE, isTvSafe } from '../core/tvSafe';
 
 const execFileAsync = promisify(execFile);
 const log = logger('usb');
@@ -229,31 +233,118 @@ export async function exportToDrive(
 ): Promise<PortableTransfer> {
   prepareDrive(root);
   const items = kinds.flatMap((kind) => library.items({ kind })).map(toPortableItem);
+  // The gradient is drawn from the same string the library shows, so art on the drive matches the app.
+  const seedFor = new Map(items.map((i) => [i.path, i.album ?? i.title]));
+  const kindFor = new Map(items.map((i) => [i.path, i.kind]));
   const plan = planExport(items, existingOnDrive(root));
 
   let copiedBytes = 0;
   let copiedFiles = 0;
+  /** Already on the drive and newer than the source — counted with the other skips. */
+  let alreadyThere = 0;
   const report = (stage: string): PortableTransfer => ({
     stage, direction: 'export', root,
     files: copiedFiles, totalFiles: plan.entries.length,
     bytes: copiedBytes, totalBytes: plan.totalBytes,
-    done: false, error: null, skipped: plan.skipped,
+    done: false, error: null, skipped: plan.skipped + alreadyThere,
   });
 
   onProgress(report('Preparing'));
+
+  // Decide up front what the television cannot decode. Probing is cheap next to copying, and doing
+  // it here means the progress report knows how much work is really ahead.
+  const tvMode = settings.get().storage.usbTvCompatibility;
+  const convert = new Set<string>();
+  const durations = new Map<string, number | null>();
+  if (tvMode === 'safe') {
+    onProgress(report('Checking what your TV can play'));
+    for (const entry of plan.entries) {
+      if (handle.cancelled) break;
+      try {
+        const probed = await probe(entry.source);
+        durations.set(entry.source, probed.durationSec);
+        if (!isTvSafe(factsOf(probed))) convert.add(entry.source);
+      } catch {
+        // Unreadable by ffprobe: copy it untouched rather than guessing.
+      }
+    }
+  }
+  const cancels: (() => void)[] = [];
+  handle.cancel = () => { for (const c of cancels) c(); };
+
   for (const entry of plan.entries) {
     if (handle.cancelled) break;
-    const dest = path.join(root, ...entry.target.split('/'));
+    let dest = path.join(root, ...entry.target.split('/'));
+
+    // planExport recognises "already on the drive" by the source's name and size, but neither
+    // survives the trip: converting changes both, and embedding a cover changes the size of a file
+    // we merely copied. Without this check every re-export would redo the entire library — which a
+    // two-run test caught doing exactly that.
+    const willConvert = convert.has(entry.source);
+    const isVideoFile = kindFor.get(entry.source) === 'video';
+    const parsedDest = path.parse(dest);
+    const outExt = isVideoFile ? '.mp4' : '.m4a';
+    const finalDest = willConvert ? path.join(parsedDest.dir, `${parsedDest.name}${outExt}`) : dest;
+    if (upToDate(finalDest, entry.source)) {
+      alreadyThere++;
+      continue;
+    }
+
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     const tmp = `${dest}.lumina-part`;
     try {
-      await fs.promises.copyFile(entry.source, tmp);
-      await fs.promises.rename(tmp, dest);
+      // A TV decodes far less than a PC. Rather than copying a file the set will refuse, convert it
+      // on the way over — the whole point of "export to a drive I plug into the television".
+      if (willConvert) {
+        // ffmpeg chooses its muxer from the OUTPUT EXTENSION, so the usual `.lumina-part` suffix
+        // makes it fail with "Error initializing the muxer … Invalid argument". The partial file
+        // has to end in the real extension; the leading dot keeps it hidden and identifiable.
+        const tmpConvert = path.join(parsedDest.dir, `.lumina-part-${process.pid}${outExt}`);
+        onProgress(report(`Converting ${path.basename(entry.source)} for your TV`));
+        if (isVideoFile) {
+          await transcodeTvSafe({
+            input: entry.source,
+            output: tmpConvert,
+            maxHeight: TV_PROFILE.maxHeight,
+            maxFps: TV_PROFILE.maxFps,
+            durationSec: durations.get(entry.source) ?? null,
+            onProgress: () => {},
+            register: (cancel) => { cancels.push(cancel); },
+          });
+        } else {
+          const run = convertAudio(entry.source, tmpConvert, 'm4a', 256, durations.get(entry.source) ?? null, () => {});
+          cancels.push(run.cancel);
+          await run.promise;
+        }
+        await fs.promises.rename(tmpConvert, finalDest);
+        dest = finalDest;
+      } else {
+        await fs.promises.copyFile(entry.source, tmp);
+        await fs.promises.rename(tmp, dest);
+      }
+
+      // A TV reading this drive never opens Lumina, so anything without a cover would show a blank
+      // tile. Give the copy on the drive a picture; the original on this PC is never touched.
+      const seed = seedFor.get(entry.source) ?? path.basename(entry.source);
+      try {
+        await ensureArtwork(dest, seed, {
+          // Video gets an image beside it only: tagging would make ffmpeg rewrite the whole file.
+          sidecarOnly: isVideoFile,
+          besideImage: isVideoFile,
+          folderImage: !isVideoFile,
+        });
+      } catch (err) {
+        log.debug(`Artwork for ${path.basename(dest)} skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
       copiedFiles++;
       copiedBytes += entry.sizeBytes;
       onProgress(report(path.basename(dest)));
     } catch (err) {
       fs.rmSync(tmp, { force: true });
+      for (const ext of ['.mp4', '.m4a']) {
+        fs.rmSync(path.join(path.dirname(dest), `.lumina-part-${process.pid}${ext}`), { force: true });
+      }
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`Export failed for ${entry.source}: ${message}`);
       return { ...report('Stopped'), done: true, error: `Couldn’t copy “${path.basename(entry.source)}” — ${message}` };
@@ -265,6 +356,15 @@ export async function exportToDrive(
   log.info(`Export ${final.stage.toLowerCase()}: ${copiedFiles}/${plan.entries.length} files, ${plan.skipped} already there`);
   onProgress(final);
   return final;
+}
+
+/** Is the copy on the drive at least as new as the original? Cheaper and truer than comparing sizes. */
+function upToDate(dest: string, source: string): boolean {
+  try {
+    return fs.statSync(dest).mtimeMs >= fs.statSync(source).mtimeMs;
+  } catch {
+    return false;
+  }
 }
 
 /** Refresh the .m3u8 playlists so a dumb player sees everything on the drive in order. */

@@ -1,4 +1,6 @@
 import { app, dialog, Notification, shell } from 'electron';
+// MUST be the first Lumina import: it redirects userData before any module reads a path.
+import './portableMode';
 import fs from 'node:fs';
 import type { RequestInfo } from '../shared/types';
 import { settings } from './settings';
@@ -14,6 +16,7 @@ import { library } from './library';
 import { routeFinishedToDrive } from './usb';
 import { shutdownMcp } from './ide/mcp';
 import { shutdownTerminals } from './ide/terminal';
+import { stopDlna } from './dlna/server';
 import { handleMediaProtocol, registerMediaScheme } from './media/protocol';
 import { broadcast, extensionStatus, registerIpc } from './ipc';
 import { createWindow, mainWindow, refreshWindowChrome, setQuitting, showWindow, type AppMode } from './window';
@@ -185,6 +188,9 @@ if (!app.requestSingleInstanceLock()) {
       },
       onPaired: () => broadcast('extension:changed', extensionStatus()),
     });
+    // A bridge that stops listening (a port taken by something else) must reach Settings, not just
+    // the log file — otherwise the extension simply appears broken.
+    bridge.onStateChange = () => broadcast('extension:changed', extensionStatus());
     startBridge();
 
     applyGlobalShortcut((url) => (url ? openLink(url, 'clipboard') : showWindow('downloader')));
@@ -286,6 +292,7 @@ if (!app.requestSingleInstanceLock()) {
     // MCP servers are real child processes; kill them so quitting Lumina doesn't orphan them.
     shutdownMcp();
     shutdownTerminals();
+    stopDlna();
     closeDatabase();
   });
 }

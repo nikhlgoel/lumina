@@ -32,6 +32,23 @@ export function extensionOf(name: string): string {
   return base.slice(dot + 1).toLowerCase();
 }
 
+/**
+ * Is this the downloader's own bookkeeping rather than something the user downloaded?
+ *
+ * The Files tab exists to show people what they got. Control files and metadata dumps are ours, and
+ * a name like `c9625df298353912c52657774bb3de80a9941277.torrent` tells the reader nothing at all —
+ * aria2 writes one of those beside the download whenever `--bt-save-metadata` is on, so a magnet can
+ * resume without fetching its metadata again.
+ *
+ * A torrent file the user put there themselves keeps its own name, so it is not matched and stays
+ * visible: only the 40-character infohash form is ours.
+ */
+export function isDownloaderArtifact(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.aria2') || lower.endsWith('.part') || lower.endsWith('.ytdl') || lower.endsWith('.lumina-part')) return true;
+  return /^[0-9a-f]{40}.torrent$/.test(lower);
+}
+
 export function fileKindOf(name: string): FileKind {
   return BY_EXT[extensionOf(name)] ?? 'other';
 }

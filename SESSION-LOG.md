@@ -5,6 +5,576 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-09-19 (25) — The first full 67-step capture run, and four things it caught
+
+The full capture sweep has been outstanding since session 13. It ran, all 67 steps, and was read
+**mechanically** rather than by eye: every screenshot hashed, and any two steps producing an identical image
+flagged. An identical pair means a step changed nothing — which is exactly how a silently broken feature looks.
+That found more in one pass than reading code did.
+
+### Reloading the page was impossible in a packaged build
+
+Five steps produced the same image, including all four splash steps, which do nothing but `location.reload()`.
+The reload was being swallowed. `src/main/window.ts` guarded the window against being navigated away:
+
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl && url.startsWith(devUrl)) return;
+    event.preventDefault();
+
+In a packaged build there is no `VITE_DEV_SERVER_URL`, so the condition can never be true and **every**
+navigation was prevented — including the page reloading itself. The guard now allows a navigation whose target is
+the page already loaded, and blocks everything else, so the security property is unchanged.
+
+**Proven:** the four splash steps now render the splash screen and differ from each other. They had never once
+captured anything real.
+
+### The browser extension reported itself as working when it was dead
+
+`extensionStatus()` returned `running: s.enabled` — the *setting*, not whether the socket had bound. With the
+port taken, Settings said "Listening only on this computer (127.0.0.1:17865)" while nothing was listening, and
+the one thing that fixes it (change the port) appeared only in a log file nobody reads.
+
+`BridgeServer` now tracks whether it is genuinely bound and why not, `running` means `enabled && listening`, and
+a state change broadcasts `extension:changed` so Settings follows along live.
+
+**Proven** against a real conflict (the machine's own Lumina holds 17865): the row reads *"Switched on, but not
+listening yet"* above *"Port 17865 is already used by another program… Pick a different port below."*
+
+### "Share to TV" showed an on switch beside the word "Off"
+
+Caught by looking at the capture, not by reading code. The switch shows what was asked for; the badge showed
+reality; a port clash makes them disagree, so the screen contradicted itself. Being switched on and not running is
+now its own state: an amber **"Not working"** badge and *"Switched on, but it isn't running — see the reason
+below."* The reason itself was `listen EADDRINUSE: address already in use :::8200`, which is accurate and
+useless, and now reads *"Port 8200 is already used by another program on this PC. Change the port below…"*.
+
+### Artwork remembered failure per component instead of per URL
+
+`Artwork` kept a single `failed` flag, so once a slot had failed to load an image it kept showing the placeholder
+even when handed a different, perfectly good one. It now records *which* URL failed.
+
+### What the run did NOT prove — said plainly
+
+Twelve IDE steps and three editor-theme steps also came back identical. That is **not** a fault: the scratch
+profile has no `settings.json`, so no workspace is restored and every one of them photographed the same
+"Open a folder to start editing" screen. Checked before concluding. Those 15 steps are therefore **untested** in
+this run, not passed. `18a`/`18b` likewise matched, and the portable edge cases behind `18b` remain unverified.
+
+**Verification:** `tsc --noEmit` clean · **765 tests, 37 files** · `vite build` clean · the live captures above,
+each against a genuine port conflict rather than a simulated one.
+
+---
+
+## 2026-09-19 (24) — A sweep for more of the same, by looking rather than guessing
+
+Asked to find other small things worth fixing. Method: render the real screens offscreen against a *copy* of the
+live library and read them, which is how the badge contrast was caught. Two fixes, and two things deliberately
+left alone because looking showed they were not faults.
+
+### Fixed: a folder cover beside the tracks was never shown
+
+The same shape as the thumbnail bug — the UI gates on a flag, so working code is never reached.
+`src/main/media/protocol.ts` has always been willing to serve a `cover.jpg`/`folder.jpg` sitting beside an audio
+file, but `library.ts` set `has_artwork` from the **embedded** picture alone, and both list views render
+`item.hasArtwork ? art(item.id) : null`. So for a library whose art is files rather than tags — ripped CDs, most
+organised collections — the cover was findable, servable, and never once requested.
+
+The folder-image names now live in `FOLDER_IMAGE_NAMES` in `src/core/artwork.ts` and are used by *both* sides, so
+they cannot drift apart again. The scanner's lookup is memoised per folder: 20 tracks in an album would otherwise
+stat the same five names 20 times, a whole library hundreds of times. The memo is cleared when a scan starts, so a
+cover added since last time is noticed.
+
+**Proven end to end** with a synthetic album — a 35-second silent MP3 with *no* embedded picture (confirmed by
+ffprobe: zero video streams) beside a `cover.jpg`. After a scan, `has_artwork = 1`, and a 128px sized entry
+(3,689 bytes) appeared in the artwork cache, which only happens once `sourceArt` has successfully returned the
+folder image. Both halves confirmed, not just the flag.
+
+Worth noting this does nothing on *this* machine: all 450 audio items already carry embedded art, so it was
+verified synthetically. It matters for other people's libraries, which is the stated goal.
+
+### Fixed: the Files tab listed our own bookkeeping as "Other files"
+
+Two entries named `c9625df298353912c52657774bb3de80a9941277.torrent` and similar. aria2 writes an
+`<infohash>.torrent` beside the download when `--bt-save-metadata` is on (`src/main/jobs/aria2.ts`) so a magnet
+can resume without fetching metadata again. It is ours, not the user's, and forty characters of hex says nothing.
+
+`isDownloaderArtifact` in `src/core/fileKind.ts` now covers it alongside the `.aria2`/`.part` exclusions that were
+already there — one function instead of a chain of `endsWith`. **Only the infohash form is matched**, so a torrent
+someone saved themselves keeps its name and stays listed. Re-captured against the real downloads folder: the two
+hex rows are gone, the archive, image and subtitle remain.
+
+### Looked at and deliberately not changed
+
+* **`35.0 GB` for a 37,577,372,813-byte archive.** Checked rather than assumed: that is 35.00 GiB, and Windows
+  Explorer labels it "35.0 GB" too. Matching the platform beats being pedantically correct.
+* **Placeholder art on three rows of the Music list.** Suspected a second instance of the cover bug, so the
+  covers were probed: all fourteen sampled tracks are `mjpeg` with `attached_pic`. It was artwork still loading
+  on a cold cache, not a failure. No change made — the point of looking is to find the real thing, not to fix
+  something imaginary.
+
+Two capture steps added for screens that had none: `05c-library-playlists` and `05d-library-files`.
+
+**Verification:** `tsc --noEmit` clean · **765 tests, 37 files** · `vite build` clean · the two captures above.
+Uncommitted.
+
+---
+
+## 2026-09-19 (23) — Video thumbnails: one wrong ffmpeg stream specifier had disabled them all
+
+The Library's Videos grid showed placeholder gradients, so choosing a video meant reading eight long titles.
+The renderer was never at fault — it asks for artwork unconditionally (`art(item.id, 256)`), and the media
+protocol has extracted video artwork all along. The extraction simply always failed.
+
+**The cause.** `src/main/media/protocol.ts` selected the embedded cover with
+`-map 0:v:m:disposition:attached_pic`. That is not what it looks like: in ffmpeg's stream-specifier grammar
+`m:` selects by **metadata tag**, so it read as *"the stream whose metadata key `disposition` equals
+`attached_pic`"* — which matches nothing. Run against a real file:
+
+    Stream map '' matches no streams.
+    Failed to set value '0:v:m:disposition:attached_pic' for option 'map': Invalid argument
+
+The disposition specifier is `disp:`. And because **every** video yt-dlp downloads carries an embedded
+thumbnail, all 8 videos in the library had `has_artwork = 1`, all 8 took that branch, and all 8 fell back to
+no artwork. The frame-grab branch — which works — was unreachable for exactly the files people actually have.
+
+**The fix.** `videoThumbnailAttempts` in `src/core/artwork.ts` returns the runs to try, in order: the cover via
+`0:v:disp:attached_pic`, then **always** a frame from 10% in. The frame grab is appended rather than used as an
+alternative, so a cover that is missing, mislabelled or corrupt still yields a picture. A zero-byte output counts
+as failure (ffmpeg can create the file before giving up), and the `full` cache read is size-checked too, so a
+truncated entry cannot be served for ever.
+
+It lives in core because a test now pins the specifier and **forbids the `m:disposition` form**. This bug was
+invisible: no crash, no error in the UI, just a placeholder that looked like a deliberate design.
+
+**Proven, twice over.** All 8 library videos extracted successfully via the cover branch (15 KB–116 KB JPEGs),
+and then end to end through the real app: a new capture step `05b-library-videos` renders the grid offscreen with
+**an empty artwork cache**, building 39 cache entries on the spot and showing all 8 real thumbnails. Run against a
+*copy* of the library database in a scratch profile, since the user's own Lumina was running.
+
+**Also fixed, and found by looking at the result.** The duration and quality pills were tuned against the old
+gradients, which were uniformly mid-dark. Over a real thumbnail — the C++ course one is white — a 70%-black pill
+became mid-grey and collided with the artwork's own lettering. Now 80% with a hairline ring, checked by
+re-capturing and zooming rather than by eye.
+
+**One side effect, disclosed.** The first capture attempt seeded the scratch profile from the library database
+*including its jobs table*, and the app dutifully resumed the queued "English Songs" download for ~3 seconds
+against the real `C:UsersdatanMusicLumina`. It left no `.part`/`.ytdl` files behind (checked). The scratch
+profile is now seeded with its job rows cleared, so a capture run can never touch a real download again.
+
+**Verification:** `tsc --noEmit` clean · **761 tests, 37 files** · `vite build` clean · the cold-cache capture above.
+Uncommitted.
+
+---
+
+## 2026-09-19 (22) — The portable copy was broken by asar; the progress bar was reporting honestly but reading badly
+
+Two things from live use, one proven fixed and one only partly understood. Both are written up as they are.
+
+### 1. Copying Lumina to a drive failed at `app.asar` — fixed and proven
+
+The screenshot showed the copy stopping at 349 MB of 732 MB with
+`ENOENT, not found in C:Program FilesLuminaesourcesapp.asar`. The cause is Electron, not the copy logic:
+a packaged `app.asar` is presented to `fs` as a **directory**, so `copyDir` walked *into* the archive and tried
+to copy the files it believed were inside it. `measure()` had the same fault, reporting the archive's
+uncompressed contents as the size to copy.
+
+`src/main/portableInstall.ts` now takes its filesystem from `original-fs` (Electron's unpatched `fs`) via
+`createRequire`, so the archive is seen as the one file it is. Scoped to this module deliberately, rather than
+setting the process-wide `process.noAsar`, which would break every other read from the archive while a copy ran.
+
+**Proven, not assumed.** A probe under real Electron against the installed `C:Program FilesLuminaesources`:
+
+    app.asar via patched fs   : isDirectory=true  isFile=false
+    app.asar via original-fs  : isDirectory=false isFile=true
+
+    patched fs  (the bug): FAILED -- ENOENT,  not found in C:Program FilesLuminaesourcesapp.asar
+    original-fs (the fix): COPIED 22 files, 165361985 bytes
+    copied app.asar byte-identical: true (16424011 bytes)
+
+The failing line reproduces the reported error exactly, and the fix copies the 16 MB archive byte for byte. Also
+confirmed the dynamic require survives bundling: `createRequire(import.meta.url)("original-fs")` is present
+verbatim in `dist-electron/main/index.js` rather than inlined away.
+
+### 2. Queue progress — what was actually wrong, and what was not
+
+The claim that a percentage/speed display had been **removed** was checked before anything was changed, and it is
+not what happened: `git show` of `JobRow.tsx` at c641268, f8a008e and 317fb25 shows the four `meta.push` lines
+and the `{Math.floor(p.percent)}%` readout **byte-identical in all three**. The only change across those commits
+*reduced* the looping animation. Nothing was taken away. Said plainly because the opposite was assumed.
+
+Two real faults were found and fixed:
+
+* **The bar flipped to its looping "loading" animation whenever `percent` touched 0**, which on a long playlist
+  happens at every file boundary. A looping bar over real progress reads as *stuck* — exactly the reported
+  impression. `progressIndeterminate` now reserves that animation for when nothing at all is known: no percent,
+  no bytes, no position in a playlist.
+* **Starting a playlist item did not report progress**, only a title. An item that produces no download ticks of
+  its own left the bar motionless. The engine now sends `percent` (and clears the previous file's byte counts) on
+  each item boundary, so the bar steps forward per song regardless.
+
+And the requested shading: `ProgressBar` now draws a light-to-dark ramp **anchored to the track**, so the colour
+deepens as the bar advances and the shade alone says roughly how far along it is. Byte counts on a playlist are
+labelled `this file …` so they cannot be read as a total that keeps resetting.
+
+**A wrong turn, recorded because it matters.** The first diagnosis was that `p.percent` was per-file and needed
+folding with the playlist position in the renderer. It is not: `overall()` in `src/main/jobs/ytdlp.ts` already
+folds the playlist position in, and the queue *merges* progress rather than replacing it — so that change would
+have double-counted. It was reverted. The second theory was that acceleration hands downloads to aria2c, which
+reports nothing through `--progress-template`; a full aria2 console-line parser was written and tested for it.
+**That theory is also wrong**, and was disproved with a live run against a public sample
+(`test-videos.co.uk` Big Buck Bunny) through the bundled yt-dlp with aria2c as external downloader:
+
+    LUMINA_PROGRESS|downloading|25973876|30704510|NA|3108898.05|1|NA|NA
+
+Bytes *and* speed arrive normally, and no `[#…]` aria2 line ever reaches stdout. The parser was deleted rather
+than shipped as a fix for a problem that does not exist.
+
+**So: the "0%" itself is not yet explained.** Neither code path can produce 0% at 215 of 433 — a single playlist
+job reports `100 * 214/433 ≈ 49%`, and a group of 433 jobs counts each completed member as 100. Answering it
+needs one detail from the next live run: whether that row was **one playlist download** or **433 separate
+downloads grouped together**.
+
+**Verification:** `tsc --noEmit` clean · **754 tests, 37 files** · `vite build` clean · the Electron probe above.
+Uncommitted, as always, until asked.
+
+---
+
+## 2026-09-19 (21) — Docs audit: both files brought back in line with reality
+
+Asked to check whether the handover and session log were stale. They were, in four ways:
+
+1. **Order was wrong.** Entry (13) sat *above* entries 14–20 despite the file's own "newest entry at the top"
+   rule — my earlier insertions had gone in against the wrong anchor. Re-sorted; it now reads 21 → 1.
+2. **HANDOVER §0 was two days behind**: still headed "end of session 12", still claiming 591 tests, and
+   describing only session 13's work. Rewritten around what a fresh session actually needs — what is committed,
+   what is verified *right now* (751 tests, 37 files), what was built in 13–20, the §14 plan status, and an
+   explicit **"proven vs. never proven"** list so nobody inherits an overstatement.
+3. **Stale claims elsewhere**: §5 said "529 passing, 30 files"; §17 called the DLNA server "not built" when it has
+   been working since session 17; §13 still listed git/source control and split panes as missing.
+4. **The commit was pushed and the docs said otherwise.** `origin/main` is now `317fb25` and
+   `git reflog show origin/main` records "update by push". No assistant session ever ran `git push`, so this
+   happened by another route — corrected in both files rather than left contradicting the repository.
+
+Also made the regression claim precise: `capture.ts` defines **64** steps, the last *full* run covered **56/56**,
+and the eight added since were captured individually — so a full 64-step run is still outstanding.
+
+**Verification:** every number in §0 was re-checked against the repository (`vitest`, `git log`, `git status`,
+`ls release`), not copied forward.
+
+---
+
+## 2026-09-19 (20) — One setup screen per device, and a hazard found on the real stick
+
+**Settings › Places › Portable drive** is now the single place a device is set up: set up the folders, **put
+Lumina itself on the drive**, copy the library, import from it, choose TV compatibility, and route downloads —
+both routes to a television configured from one screen, as asked.
+
+`src/core/portableInstall.ts` (**32 tests**) decides everything before a byte moves: is a copy already there and
+is it ours (`absent` / `current` / `outdated` / `unknown`), is there room (size plus slack, so an exact fit is
+refused), is the drive writable, is this a packaged build at all. `src/main/portableInstall.ts` does the copying —
+through `.part` names so a file that exists is a file that copied completely, with the marker and version file
+written **last**, so an interrupted copy is recognisably incomplete rather than looking installed and failing to
+run. It also refuses to copy into itself.
+
+**A real hazard, found by running it against the user's own USB stick.** The drive already had `F:\Lumina` —
+*their* folder, holding "English Songs" and "Videos". The screen reported it as "Unrecognised" and offered an
+**Update** button that would have copied program files straight into their media. It was disabled only because
+this is a dev build; in the packaged app it would have been live. People name a folder after the app they use it
+with, so this was always going to happen.
+
+Fixed with `looksLikeInstall` / `folderConflict`: a destination folder that exists, is not empty, and contains
+neither our version file, nor our marker, nor a Lumina executable is **refused outright** — *"There is already a
+'Lumina' folder on that drive with your own files in it. Rename or move it first."* Tested against the exact
+directory listing from that stick.
+
+**Edge cases checked through the real IPC** (`18b-portable-edges`): no drive selected, a path that does not
+exist, and a non-removable folder — all three refuse. **Honest limit:** in a dev build the "not a packaged build"
+check runs first and masks the others at runtime, so the room, read-only, self-copy and folder-conflict guards are
+proven by unit test rather than observed live. They need a packaged build to exercise end to end.
+
+**Verification:** tsc clean · vitest **751 passed (37 files)** · vite build ok · offscreen captures `18a`, `18b`.
+
+---
+
+## 2026-09-19 (19) — Portable Lumina: the app runs from the stick
+
+User's plan: **"Both, portable build first"** — carry Lumina *and* the media on one drive, plug it into any PC,
+and from there either play directly or switch on Share to TV.
+
+- **`src/core/portableApp.ts` (12 tests)** decides one thing: where `userData` goes. Portable mode turns on from
+  `PORTABLE_EXECUTABLE_DIR` (electron-builder sets it to the folder the .exe was launched from — the stick), from
+  a `lumina-portable.txt` dropped beside a copied folder, or from `LUMINA_PORTABLE=<dir>`. The filesystem is
+  injected, so every branch is tested without a USB stick.
+- **`src/main/portableMode.ts`** applies it. **Import order is the whole trick**: settings, the database, the log
+  file and the artwork cache all derive from `userData` *at import time*, so this module is the first Lumina
+  import in `index.ts` and ES modules are evaluated in order. It also redirects `sessionData`, because Chromium's
+  caches are large and constantly rewritten — leaving those on a borrowed PC would defeat the point. A read-only
+  or full stick falls back to the normal folder rather than refusing to start.
+- **Build target**: `portable` added for Windows → **`Lumina Portable_v3.0.0-alpha.0.exe`**, with a
+  `package:portable` script and a Menu.cmd entry ("Portable (.exe) - runs from a USB stick, keeps its data there").
+
+**Proven by running it**, not by reasoning: launched with `LUMINA_PORTABLE` pointed at a fake stick. The log says
+`[portable] Using …\lumina-fake-stick\Lumina-Data for all data`, and the drive then holds `settings.json`,
+`lumina.db`, `logs/`, `bin/`, `Session/`, `sync/` and `window.json`. The other half of the claim was measured too:
+**0 files** written under `%APPDATA%\Lumina` during that run, so nothing is left on the host machine.
+
+**Bug caught by a test, in the test:** `portableDataPath` looked wrong (`E://Lumina-Data`) — but the fault was my
+fake `join` in the spec, which concatenated naively where node's `path.join` collapses separators. Fixed the
+helper, not the code, after checking real `path.join('E:/','Lumina-Data')`.
+
+**Verification:** tsc clean · vitest **719 passed (36 files)** · vite build ok.
+
+**Next:** the second half of the user's request — one "set up this device" screen covering both routes (portable
+copy onto the drive, plus the TV-safe export), so a stick can be prepared in one place.
+
+---
+
+## 2026-09-19 (18) — Share-to-TV settings toggle, and a flaky test made honest
+
+**Settings › Connections › Share to TV** (`sections/sharing.tsx`): the switch, a live **Sharing/Off** badge driven
+by the `dlna:changed` event rather than the switch position, the address a TV would use (with Copy), the name
+shown on the TV, and the port. Captured offscreen with sharing on: the badge reads *Sharing* and the address is
+`http://192.168.1.4:8200/description.xml`.
+
+Two warnings are on the page in plain words rather than a tooltip: **DLNA has no password** — anyone who can reach
+the computer can browse and play the whole library, which is the protocol on every media server, not a gap here —
+and **Windows will ask about the firewall** the first time, with the note that refusing leaves sharing running but
+unreachable.
+
+**A property test failed, and the cause is worth recording.** `validateServerConfig never lets an unsafe server
+through (20,000 random configs)` failed once, then passed twice. The seed is fixed (`rng(301)`) and the inputs are
+identical every run, so the failure could not have been input-dependent — it was a **timeout**. There was no
+`testTimeout` in `vitest.config.ts`, so vitest's 5s default applied, and the suite had been started *while an
+Electron capture and ffmpeg were running*. The test's real work takes ~1.3s.
+
+Fixed by giving that file `vi.setConfig({ testTimeout: 30_000 })` with a comment explaining why. A suite that
+reports a red failure for a fixed-seed test with unchanged inputs is worse than no suite, because the next person
+to see it will assume the validator broke.
+
+**Verification:** tsc clean · vitest **707 passed (35 files)** · vite build ok.
+
+---
+
+## 2026-09-19 (17) — DLNA server running, and a TV-like probe proves it
+
+**`src/main/dlna/server.ts`** — the working MediaServer on top of the tested protocol core: a UDP multicast
+socket answering SSDP, and an HTTP server for `/description.xml`, both SCPDs, `/control/ContentDirectory`,
+`/control/ConnectionManager`, `/media/<id>` and `/art/<id>`. Settings section `sharing`
+(`dlnaEnabled` **off by default**, `dlnaPort` 8200, `dlnaName`), IPC `dlna:status` / `dlna:set-enabled`, a
+`dlna:changed` broadcast, started at launch only when enabled and stopped on `will-quit` with an `ssdp:byebye` so
+TVs drop the entry instead of showing a dead one.
+
+**Proven against a probe that behaves like a television** (`scratchpad/tvprobe.js` — real M-SEARCH to the
+multicast group, then SOAP and HTTP):
+
+```
+PROBE ssdp location: http://192.168.1.4:8200/description.xml
+PROBE description:   200  Lumina on W
+PROBE browse root:   200  containers: 2
+PROBE browse music:  200  items: 3  total: 3
+PROBE range GET:     206  bytes 0-99/97845   bytes: 100
+PROBE art:           200  image/png  8284 bytes
+PROBE unknown id:    404
+```
+
+Discovery, description, browsing, **byte-range seeking**, album art, and the security property (an id that is not
+in the library is a 404 — paths never come off the wire) all confirmed.
+
+**Bug the probe found:** `dlna:set-enabled` returned `running: false` for a server that was already listening,
+because `startDlna()` returned before `server.listen()`'s callback. It now awaits listening, so the toggle reports
+the truth instead of flickering to "off" and correcting itself via the change event a moment later.
+
+**Security, stated plainly and repeated in the UI:** DLNA has **no authentication at all** — anyone who can reach
+the port can browse and play the whole library. That is the protocol, not a gap here, and it is why the feature is
+off by default. Only ids from the library index are accepted, nothing is writable, and Lumina never exposes the
+port beyond the LAN.
+
+**Verification:** tsc clean · vitest **707 passed (35 files)** · vite build ok.
+
+**Still missing:** the settings UI for the toggle (the IPC works; nothing in Settings switches it on yet), and
+Windows Firewall will prompt on first start. **No real television has seen this** — the probe is a good stand-in
+but it is not a TV, and the user's own set may have no network at all.
+
+---
+
+## 2026-09-19 (16) — DLNA server, part 1: the protocol core
+
+The user picked **"Both — USB first, then DLNA"**. The USB half is done and verified (entry 15); this is the start
+of the DLNA/UPnP MediaServer that makes a TV list **Lumina** beside HDMI and AV.
+
+**`src/core/dlna.ts` (56 tests)** — everything that is protocol *text*, with nothing touching a socket, so it can
+be tested properly before a single packet is sent:
+
+- **SSDP**: `parseSsdp` (tolerates bare LF and quoted `MAN`, both common in the wild), `searchMatches` (answers
+  `ssdp:all`, `upnp:rootdevice`, the MediaServer and ContentDirectory types, and our own UUID — and stays silent
+  for anything else), `ssdpSearchResponse`, `ssdpNotify` for alive/byebye. CRLF throughout and a trailing blank
+  line are enforced by test, because devices that dislike either fail *silently*.
+- **`deviceUuid`** is derived from a stable seed rather than randomised per launch — otherwise every restart
+  leaves another dead "Lumina" in the TV's source list.
+- **ContentDirectory**: `parseBrowse` reads a SOAP Browse forgivingly (namespace prefixes vary by device, and a
+  fault just shows an empty folder with no explanation); `didlItemXml` / `didlContainerXml` / `didlDocument` build
+  DIDL-Lite; `browseResponse` escapes that document *into* the SOAP body — XML inside XML, which is genuinely how
+  the protocol works and is asserted in a test.
+- **`parseRange`** — how a TV seeks. Open-ended, closed, and suffix ranges; clamps an end past EOF; returns
+  `'invalid'` (→ HTTP 416) for a reversed range, `bytes=-0`, a start past EOF, an unknown unit, or a multi-part
+  range, rather than quietly serving the wrong bytes.
+- `protocolInfo` advertises `DLNA.ORG_OP=01`, without which many sets refuse to scrub at all.
+
+**Verification:** tsc clean · vitest **707 passed (35 files)**.
+
+**Not built yet:** the server itself — the UDP multicast socket, the HTTP endpoints
+(`/description.xml`, the two SCPDs, `/control/ContentDirectory`, media and art streaming), mapping the library
+into containers, the settings toggle, and the Windows Firewall prompt this will inevitably raise. **Nothing has
+talked to a real TV**, and the user's own set may have no network at all — so this will need someone with a
+DLNA-capable TV to confirm.
+
+---
+
+## 2026-09-19 (15) — TV compatibility for the USB drive (DLNA next)
+
+**Context:** the user's TV has no network, so DLNA would not help them — but they want this right for
+other people too: *"we are going to add such features with proper compatibility so others can use it too"*. They
+also asked whether the drive could boot a mini-OS or run Lumina's player on the TV. **It cannot** — see
+HANDOVER §17 for the four independent reasons (TVs don't boot from USB, no autorun, proprietary SoC with no public
+display drivers, and the only USB code path is vendor-signed firmware update). They chose: **USB compatibility
+first, then DLNA.**
+
+**The real problem with a USB drive on a TV is codecs, not artwork.** A set will show "unsupported file" for
+HEVC, 10-bit, MKV, DTS or 4K, and the export was copying files verbatim.
+
+- **`src/core/tvSafe.ts` (27 tests)** now owns the rules — profile, reasons, summary, output naming. These rules
+  already existed *inline* in `src/main/media/probe.ts`, untested and used only to label downloads; `compatibility()`
+  now delegates to the shared module, so the export and the label can no longer disagree. Reasons are returned as
+  a list ("HEVC video, 10-bit, not MP4") because the user is about to wait minutes for a conversion and deserves
+  to know why.
+- **Bug the tests caught immediately:** my first bit-depth check was a loose "contains 10/12/16", which called
+  **nv12 10-bit** (the 12 is chroma subsampling) and missed **p010le** (which really is 10-bit). Now matches only
+  the two real conventions: a depth after the plane marker (`yuv420p10le`) and the Microsoft semi-planar names
+  (`p010le`).
+- **Export converts instead of copying** (`storage.usbTvCompatibility`, default `safe`): each file is probed
+  first, video that is not TV-safe goes through the existing `transcodeTvSafe` (H.264/AAC/yuv420p/faststart), and
+  unsafe audio (FLAC, Opus, ALAC) is converted to AAC `.m4a`. `original` copies untouched. A file ffprobe cannot
+  read is copied rather than guessed at. Cancelling the transfer now also kills the running ffmpeg.
+
+**Proven with real ffmpeg, not asserted:** built a deliberately hostile file — `hevc / yuv420p10le /
+matroska,webm` — ran the exact conversion, and probed the result: **`h264 / yuv420p / mov,mp4,m4a` at 360p**,
+which is precisely what the profile requires.
+
+**Then verified against the REAL export path, which found three bugs the unit tests could not.**
+A controlled library (safe MP3, FLAC, safe MP4, HEVC/10-bit/MKV, and a name full of unicode and an apostrophe) was
+scanned into a scratch profile and `usb:export` was driven **twice** through the actual IPC:
+
+1. **ffmpeg failed on every conversion.** ffmpeg picks its muxer from the *output extension*, and the export was
+   handing it the usual `….flac.lumina-part` temp name — "Error initializing the muxer … Invalid argument". Not one
+   file would have converted. The conversion temp is now `.lumina-part-<pid>.mp4` / `.m4a`.
+2. **Re-export re-converted everything.** `planExport` recognises "already on the drive" by the source's name and
+   size, and a converted file has neither — `.mkv` becomes `.mp4` at a different size. Every export would have
+   transcoded the whole library again.
+3. **Re-export also re-copied every tagged audio file**, because embedding a cover *changes the copied file's
+   size* (measured: 97,845 → 106,045 bytes), so the size match could never succeed again. Caused by the artwork
+   feature added earlier the same day.
+
+Bugs 2 and 3 are now one check: the destination — converted name or not — is skipped when it exists and its mtime
+is at least the source's, so an edited original is still redone. **Proven:** two consecutive exports both report
+`files: 0, skipped: 5`, having done no work at all; the run before the fix re-copied 2 files.
+
+The drive's final contents are what a TV needs: `02 Lossless Song.flac` → **`.m4a`**, `04 Hostile Clip.mkv` →
+**`.mp4`**, the already-safe MP3/MP4 copied untouched, `folder.jpg` in the music folder, a `.jpg` beside each
+video, both `.m3u8` playlists, and the unicode filename intact.
+
+**Not exercised, stated honestly:** the "ffprobe can't read it → copy untouched" branch and cancelling mid-convert
+are written and typed but were not triggered by this test.
+
+**Verification:** tsc clean · vitest **651 passed (34 files)** · vite build ok.
+
+**Next:** the DLNA/UPnP server (SSDP + ContentDirectory + HTTP streaming) so networked TVs list Lumina as a
+source. Still not built from the previous session: the YouTube music-video option.
+
+---
+
+## 2026-09-19 (14) — Artwork etched into files, and video gets its own player
+
+**Context:** after the first live test the user reported: music played from the USB drive on a TV shows **no
+thumbnail**; the artwork Lumina draws should be written *into* the file; a song with a music video on YouTube
+should offer to play it; the USB drive should present Lumina's player to the TV; and the music player is wrong for
+video — "the controls remain on the screen and the video only displays in a small space even in fullscreen".
+
+**Video player — fixed and measured.** The cause was layout, not styling: in video mode the stage still sat in the
+middle row of a `grid-rows-[auto_1fr_auto]` with `mx-[clamp(16px,4vw,48px)] my-3` margins, so it could never be
+taller than whatever the header and dock left over. Auto-hide already worked (`[data-video][data-idle]`), but the
+picture never grew. Video now renders `absolute inset-0` behind the chrome, which floats over it with gradient
+scrims; music is untouched. Measured offscreen: `stage=1360x860 of 1360x860`, `video=1360x860` — previously it was
+inset on all four sides.
+
+**Artwork embedding — built and proven against real ffmpeg.** The reason a TV showed nothing is that Lumina
+*generates* art for files that have none: `Artwork.tsx` drew a CSS `linear-gradient` from a hash of the title, so
+it existed only inside the app. `src/core/coverArt.ts` (**33 tests**) now owns that maths — the same FNV-1a hash,
+oklch→sRGB conversion, and a rasteriser for the 135° gradient — and `Artwork.tsx` imports it, so what gets embedded
+is by construction what was on screen. `src/main/coverArt.ts` encodes it as a PNG (a ~40-line encoder using
+`node:zlib`, rather than adding an image dependency for one gradient) and writes it in with ffmpeg.
+
+Proven with real files, not inferred: the generated PNG probes as `png,600,600,rgb24`; embedding into a test MP3
+gives `codec_name=png width=600 height=600`; and the audio stream is identical before and after
+(`mp3,44100,2,128000` → `mp3,44100,2,128000`), the file growing only by the cover. Streams are copied, never
+re-encoded, and ffmpeg writes a temp file that is renamed over the original only on success, so a failure leaves
+the original untouched.
+
+Wired into the USB export: every file copied to the drive gets art. **Audio** is tagged and gets a `folder.jpg`
+per album; **video** gets a `<name>.jpg` beside it and is *not* re-tagged, because embedding a cover makes ffmpeg
+rewrite the whole container — a 2 GB film would be copied twice for a thumbnail most TVs ignore. Ogg/Opus is
+refused outright rather than silently doing nothing, since ffmpeg cannot write their cover format.
+
+**Verification:** tsc clean · vitest **624 passed (33 files)** · vite build ok · offscreen capture `14a`.
+
+**NOT built, stated plainly:** the YouTube music-video lookup and its "play the video" option. And the USB drive
+**cannot** make a TV run Lumina's player — see HANDOVER §17.
+
+---
+
+**Stability check before the first installer (2026-09-19)**
+
+- tsc clean · vitest **591 passed (32 files)** · vite build ok.
+- **Full offscreen regression: 56/56 capture steps rendered.** Only two log lines, and neither is an app fault:
+  a benign `Transition was skipped` from fast navigation (known since session 11), and a **harness** bug in the
+  source-control steps.
+- The harness bug is worth remembering because it made a *verification* silently pass: `10c-ide-commit` looked up
+  the commit textarea and called `set.call(t, …)` without checking `t`, so when Source Control was not the
+  showing view it threw `Illegal invocation`, typed nothing, and simply reported "commit button never enabled".
+  Three fixes: `10a` now opens Source Control explicitly instead of trusting the persisted layout; `10c` guards
+  the null; and both only click the activity-bar item **when it is not already active**, because clicking the
+  active one collapses the sidebar — which is exactly what broke the first attempt at this fix.
+- Re-verified afterwards: `[scm] clicking Commit 3 files` and a real new commit (`3d17f1e`) in the test repo.
+
+**Installer naming:** `electron-builder.json` nsis `artifactName` is now `Lumina Setup_v${version}.exe`, so this
+build produces **`Lumina Setup_v3.0.0-alpha.0.exe`**. The installer already registers the `magnet:` and `lumina:`
+protocol handlers and the `.torrent` file association.
+
+**A release-blocking bug the first build attempt exposed.** `electron-builder` refused to start:
+`configuration has an unknown property '//asarUnpack'`. That key was added a session earlier as a JSON "comment"
+next to the real `asarUnpack` entry that keeps node-pty's `.node` binaries outside the asar — but
+electron-builder validates its config strictly, so **the node-pty packaging change had never once survived a
+build**, and any attempt to ship would have failed at this exact point. JSON has no comments; the explanation now
+lives in this log and HANDOVER instead of in the config file.
+
+Second lesson from the same run: the build command was piped into `tail`, so `$?` reported **`tail`'s** exit code
+and printed `BUILD_EXIT=0` while the build had actually failed. Re-run with `set -o pipefail` and the output
+redirected to a log rather than piped.
+
+**Installer built (2026-09-19):** `release/Lumina Setup_v3.0.0-alpha.0.exe`, **322,889,206 bytes**,
+SHA-256 `38967ef57332564656e3d28411004959e7fbc38439d2ec0ee355282648384416`. Copied to the user's **Downloads**
+folder and the copy's hash re-checked against the source. Packaged contents confirmed: 31 files in
+`resources/bin` (ffmpeg, yt-dlp, aria2c, 7-Zip, whisper), the browser extension in `resources/extension`, and
+node-pty's `conpty.node` in **`app.asar.unpacked`** — so the integrated terminal will work in the installed build.
+Also noted for later: electron-builder warns that the *other* platforms' node-pty binaries are not bundled
+(darwin-arm64/x64, linux-arm64/x64, win32-arm64). Harmless for Windows x64; **a Linux or macOS build will need
+them in `optionalDependencies` first.** The build is **unsigned** — Windows SmartScreen will warn on first run.
+
+**Next:** the rest of §14.3 — Problems panel, full status bar (Ln/Col, indentation, EOL, problem counts), a file
+watcher so the tree follows external changes, breadcrumbs/outline, editor settings & keybindings — then §14.4's
+media-native editor. After that the user wants a **stage-2 live test**: install the app on their machine and use it.
+
+---
+
 ## ⏸ HANDOFF (2026-09-18, after entry 12) — continuing on another account
 
 - **Uncommitted:** ~85 files from entries 8–12. HEAD is still `65c3f55` (= `origin/main`). Ask the user before
@@ -12,6 +582,81 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 - **Green at handoff:** tsc clean · vitest **529 passed** · vite build ok · all 48 offscreen capture steps render.
 - **Waiting on the user's choice of next step** — the five options are listed in HANDOVER **§0**.
 - Start with HANDOVER §0 (current state + gotchas), then entries 12 → 8 below.
+
+---
+
+## 2026-09-18 (13) — Committed sessions 8–12, then editor themes and the Explorer context menu
+
+**Context:** New account picking the work up. Confirmed the handover state first (HEAD `65c3f55`, 85 changed
+paths, tsc clean, **529 passed**, build ok — exactly what the docs claimed), then the user said to commit with a
+short message and no co-author, and to do option **1** (finish the IDE plan) "and then do the others too".
+
+- **Commit `317fb25`** — "feat: embedded IDE, MCP client, integrated terminal, and source control", 96 files,
+  +12,094/−214. Not pushed *by this session*. (Checked again on 2026-09-19: `origin/main` is now `317fb25` and the
+  reflog shows an "update by push", so it reached GitHub later by some other route.)
+
+**§14.2 themes — built and proven**
+
+- `src/core/theme.ts` (**34 new tests**): one `EditorTheme` drives the editor chrome, 14 token roles and the
+  terminal's 16 ANSI colours; `toMonacoTheme` / `toXtermTheme` adapt it. Monaco and xterm now read the same object
+  instead of each reading CSS variables separately, which is what let them drift before.
+- Four built-ins + **Settings › App › Editor theme**, each card previewing in its own colours; `auto` follows the
+  app's light/dark.
+- **VS Code colour-theme import** (`src/main/ide/themes.ts`): `.json`/`.jsonc` directly, `.vsix` via the bundled
+  7-Zip extracting only `extension/themes/*` into a temp dir that is then deleted. Nothing is executed. Sparse
+  themes are completed from a built-in; JSONC is tolerated; the *background* decides dark/light because a theme's
+  `type` field is often wrong.
+- **Measured rather than eyeballed:** the first screenshot was ambiguous, so capture probe `11d-theme-probe` reads
+  the computed colour back out of Monaco — Midnight `rgb(15, 17, 23)`, Paper `rgb(253, 252, 247)`, auto
+  `rgb(20, 19, 18)`. Exact matches.
+
+**§14.3.4 Explorer context menu — built and proven**
+
+- New file / New folder / Rename / **Delete** (confirm names the victim; a non-empty folder needs the explicit
+  recursive flag, which main refuses to infer) / Reveal in File Explorer / Copy path / Copy relative path.
+  New main-process `deleteEntry` + `absolutePathOf`, both behind the same `resolveInside` workspace guard.
+- Capture `12b` drives the real menu: right-click → New file… → type a name → Create. `menu-made.txt` appears on
+  disk, the tree reloads, the file opens as a tab, status bar reads `menu-made.txt plaintext`.
+
+**Verification:** tsc clean · vitest **563 passed (31 files)** · vite build ok · offscreen captures `11a`–`11d`,
+`12a`–`12b`.
+
+**Honest gaps from this session:** the theme *import dialog* is native, so the harness can't drive it — conversion
+is unit-tested and the list/apply path is proven, but picking a real `.vsix` still needs the user's live test.
+Browsing/downloading themes from Open VSX inside Lumina is **not** built.
+
+**Then (same session): Menu.cmd and running the project from the IDE**
+
+- **`Menu.cmd`** at the repo root — quick actions for the user: verify / type-check / tests (all, watch, one file,
+  by name) / build; dev server; launch with a scratch profile; **offscreen screenshots**; diagnostics (host
+  self-test, resource metrics, fetch bundled tools); **releases** (Windows NSIS or unpacked, Linux AppImage or
+  AppImage+RPM, and an honest explanation that macOS cannot be cross-built from Windows, with the exact commands
+  to run on a Mac); git; dependencies; open folders; clean; source search; project info. It calls the project's
+  own npm scripts, so it cannot drift from package.json, and it bakes in the two project rules
+  (`ELECTRON_RUN_AS_NODE` cleared, captures offscreen).
+  - It also takes an argument: **`Menu.cmd 1`** runs "Verify everything" and exits, so it works from a shortcut,
+    a scheduled task or another script.
+  - Three real bugs found while testing it: the file was written with **LF endings**, which makes every `goto`
+    fail with "cannot find the batch label"; `exit /b` inside a CALLed label only returns from the call, so
+    argument mode fell back into the menu; and on EOF `set /p` returns instantly forever, which spun the menu at
+    100% CPU. All fixed; a static check confirms all 43 labels and 43 jump targets match.
+
+- **§14.5 Run panel** — the project's `package.json` scripts listed in the bottom panel with a play button, plus a
+  **Ports** list. `src/core/tasks.ts` (**28 tests**): package-manager detection from the lockfile, script parsing,
+  and URL/port extraction from terminal output (ANSI stripped, `0.0.0.0` rewritten to `localhost`, port-less URLs
+  ignored). Running a task opens a normal terminal tab and types the command in, so there is no second execution
+  path. A loopback URL gets an **Open** button that loads it in Lumina's own browser; a LAN address is shown but
+  marked "network".
+- **Bundled tools on PATH**: terminals now get `resources/bin` appended to PATH, so ffmpeg/yt-dlp/aria2c/whisper
+  are available in any project opened here without installing anything. Appended, so a user's own tool still wins.
+
+**Bug that only the offscreen run could find:** the first Ports capture came back empty. The default shell on this
+machine is **WSL**, whose userland here is broken — but the real point is that a Windows project's toolchain is
+native, so tasks now force a native shell (`startTerminal({ native: true })`). Manual terminals still honour the
+user's choice. Re-captured: port 5173 listed with Open, and the LAN address correctly marked "network".
+
+**Verification after all of the above:** tsc clean · vitest **591 passed (32 files)** · vite build ok · offscreen
+captures `13a`, `13b`.
 
 ---
 

@@ -5,7 +5,7 @@
 //
 // Every generator is seeded (tests/helpers/rng.ts), so a failure is reproducible exactly.
 import path from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fuzzyMatch, fuzzyRank, isInsideWorkspace } from '@core/ide';
 import { decodeFrames, encodeFrame, parseCommandLine, validateServerConfig } from '@core/mcp';
 import { parseStatus } from '@core/git';
@@ -18,6 +18,12 @@ import {
   type EditorGroups,
 } from '@core/editorGroups';
 import { int, pick, rng, str } from './helpers/rng';
+
+// These are deliberately heavy — tens of thousands of generated cases each — and vitest's default
+// 5s budget is meant for unit tests. On a loaded machine (a capture run and ffmpeg in the
+// background) one of them blew past it and reported a FAILURE with a fixed seed and unchanged
+// inputs, which is the most misleading result a suite can give. The work itself takes ~1.3s.
+vi.setConfig({ testTimeout: 30_000 });
 
 /* ------------------------------------------------------------------ */
 /* The workspace guard — every IDE file read/write goes through this.  */

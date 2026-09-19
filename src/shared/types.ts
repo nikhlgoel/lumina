@@ -1,5 +1,11 @@
 import type { McpServerConfig, McpTool } from '../core/mcp';
 import type { ShellChoice, TreeEntry } from '../core/ide';
+import type { EditorTheme } from '../core/theme';
+import type { DetectedUrl, PackageManager, ProjectTask } from '../core/tasks';
+
+export type { DetectedUrl, PackageManager, ProjectTask };
+
+export type { EditorTheme };
 import type { GitFile, GitStatus } from '../core/git';
 
 export type { ShellChoice };
@@ -554,4 +560,31 @@ export interface GitView {
   repo: { top: string; prefix: string } | null;
   status: GitStatus | null;
   files: GitFileView[];
+}
+
+/** Server URLs a terminal session has announced. */
+export interface TerminalPorts {
+  id: string;
+  urls: DetectedUrl[];
+}
+
+/** State of the DLNA media server that makes a TV list Lumina as a source. */
+export interface DlnaStatus {
+  running: boolean;
+  location: string | null;
+  address: string | null;
+  port: number;
+  friendlyName: string;
+  error: string | null;
+}
+
+/** Whether a portable copy of Lumina is on a drive, and whether one can be made. */
+export interface PortableInstallStatus {
+  state: 'absent' | 'current' | 'outdated' | 'unknown';
+  versionOnDrive: string | null;
+  currentVersion: string;
+  appDir: string | null;
+  appBytes: number;
+  canInstall: boolean;
+  reason: string | null;
 }

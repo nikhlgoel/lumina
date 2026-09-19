@@ -31,13 +31,16 @@ import { shortcutStatus } from './shortcuts';
 import { aiModelStatus, removeAiModel } from './subtitles';
 import { selectTorrentFiles, torrentDetail } from './jobs/aria2';
 import {
-  allFiles, closeWorkspace, createFile, listDirectory, openWorkspace, readTextFile, renameEntry, restoreWorkspace,
-  searchInFiles, workspaceInfo, writeTextFile,
+  absolutePathOf, allFiles, closeWorkspace, createFile, deleteEntry, listDirectory, openWorkspace, readTextFile,
+  renameEntry, restoreWorkspace, searchInFiles, projectTasks, workspaceInfo, writeTextFile,
 } from './ide/workspace';
 import { callTool, initMcp, listServers, onMcpChanged, removeServer, saveServer, setServerEnabled } from './ide/mcp';
 import {
-  availableShells, listTerminals, resizeTerminal, setTerminalListeners, startTerminal, stopTerminal, writeTerminal,
+  availableShells, listPorts, listTerminals, resizeTerminal, setTerminalListeners, startTerminal, stopTerminal,
+  writeTerminal,
 } from './ide/terminal';
+import { importThemeFile, listThemes, removeTheme } from './ide/themes';
+import { dlnaStatus, initDlna, onDlnaChanged, setDlnaEnabled } from './dlna/server';
 import { commit as gitCommit, discard as gitDiscard, gitStatus, init as gitInit, original as gitOriginal, stage as gitStage, unstage as gitUnstage } from './ide/git';
 import { commitMessageProblem } from '../core/git';
 import { aiKeyStatus, clearAiKey, openKeyPage, setAiKey, testAiKey } from './ai';
@@ -49,6 +52,7 @@ import { logger } from './log';
 import {
   addBookmark, createChain, initSync, joinChain, leaveChain, listBookmarks, removeBookmark, syncNow, syncStatus,
 } from './sync/syncManager';
+import { installPortable, portableInstallStatus } from './portableInstall';
 
 const log = logger('ipc');
 
@@ -93,8 +97,11 @@ const withParent = <T extends Electron.OpenDialogOptions | Electron.SaveDialogOp
 
 export function extensionStatus(): ExtensionStatus {
   const s = settings.get().extension;
+  // `running` is whether the bridge is actually bound, not whether the switch is on. Reporting the
+  // setting meant a busy port showed as working.
+  const { listening, error } = bridge.state;
   return {
-    running: s.enabled, port: s.port, folder: extensionDir(),
+    running: s.enabled && listening, port: s.port, error: s.enabled ? error : null, folder: extensionDir(),
     paired: pairedBrowsers().map(({ id, browser, createdAt, lastUsedAt }) => ({ id, browser, createdAt, lastUsedAt })),
   };
 }
@@ -258,7 +265,9 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'git:init': () => gitInit(),
   'ide:term-shells': () => availableShells(),
   'ide:term-list': () => listTerminals(),
-  'ide:term-start': ({ shellId }: { shellId?: string }) => startTerminal(shellId),
+  'ide:tasks': () => projectTasks(),
+  'ide:ports': () => listPorts(),
+  'ide:term-start': (o: { shellId?: string; command?: string; label?: string; native?: boolean }) => startTerminal(o),
   'ide:term-write': ({ id, data }: { id: string; data: string }) => writeTerminal(id, data),
   'ide:term-resize': ({ id, cols, rows }: { id: string; cols: number; rows: number }) => resizeTerminal(id, cols, rows),
   'ide:term-stop': ({ id }: { id: string }) => stopTerminal(id),
@@ -267,6 +276,30 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'mcp:remove': ({ id }: { id: string }) => removeServer(id),
   'mcp:enable': ({ id, enabled }: { id: string; enabled: boolean }) => setServerEnabled(id, enabled),
   'mcp:call': ({ serverId, name, args }: { serverId: string; name: string; args?: unknown }) => callTool(serverId, name, args),
+  'ide:delete': ({ path: p, recursive }: { path: string; recursive?: boolean }) => deleteEntry(p, recursive ?? false),
+  'ide:reveal': ({ path: p }: { path: string }) => { shell.showItemInFolder(absolutePathOf(p)); },
+  'ide:abs-path': ({ path: p }: { path: string }) => absolutePathOf(p),
+  'dlna:status': () => dlnaStatus(),
+  'dlna:set-enabled': ({ enabled }: { enabled: boolean }) => setDlnaEnabled(enabled),
+  'theme:list': () => listThemes(),
+  'theme:import': async () => {
+    const { win, opts } = withParent({
+      title: 'Import a colour theme',
+      properties: ['openFile'] as const,
+      filters: [
+        { name: 'Colour theme', extensions: ['json', 'jsonc', 'vsix'] },
+        { name: 'VS Code theme JSON', extensions: ['json', 'jsonc'] },
+        { name: 'Theme extension', extensions: ['vsix'] },
+      ],
+    });
+    const r = win
+      ? await dialog.showOpenDialog(win, { ...opts, properties: ['openFile'] })
+      : await dialog.showOpenDialog({ ...opts, properties: ['openFile'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const result = importThemeFile(r.filePaths[0]);
+    return { themes: listThemes(), imported: result.imported.map((t) => t.id), skipped: result.skipped };
+  },
+  'theme:remove': ({ id }: { id: string }) => { removeTheme(id); return listThemes(); },
   'ide:search': ({ query, caseSensitive }: { query: string; caseSensitive?: boolean }) => searchInFiles(query, { caseSensitive }),
   'torrent:detail': ({ id }: { id: string }) => torrentDetail(id),
   'torrent:select-files': ({ id, indices }: { id: string; indices: number[] }) => selectTorrentFiles(id, indices),
@@ -276,6 +309,19 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
     runTransfer((onProgress, handle) => exportToDrive(root, kinds, onProgress, handle)),
   'usb:import': ({ root }: { root: string }) =>
     runTransfer((onProgress, handle) => importFromDrive(root, onProgress, handle)),
+  'usb:portable-status': ({ root }: { root: string }) => portableInstallStatus(root),
+  'usb:install-portable': ({ root }: { root: string }) =>
+    // Reported through the same transfer channel as export/import, so the drive screen has one
+    // progress area rather than three competing ones.
+    runTransfer((onProgress, handle) => installPortable(root, (p) => onProgress({
+      stage: p.stage, direction: 'export', root,
+      files: 0, totalFiles: 0, bytes: p.bytes, totalBytes: p.totalBytes,
+      done: p.done, error: p.error, skipped: 0,
+    }), handle).then((p) => ({
+      stage: p.stage, direction: 'export' as const, root,
+      files: 0, totalFiles: 0, bytes: p.bytes, totalBytes: p.totalBytes,
+      done: true, error: p.error, skipped: 0,
+    }))),
   'usb:import-preview': ({ root }: { root: string }) => {
     const found = scanDriveForImport(root);
     return { files: found.length, bytes: found.reduce((n, f) => n + f.sizeBytes, 0) };
@@ -486,10 +532,13 @@ export function registerIpc() {
   initUsb();
   restoreWorkspace();
   onMcpChanged((states) => broadcast('mcp:changed', states));
+  onDlnaChanged((state) => broadcast('dlna:changed', state));
+  initDlna();
   // Terminal output is a firehose; it goes straight out as an event rather than through invoke.
   setTerminalListeners(
     (id, chunk) => broadcast('ide:term-data', { id, chunk }),
     (id, exitCode) => broadcast('ide:term-exit', { id, exitCode }),
+    (ports) => broadcast('ide:term-ports', ports),
   );
   initMcp();
   tools.on('changed', (list) => broadcast('tools:changed', list));

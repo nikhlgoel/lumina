@@ -6,56 +6,98 @@ Keep **both** files updated as you work — that is how the next session continu
 
 ---
 
-## 0. CURRENT STATE — read this first (updated 2026-09-18, end of session 12)
+## 0. CURRENT STATE — read this first (updated 2026-09-19, end of session 20)
 
-**⚠ NOTHING SINCE `65c3f55` IS COMMITTED.** ~85 files changed/added across sessions 8–12 live only in the working
-tree. The user has been offered a commit and has not said yes yet — **ask before committing or pushing** (standing
-rule). If they agree: commit, don't push unless asked.
+**One commit exists; everything since is uncommitted.** Sessions 8–12 landed as **`317fb25`** ("feat: embedded
+IDE, MCP client, integrated terminal, and source control", 96 files). That commit **is now on GitHub** —
+`origin/main` == `317fb25`, and `git reflog show origin/main` records it as "update by push". The push did **not**
+happen in an assistant session (no `git push` was ever run in one), so it was done by the user or another tool;
+earlier notes in this file and the session log saying "not pushed" were true when written and are now stale.
+**Sessions 13–20 (roughly 49 changed paths) are uncommitted on top of it.** **Ask before committing or pushing**
+(standing rule).
 
-**Verified state right now:** `npx tsc --noEmit` clean · `npx vitest run` **529 passed (30 files)** · `npx vite build`
-ok · full offscreen regression run of all 48 capture steps: every screen renders.
+**Verified right now:** `npx tsc --noEmit` clean · `npx vitest run` **765 passed (37 files)** · `npx vite build`
+ok. `src/main/capture.ts` now defines **64 steps**; the last *full* regression (session 15) covered **56/56**, and
+the eight added since (`13a`–`18b`) were each captured individually as they were written. **A full 64-step
+regression has not been run** — worth doing before the next release.
 
-**Built in sessions 8–12 (details in SESSION-LOG entries 8–12 and the sections referenced):**
-- Embedded IDE: Monaco editor, file tree, tabs, Quick Open / Command Palette / Find in Files (§13).
-- MCP client + Settings › Connected tools UI; real handshake proven against a test server (§13).
-- Integrated terminal (node-pty + xterm), split terminals (§13, §14.1).
-- VS Code-style shell: both sidebars, bottom panel, **every divider draggable** ("Freedom" — the user's stated
-  design principle), editor groups side by side (§14.1).
-- Source control: status, stage/unstage/discard, commit, diff view — a real commit proven (§14.3.1).
-- Offscreen capture so testing never pops a window (§14.0); RAM/CPU measurement harness + two optimisations (§15).
-- Deep property tests (§16) — they found and fixed two real Quick Open bugs.
-- Tray: mute, volume, seek ±10 s, shuffle, repeat, pause/resume all downloads (SESSION-LOG 12).
+**Installer / builds:** `Lumina Setup_v3.0.0-alpha.0.exe` (NSIS) and `Lumina Portable_v3.0.0-alpha.0.exe`
+(portable). Build via `Menu.cmd` → Build a release → Windows, or `pnpm run package:win` /
+`pnpm run package:portable`. A built installer was delivered to the user's Downloads folder in session 17 and is
+**unsigned** — SmartScreen warns on first run. macOS cannot be cross-built from Windows (Menu.cmd explains this).
 
-**Status of the §14 IDE plan:** ✅ 14.0 · ✅ 14.1 (mostly) · ✅ 14.3.1 source control · ❌ 14.2 themes /
-downloadable theme extensions · ❌ 14.3.2–7 (Problems panel, full status bar, Explorer context menus/drag-drop/
-file watcher, breadcrumbs/outline, editor settings & keybindings) · ❌ 14.4 media-native editor + bundled tools on
-the terminal PATH.
+**`Menu.cmd`** at the repo root is the user's own console: verify, tests, build, dev, offscreen screenshots,
+diagnostics, releases, git, dependencies, clean, search, info. `Menu.cmd <n>` runs one action and exits.
+
+### Built in sessions 13–20 (newest first; details in the SESSION-LOG entry named)
+
+- **One setup screen per device** (20) — Settings › Portable drive now does everything for a drive: set up folders,
+  **copy Lumina itself onto it**, copy the library, import, TV compatibility, download routing.
+- **Portable mode** (19) — Lumina runs from a USB stick keeping all data in `Lumina-Data` beside the executable;
+  proven to leave **0 files** in `%APPDATA%`. Turned on by `PORTABLE_EXECUTABLE_DIR`, a `lumina-portable.txt`
+  marker, or `LUMINA_PORTABLE`. `src/main/portableMode.ts` **must stay the first Lumina import** in `index.ts`.
+- **DLNA / "Share to TV"** (16–18) — a real UPnP MediaServer (SSDP + ContentDirectory + range streaming), off by
+  default, with a settings toggle. Proven with a TV-like probe: discovery, browse, `206` range GET, album art,
+  404 for an unknown id. **No real television has seen it.**
+- **TV-safe USB export** (15) — files a TV cannot decode (HEVC, 10-bit, MKV, DTS, 4K) are converted to H.264/AAC
+  MP4 while copying; unsafe audio becomes AAC. Setting `storage.usbTvCompatibility`.
+- **Artwork etched into files** (14) — the gradient the player draws is rasterised to a real PNG and embedded with
+  ffmpeg, plus `folder.jpg` / per-video `.jpg` sidecars, so a TV shows a thumbnail. Audio stream is byte-identical.
+- **Video player fixed** (14) — video now fills the window (`1360x860 of 1360x860`) instead of sitting in a small
+  box with permanent chrome.
+- **Editor themes** (13) — 4 built-ins + VS Code `.json`/`.vsix` import; one theme drives Monaco *and* xterm.
+- **Explorer context menu** (13) — new/rename/delete/reveal/copy path.
+
+### Status of the §14 IDE plan
+
+✅ 14.0 offscreen capture · ✅ 14.1 shell (mostly) · ✅ 14.2 themes · ✅ 14.3.1 source control ·
+✅ 14.3.4 Explorer context menu · ✅ 14.5 Run panel + ports · ✅ bundled tools on the terminal PATH ·
+❌ rest of 14.3 (Problems panel, full status bar, drag-drop, file watcher, breadcrumbs/outline, editor settings &
+keybindings) · ❌ 14.4 media-native editor (video/waveform subtitle editing — still the headline differentiator).
+
+### Proven vs. not — do not overstate these
+
+**Proven by running it:** MCP handshake · terminal typing · git commit through the UI · theme application (colours
+read back out of Monaco) · artwork embedding (ffprobe before/after) · TV-safe conversion (HEVC/10-bit/MKV →
+H.264/MP4) · USB export incl. re-export doing zero work · DLNA discovery/browse/seek via probe · portable mode
+leaving nothing in AppData · **the portable copy surviving `app.asar`** (probe under real Electron: patched
+`fs` reproduces the reported `ENOENT, not found in ...app.asar`, `original-fs` copies it byte-identical).
+
+**Proven (session 23):** video thumbnails in the Library — capture step `05b-library-videos` renders the
+grid offscreen from an **empty** artwork cache and all 8 real thumbnails appear. The old
+`0:v:m:disposition:attached_pic` specifier matched no stream (`m:` is the *metadata* selector), so every video
+with an embedded cover silently showed a placeholder; a test now forbids that form.
+
+**Proven (session 24):** a folder `cover.jpg` beside audio files now reaches the UI — scanner flag and served
+image both confirmed with a synthetic album (no embedded picture, cover beside it). Verified synthetically on
+purpose: every audio file on the dev machine already has embedded art, so this path had no real sample.
+
+**Proven (session 25):** the first complete **67-step** capture run, read mechanically (identical
+screenshots = a step that changed nothing). It caught: page reload blocked in packaged builds, the extension
+bridge reporting itself as listening when it was not, and the Share-to-TV switch reading "Off" while on. All
+three fixed and re-captured against real port conflicts.
+
+**Still NOT proven after that run:** the 15 IDE/editor-theme steps and `18b-portable-edges` photographed the
+same screen because the capture profile has no workspace in `settings.json`. They are untested, not passing —
+give the scratch profile a settings file with `ide.workspace` set before trusting them.
+
+**Never proven:** typing into Monaco · MCP `tools/call` live · MCP tools wired into the assistant (not built) ·
+**any real TV** · the portable *copy* running on a second PC · cancelling a copy or conversion mid-way · a drive
+filling during a copy. In a dev build the "not a packaged build" check masks the other install guards at runtime,
+so room/read-only/self-copy/folder-conflict are unit-tested only.
+
+**Open, not explained (session 22):** a playlist row was seen reading "215 of 433" beside **0%**. Neither code
+path can produce that — one playlist job reports `100 * 214/433 ≈ 49%` (`overall()` in `src/main/jobs/ytdlp.ts`
+already folds the playlist position into `percent`, and `Runner.progress` *merges* rather than replaces), and a
+group of 433 jobs scores each completed member 100. Two theories were built and both disproved — see session log
+(22); do not rebuild either. What settles it is one detail from the next live run: **one playlist download, or
+433 separate downloads grouped?** The looping-bar and shading faults around it were real and are fixed.
 
 **Still needs the USER's live test:** #1 download speed, #2 embedded subtitles, #15 firewall UAC, #21 real AI key,
-#24 real search, and the tray menu's *appearance* (its behaviour is verified). **Never proven:** typing into Monaco;
-MCP `tools/call` live; MCP tools wired into the AI assistant (not built). **Owed by the user:** an answer on #5
-(verify-button position); #20 Chrome Web Store submission is theirs.
+#24 real search, the tray menu's appearance, and now: the installer, the portable copy on a second PC, and a TV.
 
-**The user was offered these next steps and hasn't picked yet:** (1) commit; (2) finish the IDE plan — themes, then
-the §14.3 basics; (3) the §14.4 media editor differentiator; (4) stabilise for release — their live test pass, a
-long leak/soak test; (5) start the list of new ideas they said they have. **Ask which, don't assume.**
-
-**Gotchas that cost time this week — don't relearn them:**
-- **Never show the app window.** Screenshot runs: `env -u ELECTRON_RUN_AS_NODE LUMINA_CAPTURE=<dir>
-  LUMINA_CAPTURE_ONLY=<regex> npx electron . --user-data-dir=<scratch>` — renders **offscreen**, nothing appears.
-  A plain hidden window is NOT enough (it stops painting; screenshots go stale). Metrics: `LUMINA_METRICS` (§15).
-- `ELECTRON_RUN_AS_NODE=1` leaks into this shell from the host app → Electron starts as plain Node
-  ("does not provide an export named BrowserWindow"). Always `env -u ELECTRON_RUN_AS_NODE`.
-- Capture scripts are JS inside TS strings/template literals: **avoid backslashes** (`\d` silently became `d`
-  twice, and escaping got mangled between shell, Python and TS). Use `[0-9]`. Scripts share one page scope — wrap
-  each step's helpers in an IIFE. Make steps idempotent: layout persists in the scratch profile.
-- The **ECC plugin's gateguard hook** blocks the *first* write of every new file until you state importers/callers,
-  affected API, data schemas and the user's verbatim instruction — state them, then retry the identical write.
-- Don't add a static import of `views/ide` or `views/browser` anywhere — it pulls Monaco back into startup (§15).
-- "Green checks are not proof" — tsc/vitest/build all passed while the editor rendered nothing. See UI running
-  (offscreen capture) before calling it done.
-
----
+**Open question for the user:** their TV's model number, to know whether it has DLNA or even Ethernet. Their set
+appears to have no network, which is why §17 exists.
 
 ## 1. What Lumina is
 
@@ -130,7 +172,7 @@ driver auto-updater; USB portable player + import/export/sync; Chrome Web Store 
 
 ```bash
 npx tsc --noEmit                 # types — must be clean
-npx vitest run                   # unit + property tests (currently 529 passing, 30 files)
+npx vitest run                   # unit + property tests (currently 765 passing, 37 files)
 npx vite build                   # production build must succeed
 ```
 
@@ -347,7 +389,7 @@ the main Vite build and `asarUnpack`ed, because a `.node` binary cannot be loade
   on mount (capped at 500 chunks), and fits on the next frame rather than the frame the host is attached, when it
   is often still zero-height. Neither bug was visible to tsc, vitest or vite build.
 
-**Still not built:** git/source control, split panes, and wiring MCP tools into the BYO-key assistant from item
+**Still not built** (as of session 20; git/source control and split panes have since shipped — see §0): wiring MCP tools into the BYO-key assistant from item
 #21 — that last one needs a tool-calling loop across four provider APIs plus a chat UI, so it is a real piece of
 work rather than a wire-up. Typing into Monaco has still never been simulated successfully; only the save path is
 proven. (The *terminal* round-trip **is** proven — a command was written to the pty and its output screenshotted.)
@@ -565,7 +607,33 @@ Target the VS Code shell, because that is what the user pointed at:
 or more ptys render at once. `TerminalPanel` already keeps one xterm per session in a ref map, so this is a layout
 change, not an engine change — render N hosts instead of one and fit each.
 
-### 14.2 — Themes, and "download extensions for the theme"
+### 14.2 — Themes ✅ BUILT (session 13)
+
+`src/core/theme.ts` (**34 tests**) is the single source: one `EditorTheme` carries the editor chrome, 14 token
+roles and the terminal's 16 ANSI colours, and `toMonacoTheme` / `toXtermTheme` adapt it. Monaco and xterm now read
+the *same* object, so they can no longer drift. Four built-ins (Lumina Dark/Light, Midnight, Paper), selected in
+**Settings › App › Editor theme** with a live preview rendered in each theme's own colours; `auto` follows the
+app's light/dark.
+
+**Importing a VS Code colour theme works**: `src/main/ide/themes.ts` takes a `.json`/`.jsonc`, or a `.vsix` which
+it opens with the **bundled 7-Zip**, extracting only `extension/themes/*` and the manifest into a temp dir that is
+deleted afterwards. Nothing from the file is executed — it is parsed, validated colour by colour, and re-saved in
+Lumina's own shape in `userData/themes/`. Sparse themes are completed from the matching built-in, JSONC comments
+and trailing commas are tolerated, and the theme's *background* decides dark/light (its `type` field is often
+wrong).
+
+**Proven at runtime, not inferred** — capture probe `11d-theme-probe` read the live computed colours back out of
+Monaco: Midnight → `rgb(15, 17, 23)`, Paper → `rgb(253, 252, 247)`, auto → `rgb(20, 19, 18)`. All exact.
+
+⚠ **Still true and stated in the UI:** Monaco is not TextMate, so an imported theme's backgrounds, gutter,
+selection and terminal colours are exact while token colours are mapped to the nearest of Lumina's 14 roles. Full
+fidelity needs shiki/onigasm (WASM) — a separate, deliberate decision. **Code-running extensions remain out of
+scope.** ⚠ **Needs the user's live test:** the import itself goes through a native file dialog, which the offscreen
+harness cannot drive — the conversion is unit-tested and the on-disk/list/apply path is proven, but nobody has yet
+picked a real `.vsix` in the dialog. Open VSX *browse-and-download from inside Lumina* is **not** built; today you
+download the `.vsix` yourself and import it.
+
+### 14.2 (original plan) — Themes, and "download extensions for the theme"
 
 - One token set drives app chrome, Monaco **and** xterm. Today Monaco has a hand-made `lumina` theme and xterm reads
   CSS variables; unify them so one theme switch changes everything.
@@ -617,6 +685,33 @@ Ordered by how much it matters for real work:
   misdiagnosed as a timing problem. Capture scripts are template literals: avoid backslash escapes in them.
 - **Not yet:** gutter change markers in the editor, branch switching/creation, push/pull (deliberately not
   automatic — would need credential handling done properly), staging individual hunks, merge-conflict editor.
+
+### 14.5 — Running the project from inside the IDE ✅ BUILT (session 13)
+
+The user's ask: *"if i could through our app's ide, i can also run it there right to see the output… ports, output
+also to professionally work on something."*
+
+- **Run panel** (bottom panel, next to Terminal): every script in the open project's `package.json`, each with the
+  command it will run. `src/core/tasks.ts` (**28 tests**) decides the package manager from the lockfile (a
+  `packageManager` field wins), and always emits `<pm> run <name>` so a script called `add` can't collide with a
+  built-in subcommand.
+- **Running is not a second code path.** A task opens an ordinary terminal tab and *types the command into it*, so
+  output, colours, Ctrl+C and the exit code are exactly what the user's own shell would give.
+- **Ports**: the pty's output is watched for an http(s) URL with a port. Loopback addresses get an **Open** button
+  that loads them in Lumina's own browser; a LAN address is listed but marked "network". ANSI codes are stripped
+  first, `0.0.0.0` is rewritten to `localhost`, and URLs without a port are ignored so documentation links aren't
+  mistaken for servers. This is a heuristic and the empty state says so.
+- ⚠ **Tasks force a native shell.** The first capture ran `npm run dev` and Ports stayed empty: the default shell
+  here is **WSL**, and this machine's WSL has no working userland. Beyond the local quirk it is simply wrong — a
+  Windows project's lockfile and `node_modules/.bin` are native, so `startTerminal({ native: true })` now skips WSL
+  for tasks. A terminal the user opens by hand still honours their own choice.
+- **Bundled tools on PATH** (§14.4's second idea): every terminal gets `resources/bin` and the updated-tools dir
+  **appended** to PATH, so `ffmpeg`, `yt-dlp`, `aria2c` and `whisper-cli` just work in a project opened here.
+  Appended, never prepended, so a tool the user installed themselves still wins.
+
+**Proven offscreen:** `13a-run-panel` (scripts listed with the right manager) and `13b-run-server-ports` — a real
+`node` HTTP server started through the panel, its Vite-style banner parsed, and port 5173 listed twice: localhost
+with **Open**, and the LAN address as "network".
 
 ### 14.4 — The differentiator (what no normal IDE has)
 
@@ -689,3 +784,30 @@ and editor-group state machines with every invariant checked after each action.
 (lowercasing grew the string and an index ran past the end) and **mis-highlighted** everything after an emoji
 (it returned UTF-16 indexes; the highlighter counts code points). Fixed, with both counterexamples kept as named
 regressions. When adding a feature, add a property test for any rule that must *always* hold.
+
+---
+
+## 17. The USB-on-a-TV question (asked 2026-09-19) — what is and is not possible
+
+The user asked for the USB drive to present **Lumina's own media player** to the TV, so that picking the pendrive
+as the source shows Lumina's interface and browses the library through it, the way HDMI or AV appear as sources.
+
+**This cannot be done, and no amount of work on Lumina changes that.** A TV's USB port is a *storage* input: the
+television runs its own firmware and its own built-in media browser, and it reads files off the stick. It has no
+mechanism for launching a program from the drive — there is no autorun (Windows' `autorun.inf` is both
+Windows-only and disabled since Windows 7), TVs do not execute arbitrary binaries, and an Electron app could not
+run on a TV's SoC even if one could be started. Anything that claimed to do this would be a fake.
+
+**What actually gets Lumina onto the TV, in order of how well it works:**
+
+1. **DLNA / UPnP media server — ✅ BUILT in sessions 16–18.** Lumina advertises itself on the network; the TV lists **Lumina**
+   as a source next to HDMI and AV, exactly the behaviour asked for, and browses the library live. This is the
+   real answer to the request. It is a genuine piece of work — SSDP discovery, a ContentDirectory service and an
+   HTTP streaming endpoint — and it needs the TV and the PC on the same network.
+2. **Make the USB drive as good as a dumb player allows (done, §14/§17 work).** Embedded cover art, `folder.jpg`
+   per album, `.m3u8` playlists, and a clean `LuminaMedia/{Music,Videos,Playlists,Files}` layout. The TV still
+   uses its own interface, but it shows artwork and sensible lists instead of a wall of filenames.
+3. **Cast/AirPlay-style handoff** — bigger again, and device-specific.
+
+If the user wants the TV to show "Lumina" as a source, **option 1 is the feature to build**; it should not be
+described as a USB feature.

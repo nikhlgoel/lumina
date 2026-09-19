@@ -4,7 +4,7 @@
 // screen at once, side by side, and the tab strip picks the group. Each session gets its own
 // permanent host element and its xterm is opened into it exactly once — xterm cannot be re-opened
 // into a different element, so switching groups hides hosts rather than moving terminals around.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Columns2, Maximize2, Minimize2, Plus, Trash2, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -18,23 +18,14 @@ import { Sash } from './IdeChrome';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
+import { toXtermTheme } from '@core/theme';
+import { activeTheme, onThemeChange } from '@/lib/editorTheme';
 
 interface Attached {
   term: Terminal;
   fit: FitAddon;
 }
 
-/** Read the app's own CSS variables so the terminal matches whatever theme is active. */
-function themeFromCss(): Record<string, string> {
-  const css = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  return {
-    background: v('--panel', '#1b1b1b'),
-    foreground: v('--ink', '#e6e6e6'),
-    cursor: v('--accent', '#e0752d'),
-    selectionBackground: v('--accent-soft', 'rgba(224,117,45,0.3)'),
-  };
-}
 
 /** Fit a terminal to its host, unless the host is hidden (display:none reports a zero size). */
 function fitIfVisible(entry: Attached | undefined, host: HTMLElement | null | undefined) {
@@ -55,10 +46,12 @@ function Tool({ label, onClick, children, disabled }: { label: string; onClick: 
   );
 }
 
-export function TerminalPanel({ onClose, maximized = false, onToggleMaximize }: {
+export function TerminalPanel({ onClose, maximized = false, onToggleMaximize, tabs }: {
   onClose: () => void;
   maximized?: boolean;
   onToggleMaximize?: () => void;
+  /** Panel-level tabs (Terminal / Run), rendered at the start of this panel's own header. */
+  tabs?: ReactNode;
 }) {
   const toast = useApp((s) => s.toast);
   const [sessions, setSessions] = useState<Record<string, TerminalSession>>({});
@@ -93,7 +86,7 @@ export function TerminalPanel({ onClose, maximized = false, onToggleMaximize }: 
       fontSize: 13,
       cursorBlink: true,
       scrollback: 5000,
-      theme: themeFromCss(),
+      theme: toXtermTheme(activeTheme()),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -195,15 +188,16 @@ export function TerminalPanel({ onClose, maximized = false, onToggleMaximize }: 
   // terminal opened in dark mode stays a black box after the app goes light. Watching the attribute
   // (rather than the setting) also catches the OS flipping when colour mode is "system".
   useEffect(() => {
-    const observer = new MutationObserver(() => {
-      // Let the new theme's CSS variables apply before reading them.
-      requestAnimationFrame(() => {
-        const theme = themeFromCss();
-        for (const { term } of attached.current.values()) term.options.theme = theme;
-      });
-    });
+    const apply = () => {
+      const theme = toXtermTheme(activeTheme());
+      for (const { term } of attached.current.values()) term.options.theme = theme;
+    };
+    // Two triggers: the user picking a different editor theme, and the app flipping light/dark
+    // (which "auto" follows, and which also fires when the OS changes under colour mode "system").
+    const unsubscribe = onThemeChange(apply);
+    const observer = new MutationObserver(() => requestAnimationFrame(apply));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
+    return () => { unsubscribe(); observer.disconnect(); };
   }, []);
 
   // Dispose every xterm when the panel unmounts. The ptys keep running; reopening reattaches.
@@ -236,6 +230,7 @@ export function TerminalPanel({ onClose, maximized = false, onToggleMaximize }: 
   return (
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
+        {tabs}
         <span className="mr-1 text-[11px] font-semibold tracking-[0.08em] text-ink-3 uppercase">Terminal</span>
         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {groups.groups.map((g, i) => (

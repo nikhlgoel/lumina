@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, FolderOpen, Globe, LogOut, Puzzle, ShieldAlert, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, Copy, ExternalLink, FolderOpen, Globe, LogOut, Puzzle, ShieldAlert, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { ExtensionStatus, SiteAccountInfo, SpotifyStatus } from '@shared/ipc';
 import type { FirewallStatus } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
@@ -154,9 +154,26 @@ export function ExtensionSection({ s, set }: SectionProps) {
   return (
     <>
       <Group title="Browser extension" description="Catches downloads you start in your browser and finds videos and streams playing on any page, including ones Lumina can’t open from a link alone.">
-        <Row id="extEnabled" label="Allow the extension to connect" description={e.enabled ? `Listening only on this computer (127.0.0.1:${e.port}).` : 'The extension can’t reach Lumina while this is off.'}>
+        <Row
+          id="extEnabled"
+          label="Allow the extension to connect"
+          description={!e.enabled
+            ? 'The extension can’t reach Lumina while this is off.'
+            : status?.running
+              ? `Listening only on this computer (127.0.0.1:${e.port}).`
+              : status
+                ? 'Switched on, but not listening yet.'
+                : 'Checking…'}
+        >
           <Switch label="Extension bridge" checked={e.enabled} onChange={(v) => set({ extension: { enabled: v } })} />
         </Row>
+
+        {e.enabled && status?.error && (
+          <Row
+            label={<span className="flex items-center gap-1.5 text-danger"><CircleAlert className="size-4" /> The extension can’t connect</span>}
+            description={status.error}
+          />
+        )}
         <Row id="extCapture" label="Take over browser downloads" description="Downloads you start in the browser go to Lumina instead, with multi-connection speed and resume.">
           <Switch label="Capture downloads" checked={e.captureDownloads} onChange={(v) => set({ extension: { captureDownloads: v } })} />
         </Row>

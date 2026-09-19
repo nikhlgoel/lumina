@@ -4,6 +4,7 @@
 // resolved and then checked with isInsideWorkspace() against the current root, so a crafted path
 // (../../.. , a symlink target, an absolute path to somewhere else) is refused rather than served.
 // There is no "open file" API that works without a root being opened first.
+import { detectPackageManager, parseScripts, type PackageManager, type ProjectTask } from '../../core/tasks';
 import { dialog } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -199,6 +200,56 @@ export function renameEntry(from: string, to: string): TreeEntry {
   fs.renameSync(src, dest);
   const isDir = fs.statSync(dest).isDirectory();
   return { name: path.basename(dest), path: relativeToWorkspace(root!, dest), kind: isDir ? 'directory' : 'file' };
+}
+
+/**
+ * Delete a file or folder inside the workspace.
+ *
+ * `resolveInside` is what makes this safe: a path that escapes the open folder throws before any
+ * filesystem call. Deliberately NOT recursive-by-default — a folder with anything in it has to be
+ * asked for explicitly, so a mis-click cannot take a subtree with it.
+ */
+export function deleteEntry(relative: string, recursive = false): void {
+  const abs = resolveInside(relative);
+  if (!fs.existsSync(abs)) throw new Error('That no longer exists.');
+  const stat = fs.lstatSync(abs);
+  if (stat.isDirectory()) {
+    if (!recursive && fs.readdirSync(abs).length > 0) throw new Error('That folder isn’t empty.');
+    fs.rmSync(abs, { recursive: true, force: true });
+  } else {
+    fs.unlinkSync(abs);
+  }
+}
+
+/**
+ * The runnable scripts in the open project, and the package manager to run them with.
+ *
+ * Reads package.json fresh each time rather than caching: someone editing scripts in the editor
+ * next to this list would otherwise see a stale one.
+ */
+export function projectTasks(): { manager: PackageManager; tasks: ProjectTask[] } {
+  if (!root) throw new Error('No folder is open.');
+  const manifest = path.join(root, 'package.json');
+  if (!fs.existsSync(manifest)) return { manager: 'npm', tasks: [] };
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  } catch {
+    return { manager: 'npm', tasks: [] };
+  }
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(root);
+  } catch {
+    entries = [];
+  }
+  const field = (parsed as { packageManager?: string } | null)?.packageManager;
+  return { manager: detectPackageManager(entries, field), tasks: parseScripts(parsed) };
+}
+
+/** The absolute path of something in the workspace, for "Reveal in File Explorer" and "Copy path". */
+export function absolutePathOf(relative: string): string {
+  return resolveInside(relative);
 }
 
 /**

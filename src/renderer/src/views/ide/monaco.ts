@@ -18,6 +18,8 @@ import HtmlWorker from 'monaco-editor/language/html/html.worker?worker';
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 // In Monaco 0.56 the TypeScript defaults live in the language contribution, not on the editor API.
 import { javascriptDefaults, typescriptDefaults } from 'monaco-editor/language/typescript/monaco.contribution';
+import { toMonacoTheme } from '@core/theme';
+import { activeTheme } from '@/lib/editorTheme';
 
 let ready = false;
 
@@ -43,30 +45,12 @@ function workerFor(label: string): Worker {
 }
 
 /**
- * Lumina's own colours as a Monaco theme, so the editor doesn't look like a foreign window pasted
- * into the app. Reads the live CSS custom properties, so it follows the user's accent and theme.
+ * Apply the active editor theme. The colours come from @core/theme, which is also what the terminal
+ * reads, so the editor and the shell below it can never drift apart.
  */
-function defineTheme(dark: boolean) {
-  const css = getComputedStyle(document.documentElement);
-  const read = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  monaco.editor.defineTheme('lumina', {
-    base: dark ? 'vs-dark' : 'vs',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': read('--color-panel', dark ? '#16151a' : '#ffffff'),
-      'editor.foreground': read('--color-ink', dark ? '#e9e7ef' : '#1b1a1f'),
-      'editorLineNumber.foreground': read('--color-ink-3', '#8b8794'),
-      'editorGutter.background': read('--color-panel', dark ? '#16151a' : '#ffffff'),
-      'editor.lineHighlightBackground': read('--color-hover', dark ? '#1e1d24' : '#f4f2ef'),
-      'editorCursor.foreground': read('--color-accent', '#e8752f'),
-      'editor.selectionBackground': read('--color-accent-soft', dark ? '#3a2a1e' : '#fbe6d6'),
-    },
-  });
+function defineTheme() {
+  monaco.editor.defineTheme('lumina', toMonacoTheme(activeTheme()));
 }
-
-/** True when the app is currently in dark mode, by the same signal the rest of the UI uses. */
-const isDark = () => document.documentElement.dataset.theme !== 'light';
 
 /**
  * Prepare Monaco once, then hand back the API. Safe to call repeatedly — the worker wiring and
@@ -77,7 +61,7 @@ export function loadMonaco(): typeof monaco {
     (self as unknown as { MonacoEnvironment: { getWorker: (id: string, label: string) => Worker } }).MonacoEnvironment = {
       getWorker: (_id, label) => workerFor(label),
     };
-    defineTheme(isDark());
+    defineTheme();
     // Editing a project on disk: the in-browser TypeScript service has no node_modules, so its
     // "cannot find module" noise would be wrong far more often than right. Syntax errors still show.
     for (const defaults of [typescriptDefaults, javascriptDefaults]) {
@@ -91,7 +75,7 @@ export function loadMonaco(): typeof monaco {
 /** Re-read the app's colours after a theme switch and re-apply them to every open editor. */
 export function refreshTheme() {
   if (!ready) return;
-  defineTheme(isDark());
+  defineTheme();
   monaco.editor.setTheme('lumina');
 }
 

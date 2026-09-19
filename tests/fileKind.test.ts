@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { KIND_ORDER, extensionOf, fileKindOf, groupByKind, isTrailingVolume } from '@core/fileKind';
+import { isDownloaderArtifact, KIND_ORDER, extensionOf, fileKindOf, groupByKind, isTrailingVolume } from '@core/fileKind';
 
 describe('extensionOf', () => {
   it('reads the last extension, lower-cased', () => {
@@ -82,5 +82,34 @@ describe('groupByKind', () => {
   it('every kind it can produce has a place in the display order', () => {
     const kinds = new Set(['a.pdf', 'a.epub', 'a.zip', 'a.png', 'a.exe', 'a.srt', 'a.json', 'a.qqq'].map(fileKindOf));
     for (const k of kinds) expect(KIND_ORDER).toContain(k);
+  });
+});
+
+describe('isDownloaderArtifact — the Files tab should show what the user got, not our bookkeeping', () => {
+  it('hides the infohash torrent aria2 saves beside a magnet download', () => {
+    // Exactly what turned up in a real downloads folder, listed under "Other files" as raw hex.
+    expect(isDownloaderArtifact('c9625df298353912c52657774bb3de80a9941277.torrent')).toBe(true);
+    expect(isDownloaderArtifact('DD8255ECDC7CA55FB0BBF81323D87062DB1F6D1C.TORRENT')).toBe(true);
+  });
+
+  it('keeps a torrent the user put there themselves', () => {
+    expect(isDownloaderArtifact('ubuntu-24.04-desktop-amd64.iso.torrent')).toBe(false);
+    expect(isDownloaderArtifact('Big Buck Bunny.torrent')).toBe(false);
+    // Hex, but not an infohash: too short, too long, or not hex at all.
+    expect(isDownloaderArtifact('c9625df.torrent')).toBe(false);
+    expect(isDownloaderArtifact(`${'a'.repeat(41)}.torrent`)).toBe(false);
+    expect(isDownloaderArtifact(`${'g'.repeat(40)}.torrent`)).toBe(false);
+  });
+
+  it('still hides the in-progress control files it always did', () => {
+    for (const name of ['movie.mp4.aria2', 'movie.mp4.part', 'video.f137.ytdl', 'Lumina.exe.lumina-part']) {
+      expect(isDownloaderArtifact(name), name).toBe(true);
+    }
+  });
+
+  it('leaves ordinary downloads alone', () => {
+    for (const name of ['Dune-Awakening-AnkerGames.zip', 'poster.jpg', 'Big Buck Bunny.en.srt', 'notes.txt']) {
+      expect(isDownloaderArtifact(name), name).toBe(false);
+    }
   });
 });

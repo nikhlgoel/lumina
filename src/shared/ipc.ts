@@ -2,7 +2,7 @@ import type { PlayerCommand } from '../core/trayMenu';
 import { z } from 'zod';
 import type {
   AiKeyStatus, AiModelStatus, AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats,
-  Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchResults, GitView, ShellChoice, SyncStatus, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
+  Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableInstallStatus, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchResults, GitView, DlnaStatus, EditorTheme, PackageManager, ProjectTask, ShellChoice, SyncStatus, TerminalPorts, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
 } from './types';
 import type { Settings, SettingsPatch } from './settings';
 
@@ -137,7 +137,15 @@ export const inputSchemas = {
   'git:init': z.void(),
   'ide:term-shells': z.void(),
   'ide:term-list': z.void(),
-  'ide:term-start': z.object({ shellId: z.string().max(40).optional() }),
+  'ide:term-start': z.object({
+    shellId: z.string().max(40).optional(),
+    // A command to type into the shell. Used by the Run panel; still just keystrokes.
+    command: z.string().max(2000).optional(),
+    label: z.string().max(60).optional(),
+    native: z.boolean().optional(),
+  }),
+  'ide:tasks': z.void(),
+  'ide:ports': z.void(),
   // Keystrokes. Capped so one IPC message can't be a megabyte of paste.
   'ide:term-write': z.object({ id: z.string().max(16), data: z.string().max(100_000) }),
   'ide:term-resize': z.object({ id: z.string().max(16), cols: z.number(), rows: z.number() }),
@@ -160,6 +168,15 @@ export const inputSchemas = {
     name: z.string().min(1).max(120),
     args: z.unknown().optional(),
   }),
+  'ide:delete': z.object({ path: z.string().min(1).max(1024), recursive: z.boolean().optional() }),
+  'ide:reveal': z.object({ path: z.string().min(1).max(1024) }),
+  'ide:abs-path': z.object({ path: z.string().min(1).max(1024) }),
+  'dlna:status': z.void(),
+  'dlna:set-enabled': z.object({ enabled: z.boolean() }),
+  'theme:list': z.void(),
+  // No path argument: the user picks the file in a native dialog owned by main.
+  'theme:import': z.void(),
+  'theme:remove': z.object({ id: z.string().min(1).max(80) }),
   'ide:search': z.object({
     query: z.string().min(1).max(500),
     caseSensitive: z.boolean().optional(),
@@ -176,6 +193,8 @@ export const inputSchemas = {
     kinds: z.array(z.enum(['audio', 'video'])).min(1).max(2),
   }),
   'usb:import': z.object({ root: z.string().min(2).max(1024) }),
+  'usb:portable-status': z.object({ root: z.string().min(2).max(1024) }),
+  'usb:install-portable': z.object({ root: z.string().min(2).max(1024) }),
   'usb:import-preview': z.object({ root: z.string().min(2).max(1024) }),
   'usb:cancel': z.void(),
   'update:status': z.void(),
@@ -266,8 +285,11 @@ export const inputSchemas = {
 export interface SiteAccountInfo { domain: string; cookies: number; signedIn: boolean }
 export interface SpotifyStatus { connected: boolean; user: string | null; hasClientId: boolean; redirectUri: string }
 export interface ExtensionStatus {
+  /** The bridge is actually accepting connections — not merely switched on in settings. */
   running: boolean;
   port: number;
+  /** Why the bridge isn't listening, when it is switched on but failed (usually a busy port). */
+  error: string | null;
   folder: string;
   paired: { id: string; browser: string; createdAt: number; lastUsedAt: number }[];
 }
@@ -339,6 +361,8 @@ export interface InvokeOutputs {
   'ide:term-shells': ShellChoice[];
   'ide:term-list': TerminalSession[];
   'ide:term-start': TerminalSession;
+  'ide:tasks': { manager: PackageManager; tasks: ProjectTask[] };
+  'ide:ports': TerminalPorts[];
   'ide:term-write': void;
   'ide:term-resize': void;
   'ide:term-stop': void;
@@ -347,6 +371,14 @@ export interface InvokeOutputs {
   'mcp:remove': McpServerState[];
   'mcp:enable': McpServerState[];
   'mcp:call': { text: string; isError: boolean };
+  'ide:delete': void;
+  'ide:reveal': void;
+  'ide:abs-path': string;
+  'dlna:status': DlnaStatus;
+  'dlna:set-enabled': DlnaStatus;
+  'theme:list': EditorTheme[];
+  'theme:import': { themes: EditorTheme[]; imported: string[]; skipped: string[] } | null;
+  'theme:remove': EditorTheme[];
   'ide:search': CodeSearchHit[];
   'torrent:detail': TorrentDetail | null;
   'torrent:select-files': boolean;
@@ -354,6 +386,8 @@ export interface InvokeOutputs {
   'usb:prepare': PortableDrive | null;
   'usb:export': PortableTransfer;
   'usb:import': PortableTransfer;
+  'usb:portable-status': PortableInstallStatus;
+  'usb:install-portable': PortableTransfer;
   'usb:import-preview': { files: number; bytes: number };
   'usb:cancel': void;
   'update:status': UpdateState;
@@ -436,6 +470,8 @@ export interface EventPayloads {
   'update:changed': UpdateState;
   'mcp:changed': McpServerState[];
   'ide:term-data': { id: string; chunk: string };
+  'ide:term-ports': TerminalPorts;
+  'dlna:changed': DlnaStatus;
   'ide:term-exit': { id: string; exitCode: number };
   'usb:drives-changed': PortableDrive[];
   'usb:transfer': PortableTransfer;

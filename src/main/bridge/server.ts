@@ -109,6 +109,28 @@ class BridgeServer {
   private server: http.Server | null = null;
   private port = 0;
   private pairing = false;
+  /**
+   * Whether the socket is genuinely bound, and why not when it isn't.
+   *
+   * Kept here rather than inferred from the setting: a busy port used to leave Settings saying
+   * "Listening only on this computer" while nothing was listening at all, so the extension looked
+   * broken and the one thing that would fix it — changing the port — was never suggested.
+   */
+  private listening = false;
+  private lastError: string | null = null;
+  /** Told when the bridge starts or stops listening, so Settings can follow along. */
+  onStateChange: (() => void) | null = null;
+
+  get state(): { listening: boolean; error: string | null } {
+    return { listening: this.listening, error: this.lastError };
+  }
+
+  private setState(listening: boolean, error: string | null) {
+    if (this.listening === listening && this.lastError === error) return;
+    this.listening = listening;
+    this.lastError = error;
+    this.onStateChange?.();
+  }
 
   start(handlers: BridgeHandlers) {
     const s = settings.get().extension;
@@ -126,15 +148,24 @@ class BridgeServer {
     // Keep-alive lets bursts of captures reuse connections.
     this.server.keepAliveTimeout = 30_000;
     this.server.on('error', (err: NodeJS.ErrnoException) => {
-      log.warn(err.code === 'EADDRINUSE' ? `Port ${this.port} is in use; the browser extension can't connect. Change it in Settings › Browser extension.` : 'Bridge server error', err);
+      const busy = err.code === 'EADDRINUSE';
+      const message = busy
+        ? `Port ${this.port} is already used by another program, so the extension can't reach Lumina. Pick a different port below.`
+        : err.message;
+      log.warn(busy ? `Port ${this.port} is in use; the browser extension can't connect. Change it in Settings › Browser extension.` : 'Bridge server error', err);
+      this.setState(false, message);
     });
     // Loopback only: nothing on the network can reach this.
-    this.server.listen(this.port, '127.0.0.1', () => log.info(`Extension bridge listening on 127.0.0.1:${this.port}`));
+    this.server.listen(this.port, '127.0.0.1', () => {
+      log.info(`Extension bridge listening on 127.0.0.1:${this.port}`);
+      this.setState(true, null);
+    });
   }
 
   stop() {
     this.server?.close();
     this.server = null;
+    this.setState(false, null);
   }
 
   private json(res: http.ServerResponse, status: number, body: unknown, origin?: string) {

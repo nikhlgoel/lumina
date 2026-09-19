@@ -5,7 +5,7 @@ import { assForceStyle } from '@core/subtitleStyle';
 import { classifyUrl, cleanUrl, extractLinks, isMusicSite, toInspectTarget, youtubeId, youtubeThumb } from '@core/url';
 import { parseStreams } from '@core/streams';
 import { audioFormatArgs, buildDownloadArgs, outputTemplate, previewTemplate, SQUARE_ARTWORK_PPA, videoFormatArgs, type BuildArgsInput } from '@core/ytdlpArgs';
-import { parseYtdlpLine, friendlyYtdlpError, friendlyAria2Error, isCookieReadError } from '@core/progress';
+import { parseYtdlpLine, friendlyYtdlpError, friendlyAria2Error, isCookieReadError, progressIndeterminate } from '@core/progress';
 import { parsePlaylist, writeM3u8 } from '@core/playlists';
 import { activeLineIndex, cleanTrackMetadata, parseCues, parseLrc, scoreLyricsMatch } from '@core/lyrics';
 import { formatBytes, formatDuration, safeFileName } from '@core/format';
@@ -331,5 +331,25 @@ describe('formatting and presets', () => {
     expect(new Set(BUILT_IN_PRESETS.map((p) => p.id)).size).toBe(BUILT_IN_PRESETS.length);
     const info = { audioStreams: [{ codec: 'opus', bitrateKbps: 130, lossless: false }], videoStreams: [] } as unknown as MediaInfo;
     expect(qualityNote(presetById('audio-flac')!.format, info)).toContain('cannot add quality');
+  });
+});
+
+describe('progressIndeterminate — the looping bar that reads as "stuck"', () => {
+  it('is off the moment anything at all is known', () => {
+    expect(progressIndeterminate({ percent: 1 })).toBe(false);
+    expect(progressIndeterminate({ percent: 0, downloadedBytes: 4096 })).toBe(false);
+    // Between two songs of a playlist the percent can tick to 0 for an instant; the position is
+    // still known, and flipping to a looping animation there is what read as a hung download.
+    expect(progressIndeterminate({ percent: 0, item: { index: 215, count: 433 } })).toBe(false);
+  });
+
+  it('is on only before there is any figure to show at all', () => {
+    expect(progressIndeterminate({ percent: 0 })).toBe(true);
+    expect(progressIndeterminate({ percent: 0, downloadedBytes: 0 })).toBe(true);
+    expect(progressIndeterminate({ percent: 0, downloadedBytes: null })).toBe(true);
+  });
+
+  it('is off for a nonsense percent rather than animating for ever', () => {
+    expect(progressIndeterminate({ percent: Number.NaN, item: { index: 1, count: 2 } })).toBe(false);
   });
 });

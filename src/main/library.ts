@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from 'music-metadata';
 import type { LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats, MediaKind } from '../shared/types';
+import { FOLDER_IMAGE_NAMES } from '../core/artwork';
 import { AUDIO_EXT, PLAYLIST_EXT, VIDEO_EXT, mediaKindOf, parsePlaylist } from '../core/playlists';
 import {
   addPaths, movePath, normalizePlaylistName, removeAt, removePaths, uniquePlaylistName, userPlaylistPath,
 } from '../core/collection';
-import { isTrailingVolume } from '../core/fileKind';
+import { isDownloaderArtifact, isTrailingVolume } from '../core/fileKind';
 import { database, transaction } from './db';
 import { settings } from './settings';
 import { probe } from './media/probe';
@@ -37,6 +38,21 @@ const toItem = (r: Row): LibraryItem => ({
   sizeBytes: r.size_bytes, mtimeMs: r.mtime_ms, addedAt: r.added_at, liked: Boolean(r.liked),
 });
 
+/**
+ * Is there a cover image sitting beside the tracks in this folder?
+ *
+ * Memoised per folder: an album of 20 tracks would otherwise stat the same five names 20 times,
+ * and a full library scan hundreds of times over. Cleared at the start of every scan so a cover
+ * added since the last one is noticed.
+ */
+const folderImageCache = new Map<string, boolean>();
+function folderImage(dir: string): boolean {
+  const cached = folderImageCache.get(dir);
+  if (cached !== undefined) return cached;
+  const found = FOLDER_IMAGE_NAMES.some((name) => fs.existsSync(path.join(dir, name)));
+  folderImageCache.set(dir, found);
+  return found;
+}
 class Library extends EventEmitter<{ changed: [LibraryStats] }> {
   private scanning = false;
   private rescanRequested = false;
@@ -139,7 +155,7 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
         }
         if (!e.isFile()) continue;
         // Music and video have their own tabs; part-files and later archive volumes are noise.
-        if (mediaKindOf(full) || e.name.endsWith('.aria2') || e.name.endsWith('.part') || isTrailingVolume(e.name)) continue;
+        if (mediaKindOf(full) || isDownloaderArtifact(e.name) || isTrailingVolume(e.name)) continue;
         try {
           const st = fs.statSync(full);
           out.push({ path: full, name: e.name, folder: path.relative(root, dir).split(path.sep).join(' › '), sizeBytes: st.size, mtimeMs: st.mtimeMs });
@@ -278,6 +294,7 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
       const playlistFiles: string[] = [];
       const folders = new Map<string, { audio: string[]; video: string[] }>();
 
+      folderImageCache.clear();
       for (const root of roots) this.walk(root, root, 0, media, playlistFiles, folders);
 
       const db = database();
@@ -416,7 +433,7 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
           ...base, title: c.title || base.title.replace(/^\d+\s*[-.]\s*/, ''), artist: c.artist ?? c.albumartist ?? null, album: c.album ?? null,
           track_no: c.track?.no ?? null, duration_sec: f.duration ?? null, codec: f.codec ?? f.container ?? null,
           bitrate_kbps: f.bitrate ? Math.round(f.bitrate / 1000) : f.duration ? Math.round((st.size * 8) / f.duration / 1000) : null, sample_rate: f.sampleRate ?? null, bit_depth: f.bitsPerSample ?? null,
-          lossless: f.lossless ? 1 : 0, has_artwork: c.picture?.length ? 1 : 0,
+          lossless: f.lossless ? 1 : 0, has_artwork: c.picture?.length || folderImage(path.dirname(file)) ? 1 : 0,
         };
       }
       const p = await probe(file);

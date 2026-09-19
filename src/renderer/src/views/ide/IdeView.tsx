@@ -21,11 +21,14 @@ import { useApp } from '@/stores/app';
 import { Button, EmptyState } from '@/components/ui';
 import { TitleBar } from '@/components/Shell';
 import { loadMonaco, refreshTheme, type CodeEditor } from './monaco';
+import { loadThemes, notifyColorModeChanged, setSelectedTheme } from '@/lib/editorTheme';
 import { EditorGroupView, modelUri, type EditorOptions, type Reveal } from './EditorGroup';
 import { SourceControl } from './SourceControl';
 import { DiffPane, type DiffTarget } from './DiffPane';
 import { CommandPalette, QuickOpen, SearchPanel, type Command } from './Palette';
 import { TerminalPanel } from './TerminalPanel';
+import { ExplorerMenu, type MenuTarget } from './ExplorerMenu';
+import { RunPanel } from './RunPanel';
 import { LayoutToggles, OpenEditors, PartHeader, Sash, ViewSwitcher } from './IdeChrome';
 import {
   dragPart, normalizeLayout, resizeBetween, selectActivity, setVisible, togglePanelMaximized, togglePart,
@@ -40,7 +43,9 @@ interface Loaded {
 
 export function IdeView() {
   const toast = useApp((s) => s.toast);
+  const setView = useApp((s) => s.setView);
   const colorMode = useApp((s) => s.settings?.appearance.colorMode);
+  const editorThemeId = useApp((s) => s.settings?.appearance.editorTheme);
   const ide = useApp((s) => s.settings?.ide);
   const updateSettings = useApp((s) => s.updateSettings);
 
@@ -61,6 +66,11 @@ export function IdeView() {
   const [busy, setBusy] = useState(false);
   /** Which overlay is up, if any — only one at a time. */
   const [overlay, setOverlay] = useState<'none' | 'quick-open' | 'commands'>('none');
+  const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
+  // The file tree loads each level itself, so a create/rename/delete has to tell every level to
+  // reload. A counter is enough and avoids threading a refresh callback through the recursion.
+  const [treeVersion, setTreeVersion] = useState(0);
+  const [panelTab, setPanelTab] = useState<'terminal' | 'run'>('terminal');
   /** Which sidebars/panel are open and how big — see @core/ideLayout for every rule. */
   const [layout, setLayout] = useState<IdeLayout>(() => normalizeLayout(ide?.layout));
   const layoutSeeded = useRef(ide !== undefined);
@@ -135,12 +145,23 @@ export function IdeView() {
     tabSize: ide?.tabSize ?? 2,
   }), [ide?.fontSize, ide?.wordWrap, ide?.minimap, ide?.tabSize]);
 
-  useEffect(() => { refreshTheme(); }, [colorMode]);
+  // Imported themes live on disk in main, so fetch the list once the view opens.
+  useEffect(() => { void loadThemes().then(() => refreshTheme()); }, []);
+
+  useEffect(() => {
+    setSelectedTheme(editorThemeId || 'auto');
+    refreshTheme();
+  }, [editorThemeId]);
+
+  useEffect(() => { notifyColorModeChanged(); refreshTheme(); }, [colorMode]);
 
   // Colour mode "system" flips the theme without the setting changing, so also follow the attribute
   // App.tsx actually sets — the terminal panel does the same.
   useEffect(() => {
-    const observer = new MutationObserver(() => requestAnimationFrame(() => refreshTheme()));
+    const observer = new MutationObserver(() => requestAnimationFrame(() => {
+      notifyColorModeChanged();
+      refreshTheme();
+    }));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);
@@ -362,6 +383,25 @@ export function IdeView() {
     return () => window.removeEventListener('keydown', onKey);
   }, [saveFile, showView, toggle, splitEditor]);
 
+  // The panel's own tab strip, rendered by whichever panel body is showing.
+  const panelTabs = (
+    <div className="flex shrink-0 items-center gap-0.5" role="tablist" aria-label="Panel">
+      {(['terminal', 'run'] as const).map((id) => (
+        <button
+          key={id}
+          role="tab"
+          aria-selected={panelTab === id}
+          onClick={() => setPanelTab(id)}
+          className={cn('rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase',
+            panelTab === id ? 'text-ink' : 'text-ink-3 hover:text-ink')}
+        >
+          {id === 'terminal' ? 'Terminal' : 'Run'}
+        </button>
+      ))}
+      <span className="mx-1 h-4 w-px bg-line" aria-hidden />
+    </div>
+  );
+
   const unsaved = allDirty(groups);
 
   /** Sash between editor group `index` and `index + 1`: moves space between those two only. */
@@ -416,7 +456,7 @@ export function IdeView() {
         </button>
       </PartHeader>
       <div className="min-h-0 flex-1 overflow-auto py-1">
-        <Tree path="" depth={0} activePath={tabs.active} onOpen={openFile} />
+        <Tree path="" depth={0} activePath={tabs.active} onOpen={openFile} version={treeVersion} onContextMenu={setMenuTarget} />
       </div>
     </>
   );
@@ -498,14 +538,44 @@ export function IdeView() {
                   onDoubleClick={() => commitLayout(togglePanelMaximized)} />
               )}
               <div style={panelMax ? undefined : { height: layout.panel.size }} className={cn('flex min-h-0 flex-col border-t border-line', panelMax ? 'flex-1' : 'shrink-0')}>
-                <TerminalPanel
-                  maximized={panelMax}
-                  onToggleMaximize={() => commitLayout(togglePanelMaximized)}
-                  onClose={() => commitLayout((l) => setVisible(l, 'panel', false))}
-                />
+                {panelTab === 'terminal' ? (
+                  <TerminalPanel
+                    tabs={panelTabs}
+                    maximized={panelMax}
+                    onToggleMaximize={() => commitLayout(togglePanelMaximized)}
+                    onClose={() => commitLayout((l) => setVisible(l, 'panel', false))}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-0 flex-col bg-panel">
+                    <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
+                      {panelTabs}
+                      <button onClick={() => commitLayout(togglePanelMaximized)} aria-label={panelMax ? 'Restore panel size' : 'Maximize panel'}
+                        className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-ink-3 hover:bg-hover hover:text-ink">
+                        {panelMax ? 'Restore' : 'Maximize'}
+                      </button>
+                      <button onClick={() => commitLayout((l) => setVisible(l, 'panel', false))} aria-label="Hide panel (Ctrl+J)"
+                        className="rounded px-1.5 py-0.5 text-[11px] text-ink-3 hover:bg-hover hover:text-ink">
+                        Hide
+                      </button>
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <RunPanel
+                        onOpenUrl={(url) => { void call('browser:go', { url }); setView('browser'); }}
+                        onRan={() => setPanelTab('terminal')}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
+
+          <ExplorerMenu
+            target={menuTarget}
+            onClose={() => setMenuTarget(null)}
+            onChanged={() => setTreeVersion((v) => v + 1)}
+            onOpenPath={(p) => void openFile(p, false)}
+          />
 
           {overlay === 'quick-open' && <QuickOpen onOpen={(p) => void openFile(p, false)} onClose={() => setOverlay('none')} />}
           {overlay === 'commands' && <CommandPalette commands={commands} onClose={() => setOverlay('none')} />}
@@ -555,8 +625,11 @@ export function IdeView() {
 }
 
 /** One lazily-expanded level of the folder tree. Children are fetched only when a folder is opened. */
-function Tree({ path, depth, activePath, onOpen }: {
+function Tree({ path, depth, activePath, onOpen, version, onContextMenu }: {
   path: string; depth: number; activePath: string | null; onOpen: (p: string, preview?: boolean) => void;
+  /** Bumped by the caller after a create/rename/delete so every open level reloads. */
+  version: number;
+  onContextMenu: (target: MenuTarget) => void;
 }) {
   const toast = useApp((s) => s.toast);
   const [entries, setEntries] = useState<TreeEntry[] | null>(null);
@@ -568,7 +641,7 @@ function Tree({ path, depth, activePath, onOpen }: {
       .then((list) => { if (live) setEntries(list); })
       .catch((err) => { if (live) { setEntries([]); toast(errorMessage(err), 'error'); } });
     return () => { live = false; };
-  }, [path, toast]);
+  }, [path, toast, version]);
 
   if (!entries) return <p className="px-3 py-1 text-[12px] text-ink-3">Loading…</p>;
 
@@ -592,6 +665,10 @@ function Tree({ path, depth, activePath, onOpen }: {
                 }
               }}
               onDoubleClick={() => e.kind === 'file' && onOpen(e.path, false)}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                onContextMenu({ path: e.path, name: e.name, kind: e.kind, x: ev.clientX, y: ev.clientY });
+              }}
               className={cn('flex w-full items-center gap-1 py-[3px] pr-2 text-left text-[13px] hover:bg-hover',
                 activePath === e.path && 'bg-accent-soft text-accent')}
               style={{ paddingLeft: `${8 + depth * 12}px` }}
@@ -603,7 +680,7 @@ function Tree({ path, depth, activePath, onOpen }: {
               <span className="truncate">{e.name}</span>
             </button>
             {e.kind === 'directory' && expanded && (
-              <Tree path={e.path} depth={depth + 1} activePath={activePath} onOpen={onOpen} />
+              <Tree path={e.path} depth={depth + 1} activePath={activePath} onOpen={onOpen} version={version} onContextMenu={onContextMenu} />
             )}
           </li>
         );

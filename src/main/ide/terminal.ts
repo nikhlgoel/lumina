@@ -15,6 +15,8 @@
 import { spawn as ptySpawn, type IPty } from '@lydell/node-pty';
 import { existsSync } from 'node:fs';
 import { pickShell, shellCandidates, type ShellChoice } from '../../core/ide';
+import { detectUrls, type DetectedUrl } from '../../core/tasks';
+import { bundledBinDir, updatedBinDir } from '../paths';
 import { workspaceRoot } from './workspace';
 import { settings } from '../settings';
 import { logger } from '../log';
@@ -31,9 +33,16 @@ export interface TerminalSession {
   cwd: string;
 }
 
+export interface TerminalPorts {
+  id: string;
+  urls: DetectedUrl[];
+}
+
 interface Live {
   pty: IPty;
   session: TerminalSession;
+  /** Server URLs seen in this session's output, so the Ports list can offer them. */
+  urls: DetectedUrl[];
 }
 
 const sessions = new Map<string, Live>();
@@ -41,12 +50,30 @@ let counter = 0;
 
 type DataListener = (id: string, chunk: string) => void;
 type ExitListener = (id: string, exitCode: number) => void;
+type PortsListener = (ports: TerminalPorts) => void;
 let onData: DataListener = () => {};
 let onExit: ExitListener = () => {};
+let onPorts: PortsListener = () => {};
 
-export function setTerminalListeners(data: DataListener, exit: ExitListener) {
+export function setTerminalListeners(data: DataListener, exit: ExitListener, ports: PortsListener = () => {}) {
   onData = data;
   onExit = exit;
+  onPorts = ports;
+}
+
+/**
+ * Lumina already ships ffmpeg, yt-dlp, aria2c and whisper-cli. Putting them on the terminal's PATH
+ * means a project opened here can use them with no install and no version drift. They are APPENDED,
+ * never prepended: a tool the user installed themselves must keep winning.
+ */
+function envWithBundledTools(extra?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = { ...process.env as Record<string, string>, ...(extra ?? {}) };
+  const sep = process.platform === 'win32' ? ';' : ':';
+  // Windows environment keys are case-insensitive but the object's are not, so find the real one.
+  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const dirs = [bundledBinDir(), updatedBinDir()].filter(Boolean);
+  env[pathKey] = [env[pathKey] ?? '', ...dirs].filter(Boolean).join(sep);
+  return env;
 }
 
 /** Which shells actually exist on this machine — the terminal's "+" menu is built from this. */
@@ -63,13 +90,32 @@ export function listTerminals(): TerminalSession[] {
   return [...sessions.values()].map((l) => l.session);
 }
 
-export function startTerminal(shellId?: string): TerminalSession {
+export interface StartOptions {
+  shellId?: string;
+  /** Typed into the shell once it is up, exactly as if the user had typed it. */
+  command?: string;
+  /** What the tab is called. Defaults to the shell's name. */
+  label?: string;
+  /**
+   * Skip WSL and use a native shell.
+   *
+   * Running a project task matters here: the lockfile, `node_modules/.bin` and the toolchain belong
+   * to the host OS, so `npm run dev` inside WSL either cannot find npm at all or runs a different
+   * one against a `/mnt/...` path. A terminal the user opens themselves still honours their choice.
+   */
+  native?: boolean;
+}
+
+export function startTerminal(options: StartOptions = {}): TerminalSession {
+  const { shellId, command, label, native } = options;
   const cwd = workspaceRoot();
   if (!cwd) throw new Error('Open a folder before starting a terminal.');
   if (sessions.size >= MAX_SESSIONS) throw new Error(`That is already ${MAX_SESSIONS} terminals — close one first.`);
 
-  const available = new Set(availableShells().map((s) => s.id));
-  const preferred = shellId || settings.get().ide.shell || undefined;
+  const usable = availableShells().filter((s) => !(native && s.id === 'wsl'));
+  const available = new Set(usable.map((s) => s.id));
+  const stored = settings.get().ide.shell;
+  const preferred = shellId || (native && stored === 'wsl' ? undefined : stored) || undefined;
   const choice = pickShell(process.platform, available, preferred);
   if (!choice) throw new Error('No usable shell was found on this computer.');
 
@@ -81,25 +127,51 @@ export function startTerminal(shellId?: string): TerminalSession {
       cols: 80,
       rows: 24,
       cwd,
-      env: process.env as Record<string, string>,
+      env: envWithBundledTools(),
     });
   } catch (err) {
     throw new Error(`${choice.label} could not start: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const session: TerminalSession = { id, shellId: choice.id, label: choice.label, cwd };
-  sessions.set(id, { pty, session });
+  const session: TerminalSession = { id, shellId: choice.id, label: label || choice.label, cwd };
+  const live: Live = { pty, session, urls: [] };
+  sessions.set(id, live);
 
-  pty.onData((chunk) => onData(id, chunk));
+  pty.onData((chunk) => {
+    onData(id, chunk);
+    // Watch for a dev server announcing itself, so the Ports list can offer to open it.
+    const found = detectUrls(chunk);
+    if (found.length === 0) return;
+    let added = false;
+    for (const url of found) {
+      if (live.urls.some((u) => u.url === url.url)) continue;
+      live.urls.push(url);
+      added = true;
+    }
+    if (live.urls.length > 20) live.urls = live.urls.slice(live.urls.length - 20);
+    if (added) onPorts({ id, urls: [...live.urls] });
+  });
   pty.onExit(({ exitCode }) => {
     sessions.delete(id);
+    onPorts({ id, urls: [] });
     log.info(`Terminal ${id} (${choice.label}) exited with ${exitCode}`);
     onExit(id, exitCode);
   });
 
-  log.info(`Terminal ${id} started: ${choice.label} in ${cwd}`);
+  if (command) {
+    // A tiny delay: conpty drops input written before the shell has finished starting.
+    setTimeout(() => {
+      if (sessions.get(id)?.pty.write) sessions.get(id)!.pty.write(`${command}` + String.fromCharCode(13));
+    }, 400);
+  }
+
+  log.info(`Terminal ${id} started: ${choice.label} in ${cwd}${command ? ` running "${command}"` : ''}`);
   return session;
 }
+
+/** Every server URL currently known, per session. */
+export const listPorts = (): TerminalPorts[] =>
+  [...sessions.values()].filter((l) => l.urls.length > 0).map((l) => ({ id: l.session.id, urls: [...l.urls] }));
 
 /** Keystrokes from the user's terminal tab. Passed through byte for byte — never interpreted. */
 export function writeTerminal(id: string, data: string) {

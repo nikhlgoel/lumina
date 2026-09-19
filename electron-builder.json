@@ -14,7 +14,6 @@
     "node_modules/@lydell/**",
     "!**/*.map"
   ],
-  "//asarUnpack": "node-pty's prebuilt .node binaries cannot be loaded from inside an asar archive.",
   "asarUnpack": ["node_modules/@lydell/**"],
   "extraResources": [
     { "from": "resources/bin/${platform}-${arch}", "to": "bin", "filter": ["**/*"] },
@@ -54,10 +53,18 @@
     "artifactName": "Lumina-${version}-${arch}.AppImage"
   },
   "win": {
-    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "target": [
+      { "target": "nsis", "arch": ["x64"] },
+      { "target": "portable", "arch": ["x64"] }
+    ],
     "icon": "assets/icons/icon.ico",
     "legalTrademarks": "Lumina",
     "requestedExecutionLevel": "asInvoker"
+  },
+  "portable": {
+    "artifactName": "Lumina Portable_v${version}.exe",
+    "unpackDirName": "Lumina",
+    "requestExecutionLevel": "user"
   },
   "nsis": {
     "oneClick": false,
@@ -74,7 +81,7 @@
     "installerHeader": "build/installerHeader.bmp",
     "runAfterFinish": true,
     "deleteAppDataOnUninstall": false,
-    "artifactName": "Lumina-Setup-${version}-windows-x64.exe"
+    "artifactName": "Lumina Setup_v${version}.exe"
   },
   "mac": {
     "target": ["dmg"],

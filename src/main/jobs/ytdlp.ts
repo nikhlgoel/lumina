@@ -139,7 +139,18 @@ export const ytdlpRunner: Runner = (ctx) => {
         streamIndex = 0;
         lastFraction = 0;
         if (itemCount > 1) {
-          ctx.progress({ item: { index: Math.min(itemsSeen, itemCount), count: itemCount, title: ev.title }, stage: ev.title }, 'running');
+          // `percent` and the byte counts are sent here, not only on download ticks. Starting an
+          // item IS progress, and an item that reports no ticks of its own (already in the
+          // archive, postprocess-only, a format that reports nothing) would otherwise leave the
+          // bar motionless. The byte counts belong to the previous file and are cleared, so they
+          // cannot be read as a total that keeps resetting.
+          ctx.progress({
+            item: { index: Math.min(itemsSeen, itemCount), count: itemCount, title: ev.title },
+            stage: ev.title,
+            percent: overall(0),
+            downloadedBytes: null,
+            totalBytes: null,
+          }, 'running');
         }
         break;
       }

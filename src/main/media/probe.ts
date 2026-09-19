@@ -1,6 +1,7 @@
 import type { CompatReport } from '../../shared/types';
 import { runTool } from '../process';
 import { tools } from '../tools';
+import { TV_PROFILE, isTvSafe, tvSummary, type MediaFacts } from '../../core/tvSafe';
 
 export interface ProbeResult {
   durationSec: number | null;
@@ -71,34 +72,32 @@ export async function probe(file: string): Promise<ProbeResult> {
 }
 
 /** Whether a file plays on typical TVs and older devices: H.264 8-bit ≤1080p in MP4 with AAC/MP3 audio. */
-export function compatibility(p: ProbeResult, maxHeight = 1080): CompatReport {
-  if (!p.video && p.audio) {
-    const kbps = p.audio.bitrateKbps ?? p.bitrateKbps;
-    const lossless = ['flac', 'alac', 'pcm_s16le', 'pcm_s24le'].includes(p.audio.codec);
-    return {
-      tvSafe: ['aac', 'mp3'].includes(p.audio.codec),
-      summary: `${p.audio.codec.toUpperCase()}${lossless ? ' · lossless' : kbps ? ` · ${kbps} kbps` : ''}${p.audio.sampleRate ? ` · ${(p.audio.sampleRate / 1000).toFixed(1)} kHz` : ''}`,
-      audio: { codec: p.audio.codec, bitrateKbps: kbps, sampleRate: p.audio.sampleRate },
-    };
-  }
-  const problems: string[] = [];
-  if (p.video) {
-    if (p.video.codec !== 'h264') problems.push(`${p.video.codec.toUpperCase()} video`);
-    if (p.video.height > maxHeight) problems.push(`${p.video.height}p`);
-    if (p.video.fps > 60) problems.push(`${Math.round(p.video.fps)} fps`);
-    if (p.video.hdr || (p.video.pixFmt ?? '').includes('10')) problems.push('10-bit/HDR');
-  }
-  if (p.audio && !['aac', 'mp3', 'ac3', 'eac3'].includes(p.audio.codec)) problems.push(`${p.audio.codec.toUpperCase()} audio`);
-  if (p.video && !p.formatName.includes('mp4')) problems.push('not MP4');
-
-  const summary = p.video
-    ? `${p.video.codec.toUpperCase()} ${p.video.height}p${Math.round(p.video.fps)}${p.audio ? ` · ${p.audio.codec.toUpperCase()}` : ''}`
-    : p.audio ? `${p.audio.codec.toUpperCase()}${p.audio.bitrateKbps ? ` ${p.audio.bitrateKbps} kbps` : ''}` : 'Unknown';
-
+/** Facts for @core/tvSafe, which owns the rules about what a television can decode. */
+export function factsOf(p: ProbeResult): MediaFacts {
   return {
-    tvSafe: problems.length === 0,
-    summary: problems.length ? `${summary} — needs conversion for TVs (${problems.join(', ')})` : summary,
+    container: p.formatName,
+    video: p.video
+      ? { codec: p.video.codec, width: p.video.width, height: p.video.height, fps: p.video.fps, pixFmt: p.video.pixFmt, hdr: p.video.hdr }
+      : null,
+    audio: p.audio
+      ? { codec: p.audio.codec, channels: p.audio.channels, bitrateKbps: p.audio.bitrateKbps ?? p.bitrateKbps, sampleRate: p.audio.sampleRate }
+      : null,
+  };
+}
+
+/**
+ * Is this playable on a TV, and what should we tell the user?
+ *
+ * The judgement itself lives in @core/tvSafe so the USB export applies exactly the same rules as
+ * this label does — they used to be two different opinions.
+ */
+export function compatibility(p: ProbeResult, maxHeight = TV_PROFILE.maxHeight): CompatReport {
+  const facts = factsOf(p);
+  const profile = maxHeight === TV_PROFILE.maxHeight ? TV_PROFILE : { ...TV_PROFILE, maxHeight };
+  return {
+    tvSafe: isTvSafe(facts, profile),
+    summary: tvSummary(facts, profile),
     video: p.video ? { codec: p.video.codec, width: p.video.width, height: p.video.height, fps: p.video.fps } : undefined,
-    audio: p.audio ? { codec: p.audio.codec, bitrateKbps: p.audio.bitrateKbps, sampleRate: p.audio.sampleRate } : undefined,
+    audio: p.audio ? { codec: p.audio.codec, bitrateKbps: p.audio.bitrateKbps ?? p.bitrateKbps, sampleRate: p.audio.sampleRate } : undefined,
   };
 }

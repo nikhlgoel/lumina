@@ -86,7 +86,13 @@
 .p-sheet[data-closed] { transform: translateX(105%); }
 
 /* Video */
-.p-video video { width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 14px; }
+/* Video is edge to edge, so no rounded corners and the whole surface is black, not the app's tint. */
+.p-video video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.player[data-video] { background: #000; }
+/* Scrims so the controls stay readable over a bright frame without dimming the picture itself. */
+.player[data-video] .p-top { background: linear-gradient(to bottom, rgb(0 0 0 / 0.55), transparent); padding-bottom: 18px; }
+.player[data-video] .p-dock { background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent); padding-top: 22px; }
+.player[data-video] .p-top, .player[data-video] .p-dock { transition: opacity .35s var(--ease), transform .35s var(--ease); }
 .p-video { --cue-base: clamp(18px, 2.6vh, 34px); }
 .player[data-lyrics-size="small"] .p-line { font-size: clamp(20px, 3vw, 36px); }
 .player[data-lyrics-size="large"] .p-line { font-size: clamp(32px, 5.2vw, 64px); }

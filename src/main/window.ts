@@ -94,6 +94,11 @@ export function createWindow(opts: { show: boolean; mode: AppMode; offscreen?: b
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
+    // The window must never be navigated away from the app — that is what this guard is for. But it
+    // used to block *everything* in a packaged build, where there is no dev-server URL to match
+    // against, so the page could not even reload itself: `location.reload()` was silently swallowed
+    // and the window sat there. Reloading the page it is already on is not navigating away.
+    if (url === win?.webContents.getURL()) return;
     const devUrl = process.env.VITE_DEV_SERVER_URL;
     if (devUrl && url.startsWith(devUrl)) return;
     event.preventDefault();

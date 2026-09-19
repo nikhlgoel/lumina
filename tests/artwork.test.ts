@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ART_BUCKETS, ART_MAX, artBucket, artCacheName, bucketForDisplay, fitWithin, withArtSize } from '@core/artwork';
+import { ART_BUCKETS, ART_MAX, artBucket, artCacheName, bucketForDisplay, fitWithin, videoThumbnailAttempts, withArtSize } from '@core/artwork';
 
 /** Small deterministic PRNG (mulberry32) so property tests are reproducible run to run. */
 function rng(seed: number) {
@@ -171,5 +171,55 @@ describe('withArtSize', () => {
     expect(withArtSize(null, 36)).toBeNull();
     expect(withArtSize(undefined, 36)).toBeNull();
     expect(withArtSize('', 36)).toBeNull();
+  });
+});
+
+describe('videoThumbnailAttempts — the Library showed gradients instead of thumbnails', () => {
+  const base = { input: 'C:/Videos/Welcome to C++.mp4', output: 'C:/cache/abc.jpg', durationSec: 424, hasArtwork: true };
+
+  it('selects the attached cover by DISPOSITION, not by metadata tag', () => {
+    const [cover] = videoThumbnailAttempts(base);
+    const map = cover![cover!.indexOf('-map') + 1];
+    expect(map).toBe('0:v:disp:attached_pic');
+  });
+
+  it('never uses the metadata form again — it matches no stream and ffmpeg exits non-zero', () => {
+    // `m:` selects by metadata tag, so `m:disposition:attached_pic` asks for a tag called
+    // "disposition". Every video with an embedded thumbnail silently lost its artwork to this.
+    for (const args of videoThumbnailAttempts(base)) {
+      expect(args.join(' ')).not.toContain('m:disposition');
+    }
+  });
+
+  it('always offers a frame grab as well, so a bad cover still yields a picture', () => {
+    const attempts = videoThumbnailAttempts(base);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.join(' ')).toContain('-ss');
+  });
+
+  it('skips the cover attempt entirely when there is no embedded artwork', () => {
+    const attempts = videoThumbnailAttempts({ ...base, hasArtwork: false });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.join(' ')).not.toContain('attached_pic');
+  });
+
+  it('grabs a tenth of the way in, away from title cards and fades from black', () => {
+    const [frame] = videoThumbnailAttempts({ ...base, hasArtwork: false });
+    expect(Number(frame![frame!.indexOf('-ss') + 1])).toBeCloseTo(42.4, 6);
+  });
+
+  it('never seeks to zero, whatever the duration claims', () => {
+    for (const durationSec of [null, 0, -1, 1, Number.NaN]) {
+      const [frame] = videoThumbnailAttempts({ ...base, hasArtwork: false, durationSec });
+      const at = Number(frame![frame!.indexOf('-ss') + 1]);
+      expect(at, String(durationSec)).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('passes the paths through untouched, spaces and all', () => {
+    for (const args of videoThumbnailAttempts(base)) {
+      expect(args).toContain(base.input);
+      expect(args[args.length - 1]).toBe(base.output);
+    }
   });
 });

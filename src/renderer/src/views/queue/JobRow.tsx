@@ -3,6 +3,7 @@ import { ChevronDown, CircleCheck, CirclePause, FolderOpen, ListTree, PackageOpe
 import type { Job } from '@shared/types';
 import { formatBytes, formatEta, formatSpeed } from '@core/format';
 import { mediaKindOf } from '@core/mediaKind';
+import { progressIndeterminate } from '@core/progress';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -68,11 +69,21 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
         ? installer ? 'Unpacked and verified · ready to install' : 'Unpacked and verified'
         : job.compat?.summary ?? STATUS_LABEL[job.status];
 
+  // `percent` is already the whole job's progress: the engine folds the playlist position into it,
+  // so it is used as given rather than recomputed from the current file here.
+  const percent = Math.max(0, Math.min(100, p.percent));
+  const multi = Boolean(p.item && p.item.count > 1);
+
   const meta: string[] = [];
   if (job.status === 'running' && p.item) meta.push(`${p.item.index} of ${p.item.count}`);
   if (job.status === 'running' && p.speedBps) meta.push(formatSpeed(p.speedBps));
   if (job.status === 'running' && p.etaSec != null) meta.push(`${formatEta(p.etaSec)} left`);
-  if (job.status === 'running' && p.totalBytes) meta.push(`${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`);
+  if (job.status === 'running' && p.totalBytes) {
+    // On a playlist the byte counts belong to the file in hand, so they are labelled as such
+    // rather than looking like a total that keeps resetting.
+    const bytes = `${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`;
+    meta.push(multi ? `this file ${bytes}` : bytes);
+  }
 
   // A queued download waits its turn and starts on its own when a slot frees — say so, so there's
   // no need to babysit it or pause others by hand.
@@ -104,11 +115,11 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
             {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
           </div>
           {(active || job.status === 'paused' || job.status === 'queued') && (
-            <ProgressBar className="mt-2" value={p.percent} tone={tone} indeterminate={active && p.percent === 0} />
+            <ProgressBar className="mt-2" value={percent} tone={tone} indeterminate={active && progressIndeterminate(p)} />
           )}
         </div>
 
-        {!compact && active && <span className="w-11 text-right text-sm font-semibold text-ink-2 tabular">{Math.floor(p.percent)}%</span>}
+        {!compact && active && <span className="w-11 text-right text-sm font-semibold text-ink-2 tabular">{Math.floor(percent)}%</span>}
 
         <div className={cn('flex items-center gap-0.5', compact && 'opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100')}>
           {playable && <IconButton label="Play" onClick={play}><Play /></IconButton>}

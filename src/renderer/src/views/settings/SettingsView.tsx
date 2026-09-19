@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Captions, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Plug, Puzzle, RefreshCw, Search, Settings2, Shield, Sparkles, Usb, UserRound, Wrench, X,
+  Captions, Cast, Code2, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Plug, Puzzle, RefreshCw, Search, Settings2, Shield, Sparkles, Usb, UserRound, Wrench, X,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -9,8 +9,10 @@ import { AppearanceSection, GeneralSection, PlayerSection } from './sections/app
 import { DownloadsSection, FormatsSection, SubtitlesSection, TorrentsSection } from './sections/downloading';
 import { AccountsSection, ExtensionSection, NetworkSection } from './sections/connections';
 import { SyncSection } from './sections/sync';
+import { SharingSection } from './sections/sharing';
 import { AiSection } from './sections/ai';
 import { McpSection } from './sections/mcp';
+import { EditorThemeSection } from './sections/editorTheme';
 import { PortableSection } from './sections/portable';
 import { AdvancedSection, PrivacySection, StorageSection } from './sections/system';
 import type { SectionProps } from './controls';
@@ -36,6 +38,9 @@ const SECTIONS: SectionDef[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette />, group: 'App', component: AppearanceSection, index: [
     ['accent', 'Accent color', 'theme colour'], ['uiScale', 'Interface size', 'zoom scale font'], ['density', 'Density', 'compact'],
     ['sidebarStats', 'Library counts in the sidebar'], ['motion', 'Reduce motion', 'animations transitions'],
+  ] },
+  { id: 'editorTheme', label: 'Editor theme', icon: <Code2 />, group: 'App', component: EditorThemeSection, index: [
+    ['editorThemeAuto', 'Editor theme', 'code editor terminal colours colors syntax highlighting vs code vscode theme import vsix monaco xterm'],
   ] },
   { id: 'player', label: 'Player', icon: <Music2 />, group: 'App', component: PlayerSection, index: [
     ['effects', 'Background motion', 'aurora vinyl pocket theme'], ['hints', 'Keyboard hints'], ['openOnPlay', 'Open the full player when playing'],
@@ -88,6 +93,10 @@ const SECTIONS: SectionDef[] = [
   ] },
   { id: 'network', label: 'Network', icon: <Globe />, group: 'Connections', component: NetworkSection, index: [
     ['proxy', 'Proxy', 'socks vpn'], ['userAgent', 'Custom user agent'], ['ipv4', 'Use IPv4 only'],
+  ] },
+  { id: 'sharing', label: 'Share to TV', icon: <Cast />, group: 'Connections', component: SharingSection, index: [
+    ['dlnaEnabled', 'Share my library on this network', 'dlna upnp tv television cast stream media server share'],
+    ['dlnaName', 'Name shown on the TV'], ['dlnaPort', 'Port'], ['dlnaAddress', 'Address'],
   ] },
   { id: 'sync', label: 'Sync', icon: <RefreshCw />, group: 'Connections', component: SyncSection, index: [
     ['createChain', 'Start a sync chain', 'devices phone android luminabr brave chain'], ['joinChain', 'Join a sync chain', 'recovery code pair'],

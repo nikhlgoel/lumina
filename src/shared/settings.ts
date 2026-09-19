@@ -47,6 +47,12 @@ export const settingsSchema = z.object({
     density: z.enum(['comfortable', 'compact']).catch('comfortable'),
     reducedMotion: z.enum(['system', 'on', 'off']).catch('system'),
     showSidebarStats: z.boolean().catch(true),
+    /**
+     * Which editor/terminal theme the IDE uses. 'auto' follows the app's light/dark mode; any other
+     * value is a built-in id or an imported theme's id. An id that no longer exists falls back to
+     * 'auto' at read time rather than leaving the editor unstyled.
+     */
+    editorTheme: z.string().max(80).catch('auto'),
   }),
 
   downloads: section({
@@ -129,6 +135,14 @@ export const settingsSchema = z.object({
     usbRouting: z.boolean().catch(false),
     /** The drive the user picked for routing / export, remembered by mount root. */
     usbDrive: z.string().max(1024).catch(''),
+    /**
+     * What to do when a file won't play on a television.
+     *
+     * 'safe' converts it to H.264/AAC MP4 while copying to the drive — slower, but it means the TV
+     * shows the film instead of "unsupported file". 'original' copies every file untouched, which
+     * is right when the drive is for another computer or a modern set.
+     */
+    usbTvCompatibility: z.enum(['safe', 'original']).catch('safe'),
   }),
 
   library: section({
@@ -253,6 +267,20 @@ export const settingsSchema = z.object({
     lastAppCheck: z.number().catch(0),
     /** A version the user dismissed; the launch check stops offering it. */
     skippedVersion: z.string().max(60).catch(''),
+  }),
+
+  /**
+   * Sharing the library to a TV over the network (DLNA/UPnP).
+   *
+   * OFF by default and deliberately so: DLNA has no authentication whatsoever, so anyone who can
+   * reach the port can browse and play everything. That is the protocol's design, not a gap here.
+   */
+  sharing: section({
+    dlnaEnabled: z.boolean().catch(false),
+    /** 8200 is the conventional media-server port and is rarely taken. */
+    dlnaPort: clampInt(1024, 65535, 8200),
+    /** What the TV shows in its source list. Empty means "Lumina on <this computer>". */
+    dlnaName: z.string().max(60).catch(''),
   }),
 
   sync: section({

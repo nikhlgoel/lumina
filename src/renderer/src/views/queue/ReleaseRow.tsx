@@ -86,7 +86,7 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
               {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
             </div>
             {(active || s.status === 'queued' || s.status === 'paused') && (
-              <ProgressBar className="mt-2" value={s.percent} tone={tone} indeterminate={active && s.percent === 0} />
+              <ProgressBar className="mt-2" value={s.percent} tone={tone} indeterminate={active && s.percent === 0 && !s.downloadedBytes} />
             )}
           </div>
 

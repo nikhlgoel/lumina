@@ -144,3 +144,22 @@ export function aria2Progress(s: Aria2Status) {
     etaSec: total && speed ? Math.round((total - done) / speed) : null,
   };
 }
+
+/* ---------- What the person actually sees ---------- */
+
+/**
+ * Is there genuinely nothing to show yet?
+ *
+ * Reserved for the moments before any figure exists — resolving a URL, contacting a tracker. Once a
+ * percentage, a byte count or a position in a playlist is known, a real bar is always more honest
+ * than a looping one, which reads as "stuck" however fast it slides.
+ */
+export function progressIndeterminate(p: {
+  percent: number;
+  downloadedBytes?: number | null;
+  item?: { index: number; count: number } | undefined;
+}): boolean {
+  if (Number.isFinite(p.percent) && p.percent > 0) return false;
+  if (p.downloadedBytes != null && p.downloadedBytes > 0) return false;
+  return !p.item;
+}

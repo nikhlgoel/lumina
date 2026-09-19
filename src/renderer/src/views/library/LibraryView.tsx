@@ -279,8 +279,8 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
         <article key={item.id} className="group">
           <button onClick={() => { void playIds(items.map((x) => x.id), i); setMode('player'); }} className="relative block w-full overflow-hidden rounded-xl border border-line bg-sunken shadow-sm transition-transform duration-200 hover:-translate-y-0.5" aria-label={`Play ${item.title}`}>
             <Artwork src={art(item.id, 256)} seed={item.title} kind="video" className="aspect-video w-full" rounded="rounded-none" />
-            <span className="absolute right-2 bottom-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white tabular">{formatDuration(item.durationSec)}</span>
-            {qualityTag(item) && <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white">{qualityTag(item)}</span>}
+            <span className="absolute right-2 bottom-2 rounded-md bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 tabular">{formatDuration(item.durationSec)}</span>
+            {qualityTag(item) && <span className="absolute top-2 left-2 rounded-md bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10">{qualityTag(item)}</span>}
           </button>
           <div className="mt-2 flex items-start gap-1">
             <div className="min-w-0 flex-1">
