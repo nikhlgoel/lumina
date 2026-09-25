@@ -73,6 +73,14 @@ export interface RequestContext {
 
 export interface BuildArgsInput {
   url: string;
+  /**
+   * Which items this process should take, already formatted (e.g. `1-433` or `1,5,9`).
+   *
+   * Set when one playlist is split between several processes so its items download at the same
+   * time rather than one after another - see D19. Overrides the user's own selection, which the
+   * caller has already sharded.
+   */
+  playlistItemsArg?: string;
   /** File with one URL/search per line; used instead of url for matched playlists (e.g. Spotify). */
   batchFile?: string;
   options: DownloadOptions;
@@ -167,7 +175,8 @@ export function buildDownloadArgs(i: BuildArgsInput): string[] {
 
   if (i.isPlaylist) {
     args.push('--yes-playlist');
-    if (o.playlistItems.length) args.push('--playlist-items', o.playlistItems.join(','));
+    const items = i.playlistItemsArg ?? (o.playlistItems.length ? o.playlistItems.join(',') : '');
+    if (items) args.push('--playlist-items', items);
   } else {
     args.push('--no-playlist');
   }

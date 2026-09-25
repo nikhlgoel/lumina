@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import type { BrowserState } from '../shared/types';
 import { logger } from './log';
 import { mainWindow } from './window';
+import { cosmeticCssFor, initShields, shieldEvents, startPage } from './shields';
 
 const log = logger('browser');
 
@@ -79,6 +80,9 @@ function ensure(): WebContentsView {
     webPreferences: { partition: 'persist:browser', sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: true },
   });
   const wc = view.webContents;
+  // The shield goes on the session before anything loads, so the first page is protected too.
+  initShields(wc.session);
+  shieldEvents.on('changed', (status) => mainWindow()?.webContents.send('browser:shield-state', status));
   // Open target=_blank / window.open in the same view rather than spawning stray windows.
   wc.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) void wc.loadURL(url);
@@ -87,6 +91,15 @@ function ensure(): WebContentsView {
   for (const ev of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated'] as const) {
     wc.on(ev as 'did-navigate', () => emitState());
   }
+  // Element hiding is injected as the document starts, not once it has loaded: applying it later
+  // means the ad is drawn first and then vanishes, which is worse than leaving it there.
+  wc.on('did-start-navigation', (_e, url, _inPage, isMainFrame) => {
+    if (isMainFrame) startPage(url);
+  });
+  wc.on('dom-ready', () => {
+    const css = cosmeticCssFor(wc.getURL());
+    if (css) void wc.insertCSS(css).catch(() => undefined);
+  });
   // A download the person starts here is caught and handed to Lumina's engine instead of the browser's.
   wc.session.on('will-download', (event, item) => {
     const chain = item.getURLChain();

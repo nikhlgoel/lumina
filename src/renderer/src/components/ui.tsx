@@ -163,14 +163,14 @@ export function Segmented<T extends string>({ value, onChange, options, label, s
  * `indeterminate` is for when nothing is known yet, and nothing else. A looping bar shown over
  * real progress reads as "stuck", which is the opposite of what it is there to say.
  */
-export function ProgressBar({ value, tone = 'accent', indeterminate, className }: { value: number; tone?: 'accent' | 'success' | 'danger' | 'muted'; indeterminate?: boolean; className?: string }) {
+export function ProgressBar({ value, tone = 'accent', indeterminate, thin, className }: { value: number; tone?: 'accent' | 'success' | 'danger' | 'muted'; indeterminate?: boolean; thin?: boolean; className?: string }) {
   const color = { accent: 'var(--accent)', success: 'var(--success)', danger: 'var(--danger)', muted: 'var(--ink-3)' }[tone];
   const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
   // The ramp is drawn at the width of the whole track and then clipped to `pct` by its parent —
   // which is what ties the visible shade to how far along the bar is rather than to its own length.
   const rampWidth = pct > 0.5 ? (100 / pct) * 100 : 100;
   return (
-    <div className={cn('relative h-1.5 overflow-hidden rounded-full bg-sunken', className)} role="progressbar" aria-valuenow={indeterminate ? undefined : Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <div className={cn('relative overflow-hidden rounded-full bg-sunken', thin ? 'h-1' : 'h-1.5', className)} role="progressbar" aria-valuenow={indeterminate ? undefined : Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       {indeterminate ? (
         <span className="absolute inset-y-0 w-2/5 rounded-full" style={{ background: color, animation: 'indeterminate 1.3s var(--ease) infinite' }} />
       ) : (

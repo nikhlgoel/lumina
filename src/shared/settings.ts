@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { MAX_VOLUME } from '../core/volume';
+import { DEFAULT_PLAYLIST_WORKERS, MAX_PLAYLIST_WORKERS } from '../core/playlistShards';
 
 export const PLAYER_THEMES = ['aurora', 'vinyl', 'pocket'] as const;
 export type PlayerTheme = (typeof PLAYER_THEMES)[number];
@@ -60,6 +62,14 @@ export const settingsSchema = z.object({
     concurrentFragments: clampInt(1, 16, 8),
     /** Use the bundled aria2 (many connections) for plain HTTP stream downloads — the big speed win on fast links. */
     accelerate: z.boolean().catch(true),
+    /**
+     * How many items of one playlist download at the same time.
+     *
+     * Measured rather than guessed: yt-dlp spends about 4.8s per item deciding what to fetch, and
+     * only ~2.5s actually fetching it, so a long playlist leaves the link mostly idle. More sockets
+     * per file were measured to do nothing at all. See D19.
+     */
+    playlistWorkers: clampInt(1, MAX_PLAYLIST_WORKERS, DEFAULT_PLAYLIST_WORKERS),
     speedLimitKbps: clampInt(0, 1_000_000, 0),
     speedLimitSchedule: section({
       enabled: z.boolean().catch(false),
@@ -156,13 +166,24 @@ export const settingsSchema = z.object({
     theme: z.enum(PLAYER_THEMES).catch('aurora'),
     effects: z.enum(['balanced', 'still']).catch('balanced'),
     resumePosition: z.boolean().catch(true),
-    volume: clampNum(0, 1, 0.8),
+    /** 0..2 - above 1 is the boost, applied on the audio graph with a limiter. See D18. */
+    volume: clampNum(0, MAX_VOLUME, 0.8),
     autoOpenLyrics: z.boolean().catch(false),
     lyricsSize: z.enum(['small', 'medium', 'large']).catch('medium'),
     openPlayerOnPlay: z.boolean().catch(false),
     showKeyboardHints: z.boolean().catch(true),
     /** Empty = the system default audio output; otherwise a mediaDevices deviceId. */
     outputDeviceId: z.string().max(255).catch(''),
+    /**
+     * Play every track at one level instead of at whatever level it was mastered at.
+     *
+     * On by default, and it should be: measuring a real library found seven tracks in eight
+     * peaking above full scale — up to +5.6 dBFS — which clips on playback and is heard as harsh
+     * rather than loud. Normalising pulls those peaks back under the ceiling as a side effect.
+     */
+    normalizeLoudness: z.boolean().catch(true),
+    /** The level to match, in LUFS. -14 is what the streaming services settled on. */
+    loudnessTarget: clampNum(-30, -5, -14),
     eqEnabled: z.boolean().catch(false),
     /** A built-in profile id (see core/equalizer) or 'custom'. */
     eqProfile: z.string().max(40).catch('flat'),
@@ -201,6 +222,22 @@ export const settingsSchema = z.object({
     saveDir: z.string().catch(''),
     skipExtensions: z.array(z.string().regex(/^[a-z0-9]{1,10}$/)).max(100).catch([]),
     skipSites: z.array(z.string().max(253)).max(200).catch([]),
+  }),
+
+  /** The in-app browser's shield. See D20. */
+  browser: section({
+    shieldsEnabled: z.boolean().catch(true),
+    /** Which of the public filter lists to use, by name (see main/shields/lists.ts). */
+    shieldLists: z.array(z.string().max(40)).max(20).catch(['easylist', 'easyprivacy', 'malware', 'annoyances']),
+    /**
+     * Also hide the space an ad would have occupied.
+     *
+     * Separate from blocking because they fail differently: blocking is invisible when it works,
+     * whereas element hiding can take a chunk of a page with it, and then the useful thing to do is
+     * turn off the hiding and keep the blocking.
+     */
+    hideAdSpace: z.boolean().catch(true),
+    httpsUpgrade: z.boolean().catch(true),
   }),
 
   accounts: section({

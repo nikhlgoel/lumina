@@ -180,6 +180,13 @@ export type JobEngine = 'ytdlp' | 'aria2' | 'convert' | 'subtitles' | 'extract';
 
 export interface JobProgress {
   percent: number;
+  /**
+   * How far through the file currently downloading, 0-100, or null when nothing is known yet.
+   *
+   * `percent` covers the whole job, which on a long playlist means one song moves it 0.23% - a bar
+   * that looks frozen for five songs at a time. This is the figure that actually moves. See D15.
+   */
+  filePercent?: number | null;
   speedBps: number | null;
   etaSec: number | null;
   downloadedBytes: number | null;
@@ -439,6 +446,8 @@ export interface PlayableItem {
   path: string | null;
   /** Where to continue from (saved position), in seconds. */
   resumeAtSec?: number;
+  /** Carried so the player can show the right heart without a second round trip. */
+  liked?: boolean;
 }
 
 export interface AppInfo {
@@ -587,4 +596,24 @@ export interface PortableInstallStatus {
   appBytes: number;
   canInstall: boolean;
   reason: string | null;
+}
+
+/** What the browser's shield has done on the page in view. See D20. */
+export interface ShieldCounts {
+  ads: number;
+  trackers: number;
+  /** Requests upgraded from http to https. */
+  upgraded: number;
+}
+
+export interface ShieldStatus {
+  enabled: boolean;
+  /** False when the person turned the shield off for this site. */
+  siteEnabled: boolean;
+  hostname: string | null;
+  counts: ShieldCounts;
+  /** How many rules are loaded, so "protected" is a claim that can be checked. */
+  ruleCount: number;
+  /** The most recent things blocked, newest first. */
+  recent: { url: string; rule: string }[];
 }

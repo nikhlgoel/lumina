@@ -34,6 +34,7 @@ const GROUPS: { title: string; items: Shortcut[] }[] = [
       { keys: ['↑', '↓'], label: 'Volume' },
       { keys: ['M'], label: 'Mute' },
       { keys: ['N', 'P'], label: 'Next / previous' },
+      { keys: ['H'], label: 'Like the song playing' },
       { keys: ['L'], label: 'Lyrics' },
       { keys: ['C'], label: 'Subtitles (video)' },
       { keys: ['F'], label: 'Fullscreen' },

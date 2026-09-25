@@ -1,8 +1,12 @@
+import { applyTrackGain, applyVolumeBoost } from '@/lib/audio';
 import { create } from 'zustand';
 import type { Lyrics, PlayableItem } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from './app';
+import { useLibrary } from './library';
 import { nextVolume } from '@core/trayMenu';
+import { clampVolume, volumeSplit } from '@core/volume';
+import { createShuffle, shuffleMatches, stepShuffle, syncShuffle, type ShuffleState } from '@core/shuffle';
 
 export type Repeat = 'off' | 'all' | 'one';
 export type StageView = 'art' | 'lyrics';
@@ -36,6 +40,7 @@ interface PlayerState {
   cycleRepeat: () => void;
   setStage: (v: StageView) => void;
   toggleSubtitles: () => void;
+  toggleLike: () => Promise<void>;
 }
 
 /** The single media element used by the whole app. Video elements also play audio-only files. */
@@ -52,6 +57,23 @@ let artworkBlobUrl: string | null = null;
 
 const clampIndex = (i: number, n: number) => (n === 0 ? 0 : ((i % n) + n) % n);
 
+/** Which track a loudness answer belongs to, so a slow measurement cannot land on a later song. */
+let loudnessFor: string | null = null;
+
+/** The shuffled order and where we are in it, or null when shuffle is off. See D16. */
+let shuffleState: ShuffleState | null = null;
+
+function applyLoudness(item: PlayableItem) {
+  const key = item.path ?? item.src;
+  loudnessFor = key;
+  if (!useApp.getState().settings?.player.normalizeLoudness || !item.path) {
+    applyTrackGain(1);
+    return;
+  }
+  void call('player:loudness', { path: item.path })
+    .then((answer) => { if (loudnessFor === key) applyTrackGain(answer.gainLinear); })
+    .catch(() => { if (loudnessFor === key) applyTrackGain(1); });
+}
 export const usePlayer = create<PlayerState>((set, get) => {
   const load = (index: number, autoplay: boolean) => {
     const { queue } = get();
@@ -77,6 +99,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
       media.appendChild(track);
     }
     media.load();
+    // Match this track's level to everything else, and stop a clipping master from distorting.
+    // Deliberately not awaited: the first measurement of a file needs a decode, and playback must
+    // not wait on it. Until the answer arrives the track plays at its own level, as it always did.
+    applyLoudness(item);
     set({ index, time: 0, duration: item.durationSec ?? 0, buffering: true, lyrics: null, lyricsState: 'idle' });
     if (item.resumeAtSec) {
       const at = item.resumeAtSec;
@@ -133,9 +159,23 @@ export const usePlayer = create<PlayerState>((set, get) => {
       void media.play();
       return;
     }
-    let nextIndex = shuffle && queue.length > 1
-      ? (index + 1 + Math.floor(Math.random() * (queue.length - 1))) % queue.length
-      : index + step;
+    const autoplay = fromEnded || get().playing;
+
+    if (shuffle && queue.length > 1) {
+      // Rebuilt lazily, so a queue that changed underneath cannot hand out an index it no longer has.
+      if (!shuffleState || !shuffleMatches(shuffleState, queue.length)) shuffleState = createShuffle(queue.length, index);
+      const moved = stepShuffle(shuffleState, step, { allowWrap: repeat !== 'off' || !fromEnded });
+      // Nowhere to go: the end of the order with repeat off, or back past the first track played.
+      if (!moved) {
+        if (fromEnded) set({ playing: false });
+        return;
+      }
+      shuffleState = moved.state;
+      load(moved.index, autoplay);
+      return;
+    }
+
+    let nextIndex = index + step;
     if (nextIndex >= queue.length || nextIndex < 0) {
       if (repeat === 'off' && fromEnded) {
         set({ playing: false });
@@ -143,7 +183,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       }
       nextIndex = clampIndex(nextIndex, queue.length);
     }
-    load(nextIndex, fromEnded || get().playing);
+    load(nextIndex, autoplay);
   };
 
   /** Remember where long media was left, so it can continue next time. */
@@ -208,8 +248,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
     }
   });
 
-  const settingsVolume = useApp.getState().settings?.player.volume ?? 0.8;
-  media.volume = settingsVolume;
+  const settingsVolume = clampVolume(useApp.getState().settings?.player.volume ?? 0.8);
+  // The saved volume goes through the same split, or a stored 150% would quietly start at 100%.
+  const startSplit = volumeSplit(settingsVolume);
+  media.volume = startSplit.elementVolume;
+  if (startSplit.boostGain !== 1) applyVolumeBoost(startSplit.boostGain);
 
   return {
     queue: [],
@@ -231,8 +274,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     playQueue: (items, startIndex = 0) => {
       if (!items.length) return;
+      const start = clampIndex(startIndex, items.length);
       set({ queue: items });
-      load(clampIndex(startIndex, items.length), true);
+      shuffleState = get().shuffle ? createShuffle(items.length, start) : null;
+      load(start, true);
     },
 
     playIds: async (ids, startIndex = 0) => {
@@ -261,7 +306,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       else advance(-1, false);
     },
 
-    jump: (index) => load(clampIndex(index, get().queue.length), true),
+    jump: (index) => {
+      const target = clampIndex(index, get().queue.length);
+      // Carry on from what was chosen, rather than from wherever the shuffle had got to.
+      if (shuffleState) shuffleState = syncShuffle(shuffleState, target);
+      load(target, true);
+    },
 
     seek: (seconds) => {
       const item = get().current();
@@ -279,9 +329,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     setVolume: (v) => {
-      const volume = Math.max(0, Math.min(1, v));
-      media.volume = volume;
+      const volume = clampVolume(v);
+      // Up to 100% this is the element alone; past it the element sits at unity and the graph makes
+      // up the rest, with a limiter so the extra gain cannot clip. See D18.
+      const { elementVolume, boostGain } = volumeSplit(volume);
+      media.volume = elementVolume;
       media.muted = false;
+      applyVolumeBoost(boostGain);
       set({ volume, muted: false });
     },
 
@@ -290,9 +344,36 @@ export const usePlayer = create<PlayerState>((set, get) => {
       set({ muted: media.muted });
     },
 
-    toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
+    toggleShuffle: () => {
+      const { shuffle, queue, index } = get();
+      const next = !shuffle;
+      // Deal the order now, with whatever is playing first, so turning shuffle on does not interrupt it.
+      shuffleState = next ? createShuffle(queue.length, index) : null;
+      set({ shuffle: next });
+    },
     cycleRepeat: () => set((s) => ({ repeat: s.repeat === 'off' ? 'all' : s.repeat === 'all' ? 'one' : 'off' })),
     setStage: (stage) => set({ stage }),
+
+    /**
+     * Like the song that is playing.
+     *
+     * Liking used to be reachable only from the Library, which is the wrong moment - the time you
+     * decide you love a song is while it is playing. The queue is updated in place so the heart is
+     * right immediately, and the library store is told so its lists agree.
+     */
+    toggleLike: async () => {
+      const item = get().current();
+      if (!item?.path) return;
+      const liked = !item.liked;
+      try {
+        await call('library:like', { path: item.path, liked });
+      } catch (err) {
+        useApp.getState().toast(errorMessage(err), 'error');
+        return;
+      }
+      set((s) => ({ queue: s.queue.map((i) => (i.id === item.id ? { ...i, liked } : i)) }));
+      void useLibrary.getState().refreshLiked(item.id, liked);
+    },
 
     toggleSubtitles: () => {
       const on = !get().subtitles;
@@ -326,6 +407,42 @@ usePlayer.subscribe((s, prev) => {
   if (s.volume === prev.volume && s.muted === prev.muted && s.shuffle === prev.shuffle && s.repeat === prev.repeat) return;
   if (settingsReportTimer) clearTimeout(settingsReportTimer);
   settingsReportTimer = setTimeout(() => reportPlayback(usePlayer.getState()), 250);
+});
+
+/**
+ * Apply a saved volume to the element, the graph and the store.
+ *
+ * One function because there were two: the store set it up at creation and App.tsx set it again
+ * after settings loaded, and when volume gained a range above 1 only one of them was taught the
+ * split. The element throws on anything above 1, the throw was caught as a startup failure, and the
+ * app refused to launch with the message 'Lumina couldn’t start'. See D18.
+ */
+export function applyStoredVolume(volume: number) {
+  const v = clampVolume(volume);
+  const { elementVolume, boostGain } = volumeSplit(v);
+  media.volume = elementVolume;
+  applyVolumeBoost(boostGain);
+  usePlayer.setState({ volume: v });
+}
+
+/**
+ * Make the loudness switch audible the moment it is flipped.
+ *
+ * `applyLoudness` otherwise runs only when a track loads, so turning "match the volume of every
+ * track" on or off did nothing at all until the next song — and a switch that appears to do nothing
+ * is indistinguishable from a switch that was never wired up.
+ */
+let lastLoudnessSettings = useApp.getState().settings?.player ?? null;
+useApp.subscribe((s) => {
+  const player = s.settings?.player;
+  if (!player || player === lastLoudnessSettings) return;
+  const changed = !lastLoudnessSettings
+    || player.normalizeLoudness !== lastLoudnessSettings.normalizeLoudness
+    || player.loudnessTarget !== lastLoudnessSettings.loudnessTarget;
+  lastLoudnessSettings = player;
+  if (!changed) return;
+  const item = usePlayer.getState().current();
+  if (item) applyLoudness(item);
 });
 
 /** Persist volume changes, debounced. */

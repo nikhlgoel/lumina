@@ -1,7 +1,8 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Captions, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
+import { Captions, Heart, ListMusic, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
 import type { PlayableItem } from '@shared/types';
 import { formatDuration } from '@core/format';
+import { MAX_VOLUME, isBoosting, volumeLabel } from '@core/volume';
 import { cn } from '@/lib/cn';
 import { usePlayer, type StageView } from '@/stores/player';
 import { useApp } from '@/stores/app';
@@ -62,6 +63,8 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
   item: PlayableItem; stage: StageView; onStage: (v: StageView) => void; queueOpen: boolean; onQueue: () => void;
 }) {
   const p = usePlayer();
+  const current = p.current();
+  const liked = Boolean(current?.liked);
   const hints = useApp((s) => s.settings?.player.showKeyboardHints ?? true);
   const eqOn = useApp((s) => s.settings?.player.eqEnabled ?? false);
   const [audioOpen, setAudioOpen] = useState(false);
@@ -95,9 +98,21 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
       <SeekBar />
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-center">
-        {hints ? <span className="hidden text-xs text-[var(--p-ink-3)] lg:block">Space play · ←/→ seek · L lyrics · T theme · Esc exit</span> : <span />}
+        {hints ? <span className="hidden text-xs text-[var(--p-ink-3)] lg:block">Space play · ←/→ seek · H like · L lyrics · T theme · Esc exit</span> : <span />}
         {hints && <span className="lg:hidden" />}
         <div className="flex items-center gap-[clamp(6px,1.6vw,16px)]">
+          {/* Liking belongs where the listening happens: the moment you decide you love a song is
+              while it is playing, not later in the Library. */}
+          <button
+            className="p-btn grid size-10 place-items-center rounded-xl disabled:opacity-40"
+            aria-label={liked ? 'Remove from liked songs' : 'Add to liked songs'}
+            title={liked ? 'Liked (H)' : 'Like (H)'}
+            aria-pressed={liked}
+            disabled={!current?.path}
+            onClick={() => void p.toggleLike()}
+          >
+            <Heart className={cn('size-5', liked && 'fill-current text-[var(--p-accent)]')} />
+          </button>
           <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label="Shuffle" title="Shuffle" aria-pressed={p.shuffle} onClick={p.toggleShuffle}><Shuffle className="size-5" /></button>
           <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label="Previous" title="Previous" onClick={p.previous}><SkipBack className="size-5 fill-current" /></button>
           <button
@@ -123,7 +138,30 @@ export function Dock({ item, stage, onStage, queueOpen, onQueue }: {
           <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label={p.muted ? 'Unmute' : 'Mute'} title="Mute (M)" onClick={p.toggleMute}>
             {p.muted || p.volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
           </button>
-          <input className="p-range" type="range" min={0} max={1} step={0.01} value={p.muted ? 0 : p.volume} aria-label="Volume" onChange={(e) => p.setVolume(Number(e.target.value))} />
+          {/* Past 100% the element is at unity and the graph makes up the rest, limited so it
+              cannot clip (D18). The reading is shown because "louder than everything else" is
+              worth being able to see and undo, unlike an unmarked slider position. */}
+          <div className="flex items-center gap-2">
+            <input
+              className="p-range"
+              type="range"
+              min={0}
+              max={MAX_VOLUME}
+              step={0.01}
+              value={p.muted ? 0 : p.volume}
+              aria-label="Volume"
+              aria-valuetext={volumeLabel(p.muted ? 0 : p.volume)}
+              onChange={(e) => p.setVolume(Number(e.target.value))}
+              onDoubleClick={() => p.setVolume(1)}
+              title="Volume — double-click for 100%"
+            />
+            <span
+              className={cn('w-10 shrink-0 text-right text-[11px] tabular', isBoosting(p.volume) && !p.muted ? 'font-semibold text-[var(--p-accent)]' : 'text-[var(--p-ink-3)]')}
+              title={isBoosting(p.volume) ? 'Boosted above 100%, held below clipping by a limiter' : undefined}
+            >
+              {volumeLabel(p.muted ? 0 : p.volume)}
+            </span>
+          </div>
         </div>
       </div>
     </footer>

@@ -43,17 +43,26 @@ export function parseYtdlpLine(line: string): YtdlpEvent | null {
   return null;
 }
 
+/**
+ * What `%(progress.postprocessor)s` actually contains.
+ *
+ * yt-dlp reports a postprocessor by its `pp_key()`, which is the class name with the trailing `PP`
+ * removed *and the leading `FFmpeg` removed*: `FFmpegExtractAudioPP` arrives as `ExtractAudio`.
+ * Seven of the thirteen names here were written with that prefix still attached, so they matched
+ * nothing and every music download said a flat "Processing" where it should have said "Extracting
+ * audio". Captured from the bundled binary: `ExtractAudio`, `Metadata`, `MoveFiles`,
+ * `ThumbnailsConvertor`, `VideoRemuxer`. A test forbids the prefixed form coming back.
+ */
 const POSTPROCESSOR_LABELS: Record<string, string> = {
   Merger: 'Merging video and audio',
-  FFmpegMerger: 'Merging video and audio',
-  FFmpegExtractAudio: 'Extracting audio',
-  FFmpegVideoRemuxer: 'Remuxing',
-  FFmpegVideoConvertor: 'Converting',
-  FFmpegMetadata: 'Writing metadata',
+  ExtractAudio: 'Extracting audio',
+  VideoRemuxer: 'Remuxing',
+  VideoConvertor: 'Converting',
+  Metadata: 'Writing metadata',
   EmbedThumbnail: 'Embedding artwork',
-  FFmpegThumbnailsConvertor: 'Preparing artwork',
-  FFmpegSubtitlesConvertor: 'Converting subtitles',
-  FFmpegEmbedSubtitle: 'Embedding subtitles',
+  ThumbnailsConvertor: 'Preparing artwork',
+  SubtitlesConvertor: 'Converting subtitles',
+  EmbedSubtitle: 'Embedding subtitles',
   SponsorBlock: 'Checking SponsorBlock',
   ModifyChapters: 'Removing sponsor segments',
   MoveFiles: 'Moving files',

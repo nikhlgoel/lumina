@@ -1,3 +1,4 @@
+import { MAX_VOLUME } from '@core/volume';
 import { describe, it, expect } from 'vitest';
 import {
   SEEK_STEP_S, VOLUME_PRESETS, downloadItems, idlePlayback, isPresetActive, nextVolume, nowPlayingLabel, pauseAllOrder,
@@ -64,11 +65,13 @@ describe('volume', () => {
     expect(submenu(state({ volume: 0.5, muted: true })).some((i) => i.checked)).toBe(false);
   });
 
-  it('disables Louder at full volume and Quieter at silence or while muted', () => {
-    expect(byPrefix(submenu(state({ volume: 1 })), 'Louder')?.enabled).toBe(false);
+it('disables Louder only at the boost ceiling, and Quieter at silence or while muted', () => {
+    // 100% is no longer the top: the boost goes to MAX_VOLUME, so Louder stays live above unity.
+    expect(byPrefix(submenu(state({ volume: 1 })), 'Louder')?.enabled).toBe(true);
+    expect(byPrefix(submenu(state({ volume: MAX_VOLUME })), 'Louder')?.enabled).toBe(false);
     expect(byPrefix(submenu(state({ volume: 0 })), 'Quieter')?.enabled).toBe(false);
     expect(byPrefix(submenu(state({ volume: 0.5, muted: true })), 'Quieter')?.enabled).toBe(false);
-    // Louder stays usable while muted — it is the natural way back to sound.
+    // Louder stays usable while muted - it is the natural way back to sound.
     expect(byPrefix(submenu(state({ volume: 1, muted: true })), 'Louder')?.enabled).toBe(true);
   });
 
@@ -77,19 +80,21 @@ describe('volume', () => {
     expect(cmds).toEqual(VOLUME_PRESETS.map((value) => ({ command: 'volume', value })));
   });
 
-  it('nextVolume stays inside 0..1 and lands on whole percents', () => {
-    expect(nextVolume(0.95, 0.1)).toBe(1);
+  it('nextVolume stays inside the range and lands on whole percents', () => {
+    expect(nextVolume(0.95, 0.1)).toBe(1.05);
     expect(nextVolume(0.05, -0.1)).toBe(0);
     expect(nextVolume(0.2, 0.1)).toBe(0.3); // not 0.30000000000000004
+    // The ceiling is the boost limit now, not unity.
+    expect(nextVolume(MAX_VOLUME - 0.05, 0.5)).toBe(MAX_VOLUME);
   });
 
-  it('property: 10,000 random steps never leave 0..1 and never drift off whole percents', () => {
+  it('property: 10,000 random steps never leave the range and never drift off whole percents', () => {
     const r = rng(901);
     let v = 0.8;
     for (let i = 0; i < 10_000; i++) {
       v = nextVolume(v, pick(r, [0.1, -0.1, 0.1, -0.1, 0.05, -0.3]));
       expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
+      expect(v).toBeLessThanOrEqual(MAX_VOLUME);
       expect(Math.abs(v * 100 - Math.round(v * 100))).toBeLessThan(1e-9);
     }
   });

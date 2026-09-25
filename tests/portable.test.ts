@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  PORTABLE_DIR, buildPlaylist, describePlan, fingerprint, planExport, planImport, portableTargetFor,
+  PORTABLE_DIR, buildPlaylist, describePlan, fingerprint, planExport, planImport, portableTargetFor, realAlbums,
   safeSegment, type PortableItem,
 } from '@core/portable';
 
@@ -41,18 +41,32 @@ describe('safeSegment', () => {
 });
 
 describe('portableTargetFor', () => {
+  const ram = new Set(['daft punk|ram']);
+
   it('files music as Artist/Album/Track Title', () => {
-    expect(portableTargetFor(item({ path: 'C:\\m\\a.flac', artist: 'Daft Punk', album: 'RAM', title: 'Get Lucky', trackNo: 8 })))
+    expect(portableTargetFor(item({ path: 'C:\\m\\a.flac', artist: 'Daft Punk', album: 'RAM', title: 'Get Lucky', trackNo: 8 }), ram))
       .toBe(`${PORTABLE_DIR}/Music/Daft Punk/RAM/08 Get Lucky.flac`);
   });
 
   it('omits the track number when there isn’t one', () => {
-    expect(portableTargetFor(item({ path: '/m/a.mp3', trackNo: null }))).toBe(`${PORTABLE_DIR}/Music/Artist/Album/Title.mp3`);
+    expect(portableTargetFor(item({ path: '/m/a.mp3', trackNo: null }), new Set(['artist|album']))).toBe(`${PORTABLE_DIR}/Music/Artist/Album/Title.mp3`);
   });
 
-  it('fills in placeholders for untagged music', () => {
-    expect(portableTargetFor(item({ path: '/m/a.mp3', artist: null, album: null })))
-      .toBe(`${PORTABLE_DIR}/Music/Unknown artist/Unknown album/Title.mp3`);
+  // The bug a television exposed: a library of single downloads became one folder per song,
+  // each holding that song and a cover image.
+  it('puts a track that is not part of an album straight into Music', () => {
+    expect(portableTargetFor(item({ path: '/m/a.mp3', artist: 'Tory Lanez', album: null, title: 'The Take' })))
+      .toBe(`${PORTABLE_DIR}/Music/Tory Lanez - The Take.mp3`);
+  });
+
+  it('keeps the title alone when even the artist is unknown', () => {
+    expect(portableTargetFor(item({ path: '/m/a.mp3', artist: null, album: null, title: 'Title' })))
+      .toBe(`${PORTABLE_DIR}/Music/Title.mp3`);
+  });
+
+  it('does not nest an album that only one exported track belongs to', () => {
+    expect(portableTargetFor(item({ path: '/m/a.mp3', artist: 'A', album: 'Single', title: 'T' }), new Set()))
+      .toBe(`${PORTABLE_DIR}/Music/A - T.mp3`);
   });
 
   it('puts video flat under Videos', () => {
@@ -77,7 +91,7 @@ describe('planExport', () => {
   });
 
   it('skips a file already on the drive at the same size', () => {
-    const existing = { [`${PORTABLE_DIR}/Music/Artist/Album/A.mp3`]: 10 };
+    const existing = { [`${PORTABLE_DIR}/Music/Artist - A.mp3`]: 10 };
     const plan = planExport([item({ path: '/a.mp3', title: 'A', sizeBytes: 10 })], existing);
     expect(plan.entries).toHaveLength(0);
     expect(plan.skipped).toBe(1);
@@ -143,5 +157,43 @@ describe('describePlan', () => {
     expect(describePlan({ entries: [{ source: 'a', target: 'b', sizeBytes: 1 }], skipped: 0, totalBytes: 1 })).toBe('1 file to copy');
     expect(describePlan({ entries: [{ source: 'a', target: 'b', sizeBytes: 1 }, { source: 'c', target: 'd', sizeBytes: 1 }], skipped: 2, totalBytes: 2 }))
       .toBe('2 files to copy, 2 already there');
+  });
+});
+
+describe('realAlbums — which folders are worth making', () => {
+  it('counts an album real when more than one exported track is on it', () => {
+    const albums = realAlbums([
+      item({ path: '/m/1.mp3', artist: 'Daft Punk', album: 'RAM', title: 'One' }),
+      item({ path: '/m/2.mp3', artist: 'Daft Punk', album: 'RAM', title: 'Two' }),
+    ]);
+    expect([...albums]).toEqual(['daft punk|ram']);
+  });
+
+  it('refuses a one-track album, which would be a folder holding one song', () => {
+    expect(realAlbums([item({ path: '/m/1.mp3', artist: 'A', album: 'Lonely', title: 'One' })]).size).toBe(0);
+  });
+
+  it('never groups by a missing or blank album', () => {
+    const albums = realAlbums([
+      item({ path: '/m/1.mp3', artist: 'A', album: null, title: 'One' }),
+      item({ path: '/m/2.mp3', artist: 'A', album: '   ', title: 'Two' }),
+    ]);
+    expect(albums.size).toBe(0);
+  });
+
+  it('ignores video, which is never filed by album', () => {
+    const albums = realAlbums([
+      item({ path: '/v/1.mp4', kind: 'video', artist: 'A', album: 'RAM', title: 'One' }),
+      item({ path: '/v/2.mp4', kind: 'video', artist: 'A', album: 'RAM', title: 'Two' }),
+    ]);
+    expect(albums.size).toBe(0);
+  });
+
+  it('matches albums case-insensitively, since tags are inconsistent', () => {
+    const albums = realAlbums([
+      item({ path: '/m/1.mp3', artist: 'Daft Punk', album: 'RAM', title: 'One' }),
+      item({ path: '/m/2.mp3', artist: 'daft punk', album: 'ram', title: 'Two' }),
+    ]);
+    expect(albums.size).toBe(1);
   });
 });

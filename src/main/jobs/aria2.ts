@@ -354,7 +354,9 @@ export const aria2Runner: Runner = (ctx) => {
         percent: p.percent, speedBps: p.speedBps, etaSec: p.etaSec, downloadedBytes: p.downloadedBytes, totalBytes: p.totalBytes,
         stage: metadata ? 'Finding peers' : isTorrent
           ? `${status.numSeeders ?? 0} seeds · ${status.connections ?? 0} peers`
-          : `${status.connections ?? 0} connection${status.connections === '1' ? '' : 's'} · ${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`,
+          // Bytes are deliberately left out: the row already prints "7.6 MB of 29.3 MB" from the
+          // progress itself, and putting them here too printed the same figure twice in one line.
+          : `${status.connections ?? 0} connection${status.connections === '1' ? '' : 's'}`,
       }, 'running');
     } catch (err) {
       if (stopped) return;

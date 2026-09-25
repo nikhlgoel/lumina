@@ -10,6 +10,7 @@ import { applyFormatPreferences, BUILT_IN_PRESETS } from '../core/presets';
 import { mediaKindOf } from '../core/playlists';
 import { settings } from './settings';
 import { tools } from './tools';
+import { loudnessFor } from './media/loudness';
 import { inspect } from './inspect';
 import { searchMulti } from './search';
 import { queue } from './jobs/queue';
@@ -17,6 +18,7 @@ import { runTool } from './process';
 import { challengeAction, currentChallenge, placeChallenge } from './hosters';
 import { firewallStatus, grantFirewallAccess } from './firewall';
 import { browserBack, browserBounds, browserForward, browserGo, browserHide, browserReload, browserShow, browserStop } from './browser';
+import { refreshShieldLists, setSiteShields, shieldStats } from './shields';
 import { queueConversion, queueSubtitleGeneration } from './jobs/cpu';
 import { library } from './library';
 import { getLyrics } from './lyrics';
@@ -78,6 +80,7 @@ function toPlayable(id: string): PlayableItem | null {
     id: item.id, kind: item.kind, title: item.title, artist: item.artist, album: item.album, durationSec: item.durationSec,
     src: `${MEDIA_SCHEME}://media/${item.id}`, artworkUrl: `${MEDIA_SCHEME}://art/${item.id}`, path: item.path,
     resumeAtSec: resumePoint(item.id, item.path, item.durationSec),
+    liked: item.liked,
   };
 }
 
@@ -221,6 +224,9 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'browser:stop': () => browserStop(),
   'browser:show': (r: { x: number; y: number; width: number; height: number }) => browserShow(r),
   'browser:hide': () => browserHide(),
+  'browser:shields': () => shieldStats(),
+  'browser:shields-site': ({ enabled }) => setSiteShields(enabled),
+  'browser:shields-refresh': () => { void refreshShieldLists(true); },
   'browser:bounds': (r: { x: number; y: number; width: number; height: number }) => browserBounds(r),
   'jobs:convert': ({ paths, format }: { paths: string[]; format: FormatChoice }) => {
     paths.forEach(assertKnownPath);
@@ -344,6 +350,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   },
 
   'player:resolve': ({ ids }: { ids: string[] }) => ids.map(toPlayable).filter((x): x is PlayableItem => Boolean(x)),
+  'player:loudness': ({ path: p }: { path: string }) => loudnessFor(p, settings.get().player.loudnessTarget),
   'player:resolve-path': async ({ path: p }: { path: string }) => {
     assertKnownPath(p);
     const item = await library.ingest(p);

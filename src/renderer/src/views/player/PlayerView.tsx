@@ -105,6 +105,7 @@ export function PlayerView() {
         case 'ArrowDown': e.preventDefault(); p.setVolume(p.volume - 0.05); break;
         case 'l': case 'L': if (!isVideo) p.setStage(p.stage === 'art' ? 'lyrics' : 'art'); break;
         case 'q': case 'Q': setQueueOpen((o) => !o); break;
+        case 'h': case 'H': void p.toggleLike(); break;
         case 'm': case 'M': p.toggleMute(); break;
         case 'c': case 'C': if (isVideo) p.toggleSubtitles(); break;
         case 'f': case 'F': toggleFullscreen(); break;

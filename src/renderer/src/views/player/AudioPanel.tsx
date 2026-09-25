@@ -56,6 +56,25 @@ export function AudioPanel({ onClose }: { onClose: () => void }) {
         </select>
       </div>
 
+      <div className="mb-3 border-t border-white/10 pt-3">
+        <label className="flex items-start justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold">Match the volume of every track</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--p-ink-3)]">
+              {player.normalizeLoudness
+                ? 'Quiet songs come up, loud ones come down, and masters that would clip are kept below the ceiling.'
+                : 'Songs play at whatever level they were mastered at, which can be a big jump between tracks.'}
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="mt-1 size-4 shrink-0 accent-[var(--p-accent)]"
+            checked={player.normalizeLoudness}
+            onChange={(e) => update({ player: { normalizeLoudness: e.target.checked } })}
+            aria-label="Match the volume of every track"
+          />
+        </label>
+      </div>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[11px] font-semibold tracking-[0.08em] text-[var(--p-ink-3)] uppercase">Equalizer</span>
         <button

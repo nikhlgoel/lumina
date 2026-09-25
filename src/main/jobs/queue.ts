@@ -32,7 +32,7 @@ const BROWSER_POOL = 16;
 const FINISHED: JobStatus[] = ['completed', 'failed', 'cancelled'];
 
 const emptyProgress = (stage: string): JobProgress => ({
-  percent: 0, speedBps: null, etaSec: null, downloadedBytes: null, totalBytes: null, stage,
+  percent: 0, filePercent: null, speedBps: null, etaSec: null, downloadedBytes: null, totalBytes: null, stage,
 });
 
 class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; completed: [Job]; failed: [Job] }> {

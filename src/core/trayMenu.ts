@@ -47,14 +47,14 @@ export const idlePlayback = (): TrayPlayback => ({
   playing: false, title: null, artist: null, volume: 0.8, muted: false, shuffle: false, repeat: 'off',
 });
 
-/** The volumes offered as one-click choices. */
-export const VOLUME_PRESETS = [1, 0.75, 0.5, 0.25, 0.1] as const;
+import { MAX_VOLUME, VOLUME_PRESETS, nextVolume, volumeLabel as percentLabel } from './volume';
+export { VOLUME_PRESETS, nextVolume, MAX_VOLUME };
 
 /** How far "Louder"/"Quieter" and the seek items move. */
 export const VOLUME_STEP = 0.1;
 export const SEEK_STEP_S = 10;
 
-const pct = (v: number) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
+const pct = (v: number) => percentLabel(v);
 
 /** A preset is "the current volume" only when it really is — within rounding, and not muted. */
 export const isPresetActive = (preset: number, s: TrayPlayback) => !s.muted && Math.abs(s.volume - preset) < 0.005;
@@ -86,7 +86,7 @@ export function playbackItems(s: TrayPlayback): TrayItem[] {
     {
       label: volumeLabel(s),
       submenu: [
-        { label: `Louder (+${pct(VOLUME_STEP)})`, enabled: s.muted || s.volume < 1, run: { command: 'volume-by', value: VOLUME_STEP } },
+        { label: `Louder (+${pct(VOLUME_STEP)})`, enabled: s.muted || s.volume < MAX_VOLUME, run: { command: 'volume-by', value: VOLUME_STEP } },
         { label: `Quieter (−${pct(VOLUME_STEP)})`, enabled: !s.muted && s.volume > 0, run: { command: 'volume-by', value: -VOLUME_STEP } },
         { type: 'separator' },
         ...VOLUME_PRESETS.map((v): TrayItem => ({ label: pct(v), type: 'radio', checked: isPresetActive(v, s), run: { command: 'volume', value: v } })),
@@ -131,10 +131,3 @@ export function pauseAllOrder(jobs: JobStatusLike[]): string[] {
   return [...waiting, ...running];
 }
 
-/**
- * A relative volume change as a person expects it: from the volume they had (even if muted — the
- * player unmutes on any volume change), kept inside 0..1, rounded to whole percent so repeated
- * steps never drift into 0.30000000000000004.
- */
-export const nextVolume = (current: number, delta: number): number =>
-  Math.round(Math.max(0, Math.min(1, current + delta)) * 100) / 100;

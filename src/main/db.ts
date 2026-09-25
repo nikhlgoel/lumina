@@ -69,6 +69,13 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX likes_liked_at ON likes(liked_at DESC);
   `,
+  // 3 — measured loudness, so playback can match every track to one level without clipping it.
+  // Measuring costs a full decode, so the answer is kept: it is cleared only when the file itself
+  // changes, which the scanner detects by modification time and size.
+  `
+  ALTER TABLE library_items ADD COLUMN loudness_lufs REAL;
+  ALTER TABLE library_items ADD COLUMN true_peak_db REAL;
+  `,
 ];
 
 let db: DatabaseSync | null = null;

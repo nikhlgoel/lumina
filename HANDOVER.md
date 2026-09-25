@@ -16,10 +16,10 @@ earlier notes in this file and the session log saying "not pushed" were true whe
 **Sessions 13–20 (roughly 49 changed paths) are uncommitted on top of it.** **Ask before committing or pushing**
 (standing rule).
 
-**Verified right now:** `npx tsc --noEmit` clean · `npx vitest run` **765 passed (37 files)** · `npx vite build`
-ok. `src/main/capture.ts` now defines **64 steps**; the last *full* regression (session 15) covered **56/56**, and
-the eight added since (`13a`–`18b`) were each captured individually as they were written. **A full 64-step
-regression has not been run** — worth doing before the next release.
+**Verified right now:** `npx tsc --noEmit` clean · `npx vitest run` **937 passed (44 files)** · `npx vite build`
+ok. `src/main/capture.ts` now defines **71 steps**; the last *full* regression (session 15) covered **56/56**, and
+the ones added since (`13a`–`18b`, `13b`/`13c`) were each captured individually as they were written. **A full
+71-step regression has not been run** — worth doing before the next release.
 
 **Installer / builds:** `Lumina Setup_v3.0.0-alpha.0.exe` (NSIS) and `Lumina Portable_v3.0.0-alpha.0.exe`
 (portable). Build via `Menu.cmd` → Build a release → Windows, or `pnpm run package:win` /
@@ -80,6 +80,15 @@ three fixed and re-captured against real port conflicts.
 **Still NOT proven after that run:** the 15 IDE/editor-theme steps and `18b-portable-edges` photographed the
 same screen because the capture profile has no workspace in `settings.json`. They are untested, not passing —
 give the scratch profile a settings file with `ide.workspace` set before trusting them.
+
+**Read first now:** `AGENTS.md` holds the working rules and the capture-harness recipe; `DECISIONS.md` says
+why the architecture is what it is; `BUGS.md` lists open defects and, importantly, what is *not* proven. This
+file remains the state snapshot.
+
+**Proven (session 26):** the USB music layout — measured through the real `planExport` against the live
+library: **383 folders for 455 songs, down to 42**. A direct aria2 download shows full progress (percentage,
+speed, ETA, proportional bar), photographed mid-download; the same is **still unproven for the yt-dlp path**,
+which is where the reported problem lives (see BUGS.md B1).
 
 **Never proven:** typing into Monaco · MCP `tools/call` live · MCP tools wired into the assistant (not built) ·
 **any real TV** · the portable *copy* running on a second PC · cancelling a copy or conversion mid-way · a drive
@@ -172,7 +181,7 @@ driver auto-updater; USB portable player + import/export/sync; Chrome Web Store 
 
 ```bash
 npx tsc --noEmit                 # types — must be clean
-npx vitest run                   # unit + property tests (currently 765 passing, 37 files)
+npx vitest run                   # unit + property tests (currently 937 passing, 44 files)
 npx vite build                   # production build must succeed
 ```
 

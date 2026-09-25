@@ -14,6 +14,8 @@ interface LibraryState {
   loadLiked: () => Promise<void>;
   /** Flip a song's like and patch it in place, so the heart responds without a full reload. */
   toggleLike: (item: LibraryItem) => Promise<void>;
+  /** Reflect a like made elsewhere (the player) without re-reading the whole library. */
+  refreshLiked: (id: string, liked: boolean) => Promise<void>;
   rescan: () => Promise<void>;
 }
 
@@ -58,6 +60,22 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   loadLiked: async () => {
     const liked = await call('library:items', { liked: true });
     set((s) => ({ liked, loaded: { ...s.loaded, liked: true } }));
+  },
+
+  /**
+   * Keep the library's lists right when something was liked from outside them - from the player,
+   * for instance, where the track may not be in any loaded list at all.
+   */
+  refreshLiked: async (id, liked) => {
+    set((s) => {
+      const patch = (list: LibraryItem[]) => list.map((i) => (i.id === id ? { ...i, liked } : i));
+      return {
+        items: { audio: patch(s.items.audio), video: patch(s.items.video) },
+        liked: liked ? s.liked : s.liked.filter((i) => i.id !== id),
+        stats: s.stats ? { ...s.stats, liked: Math.max(0, s.stats.liked + (liked ? 1 : -1)) } : s.stats,
+      };
+    });
+    if (liked && get().loaded.liked) await get().loadLiked();
   },
 
   toggleLike: async (item) => {

@@ -73,6 +73,12 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
   // so it is used as given rather than recomputed from the current file here.
   const percent = Math.max(0, Math.min(100, p.percent));
   const multi = Boolean(p.item && p.item.count > 1);
+  // On a long playlist that figure cannot visibly move: one song of 433 is 0.23% of the job, so the
+  // number sits on the same value for five songs and the bar creeps a quarter of a percent per song.
+  // The file in hand takes the headline and the main bar; the playlist keeps a thinner bar of its
+  // own underneath, so both are readable and neither is pretending. See D15.
+  const filePercent = p.filePercent == null ? null : Math.max(0, Math.min(100, p.filePercent));
+  const headline = multi && filePercent != null ? filePercent : percent;
 
   const meta: string[] = [];
   if (job.status === 'running' && p.item) meta.push(`${p.item.index} of ${p.item.count}`);
@@ -115,11 +121,19 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
             {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
           </div>
           {(active || job.status === 'paused' || job.status === 'queued') && (
-            <ProgressBar className="mt-2" value={percent} tone={tone} indeterminate={active && progressIndeterminate(p)} />
+            <>
+              <ProgressBar className="mt-2" value={headline} tone={tone} indeterminate={active && progressIndeterminate(p)} />
+              {multi && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <ProgressBar thin className="flex-1" value={percent} tone="muted" />
+                  <span className="shrink-0 text-[11px] text-ink-3 tabular">{Math.floor(percent)}% of all {p.item!.count}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {!compact && active && <span className="w-11 text-right text-sm font-semibold text-ink-2 tabular">{Math.floor(percent)}%</span>}
+        {!compact && active && <span className="w-11 text-right text-sm font-semibold text-ink-2 tabular">{Math.floor(headline)}%</span>}
 
         <div className={cn('flex items-center gap-0.5', compact && 'opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100')}>
           {playable && <IconButton label="Play" onClick={play}><Play /></IconButton>}

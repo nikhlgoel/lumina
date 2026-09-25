@@ -155,6 +155,19 @@ describe('yt-dlp arguments', () => {
     expect(joined).not.toContain('m3u8:');
     expect(joined).not.toContain('dash:');
   });
+  it('gives one shard of a playlist only its own items and its own archive', () => {
+    // Several processes share one playlist (D19), so each must be told exactly which items to take.
+    const args = buildDownloadArgs(baseInput(music, { isPlaylist: true, playlistItemsArg: '1,5,9', archiveFile: 'work/archive-0.txt' }));
+    expect(args).toEqual(expect.arrayContaining(['--playlist-items', '1,5,9', '--download-archive', 'work/archive-0.txt']));
+    // The shard wins over the user selection, which the caller has already divided up.
+    expect(args.join(' ')).not.toContain('2,5');
+  });
+
+  it('falls back to the chosen items when no shard is given', () => {
+    const args = buildDownloadArgs(baseInput(music, { isPlaylist: true }));
+    expect(args).toEqual(expect.arrayContaining(['--playlist-items', '2,5']));
+  });
+
   it('does not accelerate when off or when aria2 is unavailable', () => {
     expect(buildDownloadArgs(baseInput(music)).join(' ')).not.toContain('--downloader');
     expect(buildDownloadArgs(baseInput(music, { accelerate: true, aria2cPath: null })).join(' ')).not.toContain('--downloader');

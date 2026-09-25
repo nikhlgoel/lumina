@@ -1,6 +1,7 @@
 import type { PlayerCommand } from '../core/trayMenu';
 import { z } from 'zod';
 import type {
+  ShieldStatus,
   AiKeyStatus, AiModelStatus, AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats,
   Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableInstallStatus, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchResults, GitView, DlnaStatus, EditorTheme, PackageManager, ProjectTask, ShellChoice, SyncStatus, TerminalPorts, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
 } from './types';
@@ -92,6 +93,9 @@ export const inputSchemas = {
   'browser:stop': z.void(),
   'browser:show': z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
   'browser:hide': z.void(),
+  'browser:shields': z.void(),
+  'browser:shields-site': z.object({ enabled: z.boolean() }),
+  'browser:shields-refresh': z.void(),
   'browser:bounds': z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
   'jobs:convert': z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(2000), format: formatChoiceSchema }),
   'subtitles:generate': path,
@@ -226,6 +230,7 @@ export const inputSchemas = {
   }),
   'player:resolve': z.object({ ids: z.array(z.string().max(200)).max(5000) }),
   'player:resolve-path': path,
+  'player:loudness': path,
   'lyrics:get': z.object({
     title: z.string().min(1).max(500),
     artist: z.string().max(300).nullable(),
@@ -325,6 +330,9 @@ export interface InvokeOutputs {
   'browser:stop': void;
   'browser:show': void;
   'browser:hide': void;
+  'browser:shields': ShieldStatus;
+  'browser:shields-site': void;
+  'browser:shields-refresh': void;
   'browser:bounds': void;
   'hosts:challenge-action': void;
   'firewall:status': FirewallStatus;
@@ -405,6 +413,17 @@ export interface InvokeOutputs {
   'library:playlist-move': boolean;
   'player:resolve': PlayableItem[];
   'player:resolve-path': PlayableItem;
+  'player:loudness': {
+    /** Decibels to apply at playback: negative turns a loud, clipping master down. */
+    gainDb: number;
+    /** The same figure as a multiplier for a gain node. */
+    gainLinear: number;
+    /** The peak ceiling decided this, not the loudness target. */
+    peakLimited: boolean;
+    measurement: { integratedLufs: number; lra: number | null; truePeakDbfs: number | null } | null;
+    /** The file had to be decoded for this answer rather than read from the library. */
+    measured: boolean;
+  };
   'lyrics:get': Lyrics | null;
   'shell:open-path': void;
   'shell:show-in-folder': void;
@@ -485,6 +504,7 @@ export interface EventPayloads {
   'hosts:challenge': HostChallenge;
   'hosts:challenge-done': { id: string };
   'browser:state': BrowserState;
+  'browser:shield-state': ShieldStatus;
   'sync:changed': SyncStatus;
 }
 

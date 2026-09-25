@@ -331,7 +331,11 @@ export async function exportToDrive(
           // Video gets an image beside it only: tagging would make ffmpeg rewrite the whole file.
           sidecarOnly: isVideoFile,
           besideImage: isVideoFile,
-          folderImage: !isVideoFile,
+          // A folder image only where the folder *is* an album. Writing one beside every track put
+          // a cover.jpg in hundreds of one-song folders, which is what made a television show a
+          // library of folders instead of songs. Embedded artwork already gives each track its
+          // thumbnail, so nothing is lost by leaving it out.
+          folderImage: !isVideoFile && entry.target.split('/').length > 3,
         });
       } catch (err) {
         log.debug(`Artwork for ${path.basename(dest)} skipped: ${err instanceof Error ? err.message : String(err)}`);

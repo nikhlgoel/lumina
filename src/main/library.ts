@@ -461,7 +461,8 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
       ON CONFLICT(id) DO UPDATE SET path=excluded.path, root=excluded.root, kind=excluded.kind, title=excluded.title, artist=excluded.artist, album=excluded.album,
         track_no=excluded.track_no, duration_sec=excluded.duration_sec, codec=excluded.codec, bitrate_kbps=excluded.bitrate_kbps, sample_rate=excluded.sample_rate,
         bit_depth=excluded.bit_depth, lossless=excluded.lossless, width=excluded.width, height=excluded.height, has_artwork=excluded.has_artwork,
-        size_bytes=excluded.size_bytes, mtime_ms=excluded.mtime_ms`)
+        size_bytes=excluded.size_bytes, mtime_ms=excluded.mtime_ms,
+        loudness_lufs=NULL, true_peak_db=NULL`)
       .run(r.id, r.path, r.root, r.kind, r.title, r.artist, r.album, r.track_no, r.duration_sec, r.codec, r.bitrate_kbps, r.sample_rate, r.bit_depth, r.lossless, r.width, r.height, r.has_artwork, r.size_bytes, r.mtime_ms, r.added_at);
   }
 
@@ -508,3 +509,22 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
 }
 
 export const library = new Library();
+
+/**
+ * Remember what a track measured, so it is decoded once rather than on every play.
+ *
+ * Keyed by path rather than row id because the id is derived from the path anyway and this is
+ * written from the player, which knows the file it is playing and nothing else about the row.
+ */
+export function rememberLoudness(path: string, integratedLufs: number, truePeakDbfs: number | null): void {
+  database().prepare('UPDATE library_items SET loudness_lufs = ?, true_peak_db = ? WHERE path = ?')
+    .run(integratedLufs, truePeakDbfs, path);
+}
+
+/** What a track measured last time, if it has been measured since it last changed. */
+export function storedLoudness(path: string): { integratedLufs: number; truePeakDbfs: number | null } | null {
+  const row = database().prepare('SELECT loudness_lufs, true_peak_db FROM library_items WHERE path = ?').get(path) as
+    { loudness_lufs: number | null; true_peak_db: number | null } | undefined;
+  if (!row || row.loudness_lufs === null) return null;
+  return { integratedLufs: row.loudness_lufs, truePeakDbfs: row.true_peak_db };
+}

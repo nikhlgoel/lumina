@@ -5,6 +5,283 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-09-25 (29) - Four asks, and three of them turned on a measurement
+
+### Volume past 100%, without the distortion that usually comes with it
+
+`HTMLMediaElement.volume` is 0..1 by specification and silently clamps anything more, so louder than
+100% cannot come from the element. Above it the element sits at unity and a gain node makes up the
+difference - followed by a limiter, because gain on its own is exactly how "volume boost" got its
+bad name. Below 100% the limiter is configured to do nothing at all (ratio 1), so ordinary listening
+is not coloured to pay for a feature it does not use. **D18**, 13 tests.
+
+### The app would not start, and every check was green
+
+The capture step saved 170%, and the next launch showed **"Lumina couldn't start - The volume
+provided (1.7) is outside the range [0, 1]"**. `tsc` clean, 893 tests passing, `vite build` clean.
+Two places set the startup volume - the store at creation and `App.tsx` after settings loaded - and
+only one of them had been taught the split. `applyStoredVolume` is now the only way in.
+
+This is the second time in two sessions that a green suite sat on top of a dead app. It is the whole
+argument for the capture harness.
+
+### Downloads: the premise was wrong, and measuring said so in two commands
+
+"More connections" was the assumed fix. It cannot be:
+
+    connections=1  : 12017ms => 26 Mbps
+    connections=4  : 13127ms => 24 Mbps
+    connections=16 : 12847ms => 24 Mbps
+
+The link saturates around 25 Mbit/s; extra sockets buy nothing. What does cost time is **~4.8 s per
+item** for yt-dlp to work out what to fetch - measured twice, consistently - against ~2.5 s of
+actual transfer for an 8 MB song. So a 433-song playlist is ~53 minutes, of which ~35 are *waiting*,
+with the line running at about 9 of its 25 Mbit/s.
+
+The only lever is doing several items at once. One playlist is now split between four yt-dlp
+processes, each with its own `--playlist-items` slice and its own copy of the download archive
+(several processes appending to one file is a race nobody should have to reason about), merged at
+the end. ~53 minutes to ~13, by calculation. **D19**, 21 + 2 tests. Not yet watched on a real
+playlist - that needs a signed-in profile.
+
+Also checked and cleared rather than assumed: yt-dlp's JS runtime. `JS runtimes: node-24.21.0`, so
+the app is **not** falling into the slow-interpreter trap that throttles YouTube to a crawl. A first
+attempt reported `none` and was my own path-format mistake, not a finding.
+
+### A Like on the player, and a key collision TypeScript is happy with
+
+`F` was the obvious shortcut and was already Fullscreen. A duplicate `case` in a `switch` is legal
+TypeScript, so `tsc` stayed green while Fullscreen would silently have stopped working. Found by
+reading the switch. Moved to `H`. Proven end to end: a capture pressed `H` during playback and the
+`likes` table went 0 to 1 for the track that was playing.
+
+### The browser shield
+
+A real Adblock Plus engine in `src/core/shields.ts` - `||domain^`, wildcards, separators, `$type`,
+`$third-party`, `$domain=`, `@@` exceptions, element hiding - attached to the browser session's
+`onBeforeRequest`, so a blocked tracker never leaves the machine. Plus https upgrading, per-site
+"shields down", and a badge that counts and names what it stopped. **D20**, 44 tests.
+
+Its own test caught a parser bug on the first run: element-hiding rules separate domains with
+**commas**, `$domain=` with **pipes**, and I had conflated them.
+
+Then the index was measured against the real lists - 115,598 network rules, 24,347 cosmetic:
+
+| | biggest bucket | per request |
+|---|---|---|
+| filed by longest token | 2766 | 114 us |
+| filed by rarest token | **79** | **50 us** |
+
+Filing by length looks sensible and is wrong: `analytics` is long, so 838 rules shared one bucket
+and every analytics request was compared against all of them. A first attempt at the same problem -
+removing a per-request array allocation - changed nothing, which is worth recording as a wrong
+theory that measurement killed in one run.
+
+Verified against a local page carrying two known trackers: both blocked, correctly split into
+1 ad + 1 tracker, named in the panel, and an unrelated CDN script left alone - on the 47 built-in
+rules alone, with nothing downloaded. That floor is deliberate: a shield that only works after a
+download silently does nothing on a first run.
+
+**Verified:** `npx tsc --noEmit` clean, `npx vitest run` **937 passed (44 files)**,
+`npx vite build` clean, four capture runs, each looked at.
+
+**Not proven:** no real playlist through the parallel downloader; no real ad-funded site through the
+shield, so nothing is known about how often it breaks a page; nobody has listened to the 200% boost.
+
+**Next:** B5 (playlists), B3 (a real equalizer), B7 (keyboard + `Shift+?`), and the multi-interface
+half of B6.
+
+---
+
+## 2026-09-25 (28) — The progress bar was never broken; it was measuring the wrong thing
+
+### Two sessions blamed the parser. A capture settled it in one run.
+
+B1 — "downloads show no usable progress" — had been reported three times, and two theories about the
+parser had been built and disproved. Rather than build a third, the bundled yt-dlp was run against
+three public Big Buck Bunny samples using the **exact argv `buildDownloadArgs` produces** (dumped
+from the real function through a throwaway test, so the flags could not drift from the app's), and
+every output line was captured.
+
+All 105 lines then went through the live progress model. It produced a clean, monotonic 0→99% ramp
+with correct speeds and byte totals. **Nothing was broken.**
+
+The fault is arithmetic, and it is complete on its own:
+
+    433 items: each file is 0.23% of the bar; the % number changes once every 5 files
+
+So on the reported playlist the whole-number percentage sat on one value for five songs, the bar
+crept a quarter of a percent per song, and for the first five songs it read exactly `0%`. That is
+"215 of 433 beside 0%" and "it just keeps progressing until it's complete" — with every figure in
+the pipeline honest. The number on screen was simply the wrong one for someone watching a single
+song download.
+
+Fixed by reporting `filePercent` as well and giving the file in hand the headline and the main bar,
+with the playlist on a thinner bar underneath (**D15**). The model moved into
+`src/core/ytdlpProgress.ts`, where the real capture is replayed against it — it had been sitting in
+a main-process file where no test could reach it, which is precisely how it absorbed blame twice.
+
+### The replay test found a second bug on its first run
+
+It asserted that `ExtractAudio` is labelled "Extracting audio" and got **"Processing"**. yt-dlp
+reports a postprocessor by its `pp_key()`, which strips the trailing `PP` *and the leading
+`FFmpeg`* — so `FFmpegExtractAudio` in the lookup matched nothing. **Seven of thirteen labels were
+dead.** Every music download in the app's history said a flat "Processing" during its longest phase.
+Confirmed against the real binary, which printed `Metadata`, `MoveFiles`, `ThumbnailsConvertor` and
+`VideoRemuxer` — none of them prefixed.
+
+This is D11's bug again in a different costume (`-map 0:v:m:disposition:attached_pic` also looked
+right and matched nothing), so it is written down as a rule this time: **D17 — names another program
+emits are pinned by a capture, and the wrong form is forbidden by the same test.**
+
+### Shuffle was not a shuffle
+
+Reading `advance()`: with shuffle on it picked a random *other* index and **ignored the direction
+argument entirely**. Two consequences, both real — songs repeat while others never play, and
+**Previous moved forward**, dealing another random track instead of returning to the one just heard.
+There was no history, so there was nothing to go back to. Replaced by a kept permutation plus a
+cursor in `src/core/shuffle.ts` (**D16**, 13 tests, seeded generator so the properties are actually
+asserted: full coverage, no repeat across the seam, exact retracing backwards).
+
+### The loudness switch was inert, and now it isn't
+
+`applyLoudness` ran only when a track loaded, so flipping "match the volume of every track" did
+nothing until the next song. By the user's own standard that is a feature "for show" — it is
+indistinguishable from a switch that was never wired up. It now re-applies to the track playing.
+
+### Seen, not just type-checked
+
+The sound panel had **no capture step at all**, which is exactly why last session's toggle shipped
+unseen. Two steps were added. `13b-player-sound` shows the panel open over a real track playing with
+the checkbox on; `13c-player-loudness-off` shows it off with the explanation changed — so it
+renders, round-trips through settings and re-renders, mid-playback. Six screenshots, six distinct
+hashes, no identical pairs. The app log for that run:
+
+    [loudness] Love Me.opus: -11.6 LUFS, peak 2 dBFS, in 3276ms
+
+A real track peaking 2 dB above full scale, turned down 3 dB to keep it under the ceiling.
+
+The Queue layout was photographed with a seeded multi-item job: two bars, `49% of all 433`. Recorded
+honestly — that job is `paused`, so the headline number and the speed/ETA line, which draw only for
+a `running` job, are built but unseen.
+
+### A false alarm, checked rather than filed
+
+The capture run exited 1 with no `after_move` lines, which looked like "successful downloads
+reported as failures". It was not: `ffprobe` showed the Big Buck Bunny samples are **video-only**, so
+`--extract-audio` legitimately failed and no final file was ever moved. Correct behaviour from both
+programs. Worth recording because the instinct to file it as a bug was wrong.
+
+**Verified:** `npx tsc --noEmit` clean · `npx vitest run` **857 passed (41 files)** · `npx vite build`
+clean · capture run of six steps, all distinct.
+
+**Next:** B7 (keyboard + `Shift+?`) and B4 (Like on the player) are both self-contained; then B5
+(playlists) and B3 (a real equalizer). R1 still needs its adapter picker and a real cable.
+
+---
+
+## 2026-09-25 (27) — Why it sounded worse than Spotify: it was clipping, not quiet
+
+### The measurement came first, and it inverted the assumption
+
+"Their music sounded better at the same volume, ours was weak." The obvious reading is that Lumina
+plays too quietly, so the library was measured before anything was written. Six tracks:
+
+    -11.2 LUFS   peak  +0.1 dBFS
+    -14.0 LUFS   peak  -2.2
+     -9.7 LUFS   peak  +0.4
+     -8.7 LUFS   peak  +1.9
+     -9.2 LUFS   peak  +2.1
+     -9.4 LUFS   peak  +1.6
+
+They are **louder** than Spotify's -14 LUFS target, not quieter — and almost all of them peak
+**above full scale**. A wider sample through the real app found -5.4 and -5.1 LUFS masters peaking
+at +2.8 and +2.4, and one track at **+5.6 dBFS**. Seven of eight were clipping. That is heard as
+harsh and flat, which is exactly what "weak" describes — the opposite diagnosis from the obvious one.
+
+### What was built
+
+`src/core/loudness.ts` (21 tests) decides the gain: reach the target, but never exceed -1 dBTP, and
+where those disagree the peak wins — boosting a quiet track into clipping would recreate the very
+fault being removed. `src/main/media/loudness.ts` runs `ebur128` once per file and stores the answer
+on the library row (migration 3); the scanner clears it when a file changes. The renderer applies it
+as a **gain node ahead of the equalizer**, never by touching `media.volume`, so the volume slider
+keeps meaning what the listener set it to.
+
+**Proven through the real app, not the unit tests**: a capture run called the new `player:loudness`
+channel for three library tracks — the migration applied, ffmpeg ran, the parser read the summary,
+and the results persisted (`-5.4 / +2.8`, `-5.1 / +2.4`, `-11.6 / +2.0`).
+
+**Not proven:** nobody has listened to it, and the toggle added to the player's sound panel
+type-checks but has not been seen rendered.
+
+### Two harness mistakes worth recording
+
+`execFileSync` only exposes stderr when the command *fails*, and `ebur128` exits 0 — so the first
+run of the real-file check reported "no summary" for all eight tracks. The parser was fine; the
+harness was wrong. Second: the capture step guessed the channel `library:list`, which does not
+exist (it is `library:items`), and failed silently because renderer `console.log` never reaches the
+shell on Windows. Both were found by checking the database rather than trusting the absence of output.
+
+**Verification:** `tsc --noEmit` clean · **823 tests, 39 files** · `vite build` clean.
+
+---
+
+## 2026-09-24 (26) — A music drive that made sense, and a written home for the rules
+
+The installer from session 25 did land: `C:Program FilesLumina
+esourcesapp.asar` is the 15:15 build and
+carries all three fix markers. So everything reported this session was against the **fixed** build, which matters
+— the download-progress complaint has now survived a fix, so the earlier diagnosis was wrong.
+
+### Songs appeared on the television as folders — fixed, and measured
+
+Every track was filed as `Music/Artist/Album/Title`. The assumption that most downloads carry no album tag was
+**wrong** — 435 of 455 do — but the tag YouTube Music writes is usually *unique to that one track*, so
+`Artist/Album/` still produced a folder per song, each holding one song and a `cover.jpg`. On a television,
+which lists folders, a music library became hundreds of folders.
+
+`realAlbums()` in `src/core/portable.ts` now treats an album as real only when it is named **and** more than one
+exported track belongs to it. Real albums keep `Artist/Album/NN Title`; everything else goes flat as
+`Music/Artist - Title`. The folder image follows the same rule, so a lone track no longer gets a `cover.jpg`
+next to it.
+
+**Measured on the real library through the actual `planExport`**, not a replica: **383 folders → 42**, for 455
+songs. Sample of each shape: `Music/dollelita - cinnamon girl - lana del rey (sped up).flac` and
+`Music/Arctic Monkeys/AM/I Wanna Be Yours.flac`.
+
+Consequence worth knowing: target paths changed, so a drive exported under the old layout will be written again
+in the new shape, and the old folders are not removed automatically.
+
+### Download progress — narrowed with evidence, still not solved
+
+Reported for the third time. This time it was reproduced rather than reasoned about: a real 30 MB download of a
+public sample, driven through the actual paste → inspect → Download flow and photographed as it ran, showed
+`16 connections · 7.6 MB of 29.3 MB · 4.0 MB/s · 5s left`, **25%**, and a bar filled to a quarter.
+
+So the **aria2 path is fine**, and this is specific to the **yt-dlp path** — which is exactly what the reporter
+downloads. The attempt to reproduce it there did not get far enough: a cold capture profile took over 12 seconds
+merely to inspect a YouTube URL, so the download never started and the Download button was still a skeleton.
+Recorded in `BUGS.md` as B1 with both disproved theories, so nobody rebuilds them.
+
+Found in passing and fixed: the row printed the byte count **twice**, because the aria2 stage text repeated what
+the progress meta already showed.
+
+### Documentation the project has never had
+
+`AGENTS.md` (canonical rules, workflow, the traps that keep biting), `CLAUDE.md` (a pointer, not a second copy),
+`DECISIONS.md` (13 decisions with what forced each one), `BUGS.md` (open defects, fixed list, won't-fix, and an
+explicit *not proven* section) and `CHANGELOG.md`. Until now every session re-derived the rules from a 813-line
+handover.
+
+`BUGS.md` also records the backlog raised this session: loudness against Spotify/YouTube Music, a real equalizer,
+a Like control on the player, playlists worth the name, multi-interface downloading, and full keyboard operation.
+
+**Verification:** `tsc --noEmit` clean · **772 tests, 37 files** · `vite build` clean · the layout measured
+through the real planner, and the progress row photographed from a real download.
+
+---
+
 ## 2026-09-19 (25) — The first full 67-step capture run, and four things it caught
 
 The full capture sweep has been outstanding since session 13. It ran, all 67 steps, and was read
@@ -173,7 +450,8 @@ Two things from live use, one proven fixed and one only partly understood. Both 
 ### 1. Copying Lumina to a drive failed at `app.asar` — fixed and proven
 
 The screenshot showed the copy stopping at 349 MB of 732 MB with
-`ENOENT, not found in C:Program FilesLuminaesourcesapp.asar`. The cause is Electron, not the copy logic:
+`ENOENT, not found in C:Program FilesLumina
+esourcesapp.asar`. The cause is Electron, not the copy logic:
 a packaged `app.asar` is presented to `fs` as a **directory**, so `copyDir` walked *into* the archive and tried
 to copy the files it believed were inside it. `measure()` had the same fault, reporting the archive's
 uncompressed contents as the size to copy.
@@ -182,12 +460,14 @@ uncompressed contents as the size to copy.
 `createRequire`, so the archive is seen as the one file it is. Scoped to this module deliberately, rather than
 setting the process-wide `process.noAsar`, which would break every other read from the archive while a copy ran.
 
-**Proven, not assumed.** A probe under real Electron against the installed `C:Program FilesLuminaesources`:
+**Proven, not assumed.** A probe under real Electron against the installed `C:Program FilesLumina
+esources`:
 
     app.asar via patched fs   : isDirectory=true  isFile=false
     app.asar via original-fs  : isDirectory=false isFile=true
 
-    patched fs  (the bug): FAILED -- ENOENT,  not found in C:Program FilesLuminaesourcesapp.asar
+    patched fs  (the bug): FAILED -- ENOENT,  not found in C:Program FilesLumina
+esourcesapp.asar
     original-fs (the fix): COPIED 22 files, 165361985 bytes
     copied app.asar byte-identical: true (16424011 bytes)
 

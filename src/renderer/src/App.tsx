@@ -5,7 +5,7 @@ import { initAudio } from '@/lib/audio';
 import { useApp, type View } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
 import { useLibrary } from '@/stores/library';
-import { media, usePlayer } from '@/stores/player';
+import { applyStoredVolume, media, usePlayer } from '@/stores/player';
 import { MiniBar, Sidebar, Toasts } from '@/components/Shell';
 import { QuickCheck } from '@/components/QuickCheck';
 import { Shortcuts } from '@/components/Shortcuts';
@@ -72,8 +72,8 @@ export function App() {
       await Promise.all([useJobs.getState().init(), useLibrary.getState().init()]);
       const player = useApp.getState().settings?.player;
       if (player) {
-        media.volume = player.volume;
-        usePlayer.setState({ volume: player.volume, stage: player.autoOpenLyrics ? 'lyrics' : 'art' });
+        applyStoredVolume(player.volume);
+        usePlayer.setState({ stage: player.autoOpenLyrics ? 'lyrics' : 'art' });
       }
       initAudio();
     })().catch((err) => setFailure(errorMessage(err)));
