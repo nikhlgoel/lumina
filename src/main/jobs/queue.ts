@@ -7,6 +7,8 @@ import { database } from '../db';
 import { settings } from '../settings';
 import { tempDir } from '../paths';
 import { logger } from '../log';
+import { classifyFailure, nextProbeDelayMs, retryLabel, waitedTooLong } from '../../core/networkRetry';
+import { fetchValidators } from '../resumeProbe';
 
 const log = logger('queue');
 
@@ -22,7 +24,7 @@ export interface RunnerContext {
 
 export interface RunnerHandle {
   /** Stop work. Paused jobs must be resumable by starting again. */
-  stop: (reason: 'pause' | 'cancel') => void;
+  stop: (reason: 'pause' | 'cancel') => void | Promise<void>;
 }
 
 export type Runner = (ctx: RunnerContext) => RunnerHandle;
@@ -122,18 +124,81 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   private maybeAutoRetry(job: Job) {
     if (!settings.get().downloads.autoRetryFailed || job.engine === 'convert' || job.engine === 'subtitles' || job.engine === 'extract') return;
     const attempts = job.engineState.autoRetries ?? 0;
-    const msg = `${job.error?.message ?? ''} ${job.error?.detail ?? ''}`.toLowerCase();
-    const transient = /(timed? ?out|connection|network|internet|reset|429|rate-limit|503|502|500|temporar|eof|ssl)/.test(msg)
-      && !/(private|drm|unavailable|not found|404|members|age-restricted|disk is full|can’t download)/.test(msg);
-    if (!transient || attempts >= 3) return;
+    const kind = classifyFailure(job.error?.message, job.error?.detail);
+    // A lost connection is not a "try three times" problem: wait for it, however long, and go the
+    // moment it is back (core/networkRetry has the measurement behind this).
+    if (kind === 'network') return this.waitForNetwork(job);
+    if (kind !== 'transient' || attempts >= 3) return;
     const delay = [30, 120, 600][attempts]! * 1000;
-    this.set(job, { engineState: { ...job.engineState, autoRetries: attempts + 1 }, progress: { ...job.progress, stage: `Retrying in ${Math.round(delay / 60000) || '<1'} min` } });
+    this.set(job, { engineState: { ...job.engineState, autoRetries: attempts + 1 }, progress: { ...job.progress, stage: `Retrying in ${retryLabel(delay)}` } });
     this.retryTimers.set(job.id, setTimeout(() => {
       this.retryTimers.delete(job.id);
       const current = this.jobs.get(job.id);
       if (current?.status === 'failed') this.set(current, { status: 'queued', error: null, progress: { ...current.progress, stage: 'Retrying' } });
       this.schedule();
     }, delay));
+  }
+
+  private netWaiters = new Map<string, { since: number; attempt: number; timer: NodeJS.Timeout | null }>();
+
+  /** True while a failed job is going to be started again by itself, so a failure notice would mislead. */
+  willRetry(id: string): boolean {
+    return this.retryTimers.has(id) || this.netWaiters.has(id);
+  }
+
+  private clearNetWait(id: string) {
+    const w = this.netWaiters.get(id);
+    if (w?.timer) clearTimeout(w.timer);
+    this.netWaiters.delete(id);
+  }
+
+  private waitForNetwork(job: Job) {
+    const w = this.netWaiters.get(job.id) ?? { since: Date.now(), attempt: 0, timer: null };
+    if (waitedTooLong(w.since, Date.now())) {
+      this.netWaiters.delete(job.id);
+      this.set(job, { error: { message: 'Gave up waiting for the network after 6 hours. Press Retry to resume.', detail: job.error?.detail } });
+      return;
+    }
+    const delay = nextProbeDelayMs(w.attempt++);
+    // Failed rows show their error text, so that is where the person is told what is happening.
+    const first = !this.netWaiters.has(job.id);
+    this.netWaiters.set(job.id, w);
+    this.set(job, {
+      error: { message: 'Connection lost. Lumina is waiting for the network and will resume by itself.', detail: first ? [job.error?.message, job.error?.detail].filter(Boolean).join('\n') : job.error?.detail },
+      progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Waiting for the network' },
+    });
+    w.timer = setTimeout(() => void this.probeNetwork(job.id), delay);
+  }
+
+  /** Is the server reachable again? Any HTTP answer counts, even a refusal: it means the network works. */
+  private async probeNetwork(id: string) {
+    const w = this.netWaiters.get(id);
+    const job = this.jobs.get(id);
+    if (!w || !job || job.status !== 'failed') {
+      this.clearNetWait(id);
+      return;
+    }
+    let back = true;
+    // Magnet links and local .torrent files have nothing to ask; through a proxy a plain fetch would go around it.
+    if (/^https?:/i.test(job.url) && !settings.get().network.proxy) {
+      const r = await fetchValidators(job.url, {});
+      back = r.ok || r.reason === 'status';
+    }
+    const now = this.jobs.get(id);
+    if (!now || now.status !== 'failed' || this.netWaiters.get(id) !== w) return; // cancelled or retried meanwhile
+    if (!back) return this.waitForNetwork(now);
+    log.info(`Network is back; resuming ${now.title}`, { waitedS: Math.round((Date.now() - w.since) / 1000) });
+    this.clearNetWait(id);
+    this.set(now, { status: 'queued', error: null, progress: { ...now.progress, stage: 'Reconnected, resuming' } });
+    this.schedule();
+  }
+
+  /** The computer woke from sleep, or the network changed: ask now rather than waiting out the timer. */
+  networkMayBeBack() {
+    for (const [id, w] of this.netWaiters) {
+      if (w.timer) clearTimeout(w.timer);
+      void this.probeNetwork(id);
+    }
   }
 
   pause(id: string) {
@@ -156,19 +221,37 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
 
   cancel(id: string) {
     const job = this.jobs.get(id);
-    if (!job || FINISHED.includes(job.status)) return;
-    this.handles.get(id)?.stop('cancel');
+    if (!job || FINISHED.includes(job.status) || this.cancelling.has(id)) return;
+    const stopping = this.handles.get(id)?.stop('cancel');
     this.handles.delete(id);
+    this.clearNetWait(id);
     this.cleanupWorkDir(job);
-    this.set(job, { status: 'cancelled', progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Cancelled' } });
-    this.schedule();
+    const finish = () => {
+      this.cancelling.delete(id);
+      const current = this.jobs.get(id);
+      if (current && !FINISHED.includes(current.status)) {
+        this.set(current, { status: 'cancelled', progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Cancelled' } });
+      }
+      this.schedule();
+    };
+    if (!stopping) return finish();
+    // Removing a torrent's files has to wait for aria2 to let go of them — measured ~5 s. Saying
+    // "Cancelled" at once let a Retry start a second run on the same paths while the first run's
+    // cleanup was still pending. So the job stays as it is, labelled "Cancelling…", until it is done.
+    this.cancelling.add(id);
+    this.set(job, { progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Cancelling…' } });
+    const giveUp = new Promise<void>((resolve) => setTimeout(resolve, 20_000));
+    void Promise.race([stopping.catch(() => undefined), giveUp]).then(finish);
   }
+
+  private cancelling = new Set<string>();
 
   retry(id: string) {
     const job = this.jobs.get(id);
     if (!job || !['failed', 'cancelled'].includes(job.status)) return;
     clearTimeout(this.retryTimers.get(id));
     this.retryTimers.delete(id);
+    this.clearNetWait(id);
     this.set(job, { status: 'queued', error: null, progress: emptyProgress('Waiting'), engineState: { ...job.engineState, autoRetries: 0 } });
     this.schedule();
   }
@@ -179,6 +262,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     if (!FINISHED.includes(job.status) && job.status !== 'paused') this.cancel(id);
     clearTimeout(this.retryTimers.get(id));
     this.retryTimers.delete(id);
+    this.clearNetWait(id);
     this.jobs.delete(id);
     database().prepare('DELETE FROM jobs WHERE id = ?').run(id);
     this.emit('removed', id);
@@ -198,6 +282,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
       if (job) this.save(job, true);
     }
     this.handles.clear();
+    for (const id of [...this.netWaiters.keys()]) this.clearNetWait(id);
   }
 
   activeCount(): number {
@@ -247,7 +332,8 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     fs.mkdirSync(workDir, { recursive: true });
     this.set(job, { status: 'running', error: null, progress: { ...job.progress, stage: 'Starting' } });
 
-    const isCurrent = () => this.jobs.get(job.id)?.status === 'running' || this.jobs.get(job.id)?.status === 'processing';
+    // A job being cancelled still has its old status for a moment; nothing the old run says may count.
+    const isCurrent = () => !this.cancelling.has(job.id) && (this.jobs.get(job.id)?.status === 'running' || this.jobs.get(job.id)?.status === 'processing');
     const ctx: RunnerContext = {
       workDir,
       job: () => this.jobs.get(job.id) ?? job,
@@ -281,8 +367,9 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
         this.handles.delete(job.id);
         log.warn(`Job failed: ${current.title}`, { message, detail: detail?.slice(-4000) });
         this.set(current, { status: 'failed', error: { message, detail }, progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Failed' } });
-        this.emit('failed', this.jobs.get(job.id)!);
+        // Decide on a retry first, so the failure listener can tell a job that will start again by itself.
         this.maybeAutoRetry(this.jobs.get(job.id)!);
+        this.emit('failed', this.jobs.get(job.id)!);
         this.schedule();
       },
     };

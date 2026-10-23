@@ -219,7 +219,11 @@ export interface Job {
   error: { message: string; detail?: string } | null;
   compat: CompatReport | null;
   /** Engine bookkeeping that survives restarts (e.g. items already finished). */
-  engineState: { finishedItems: number; autoRetries?: number; cookieFallback?: boolean };
+  engineState: {
+    finishedItems: number; autoRetries?: number; cookieFallback?: boolean;
+    /** What the server said about the file when the download began; compared again before a resume. */
+    validators?: { etag: string | null; lastModified: string | null; size: number | null };
+  };
   /** Where the job came from; browser downloads are quieter (no notification for small files). */
   origin?: 'app' | 'browser';
   /** Source info used to (re)start: playlist entries, direct file name, captured request, etc. */

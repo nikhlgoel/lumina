@@ -1,4 +1,4 @@
-import { app, dialog, Notification, shell } from 'electron';
+import { app, dialog, Notification, powerMonitor, shell } from 'electron';
 // MUST be the first Lumina import: it redirects userData before any module reads a path.
 import './portableMode';
 import fs from 'node:fs';
@@ -221,9 +221,16 @@ if (!app.requestSingleInstanceLock()) {
         notify('Download complete', job.title, () => (target ? shell.showItemInFolder(target) : showWindow('downloader')));
       }
     });
+    // After sleep the network usually takes a moment to come back; a job that was waiting for it asks
+    // straight away instead of sitting out its timer, and a stalled torrent gets re-announced.
+    powerMonitor.on('resume', () => {
+      log.info('Resumed from sleep; checking whether waiting downloads can continue');
+      queue.networkMayBeBack();
+    });
     queue.on('failed', (job) => {
       const w = mainWindow();
-      if (settings.get().general.notifyOnFail && (!w || !w.isVisible() || !w.isFocused())) {
+      // A job that will start again by itself (waiting for the network, a short retry) did not really fail.
+      if (settings.get().general.notifyOnFail && !queue.willRetry(job.id) && (!w || !w.isVisible() || !w.isFocused())) {
         notify('Download failed', `${job.title}: ${job.error?.message ?? 'unknown error'}`, () => {
           showWindow('downloader');
           broadcast('app:navigate', { view: 'queue' });

@@ -2,6 +2,7 @@ import { FILE_PREFIX, ITEM_PREFIX, POSTPROCESS_PREFIX, PROGRESS_PREFIX } from '.
 
 export type YtdlpEvent =
   | { type: 'progress'; status: string; downloaded: number | null; total: number | null; speed: number | null; eta: number | null; fragment: [number, number] | null }
+  | { type: 'aria2'; downloaded: number | null; total: number | null; percent: number | null; speed: number | null; eta: number | null; connections: number }
   | { type: 'postprocess'; status: string; name: string }
   | { type: 'item'; index: number | null; count: number | null; title: string }
   | { type: 'file'; path: string }
@@ -13,10 +14,71 @@ const num = (v: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+const SIZE_UNITS: Record<string, number> = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
+
+/** aria2 prints sizes as `784KiB`, `2.6MiB`, `0B`. */
+const ariaSize = (v: string): number => {
+  const m = /^([\d.]+)([KMGT]?i?B)$/.exec(v);
+  return m ? Number(m[1]) * (SIZE_UNITS[m[2]!] ?? 1) : 0;
+};
+
+/** aria2 prints an ETA as `36s`, `1m5s` or `1h2m3s`. */
+const ariaEta = (v: string): number => {
+  const m = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(v);
+  return m ? Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0) : 0;
+};
+
+const ARIA2_READOUT = /\[#\w+ ([\d.]+[KMGT]?i?B)\/([\d.]+[KMGT]?i?B)(?:\((\d+)%\))? CN:(\d+)(?: DL:([\d.]+[KMGT]?i?B))?(?: ETA:(\w+))?\]/g;
+
+/**
+ * aria2's own readout, e.g. `[#be47bb 7.3MiB/29MiB(25%) CN:16 DL:5.1MiB ETA:4s]`.
+ *
+ * When yt-dlp hands a plain http(s) download to aria2c it stops printing its own progress lines
+ * (one `finished` at the very end), so this is the only live figure there is. Several downloads can
+ * share a line; their figures add. Sizes are rounded by aria2 to three digits, so the bytes are
+ * approximate and the printed percentage is the better fraction.
+ */
+function parseAria2Readout(text: string): YtdlpEvent | null {
+  const rows = [...text.matchAll(ARIA2_READOUT)];
+  if (!rows.length) return null;
+  let downloaded = 0, total = 0, speed = 0, eta = 0, connections = 0;
+  for (const [, done, size, , cn, dl, left] of rows) {
+    downloaded += ariaSize(done!);
+    total += ariaSize(size!);
+    connections += Number(cn);
+    speed += dl ? ariaSize(dl) : 0;
+    eta = Math.max(eta, left ? ariaEta(left) : 0);
+  }
+  const printed = rows.length === 1 ? rows[0]![3] : undefined;
+  return {
+    type: 'aria2',
+    downloaded: total ? downloaded : null,
+    total: total || null,
+    percent: printed != null ? Number(printed) : total ? (100 * downloaded) / total : null,
+    speed,
+    // aria2 drops the ETA entirely when it cannot estimate one; that is "unknown", not the last value.
+    eta: rows.some(([, , , , , , left]) => left) ? eta : null,
+    connections,
+  };
+}
+
+const OWN_LINE_START = new RegExp(`(?=(?:${[PROGRESS_PREFIX, POSTPROCESS_PREFIX, ITEM_PREFIX, FILE_PREFIX].map((p) => p.replace('|', '\\|')).join('|')}))`);
+
+/**
+ * Break a line where yt-dlp's own output was glued onto aria2's.
+ *
+ * aria2 ends its final readout without a newline, so the next thing yt-dlp prints — the stream's
+ * `finished`, or the `LUMINA_FILE` path — arrives on the same line. Read as one line it starts with
+ * `[#` and the yt-dlp half is lost: a video's audio stream never started, as far as the progress
+ * model knew, and the bar fell from 49% to 5%. Seen in the app, never in the shell.
+ */
+export const splitYtdlpLine = (line: string): string[] => line.split(OWN_LINE_START).filter(Boolean);
+
 /** Parse one stdout/stderr line from a yt-dlp process started with buildDownloadArgs. */
 export function parseYtdlpLine(line: string): YtdlpEvent | null {
   const text = line.trim();
   if (!text) return null;
+  if (text.startsWith('[#')) return parseAria2Readout(text);
   if (text.startsWith(PROGRESS_PREFIX)) {
     const [status = '', dl, total, estimate, speed, eta, fi, fc] = text.slice(PROGRESS_PREFIX.length).split('|');
     const fragIndex = num(fi);
@@ -117,12 +179,16 @@ export function friendlyAria2Error(message?: string): string {
   const m = (message ?? '').toLowerCase();
   if (m.includes('403')) return 'The server refused the download (403). If this came from a website, download it through the Lumina browser extension.';
   if (m.includes('404')) return 'The file wasn’t found on the server (404). The link may have expired.';
-  if (m.includes('no space') || m.includes('disk full')) return 'The disk is full. Free up space or choose another download folder, then press Retry.';
+  // Windows says "There is not enough space on the disk." (captured from a real full NTFS volume),
+  // POSIX says "No space left on device" / ENOSPC; the old check knew only the second.
+  if (m.includes('no space') || m.includes('not enough space') || m.includes('enospc') || m.includes('disk full') || m.includes('disk is full')) return 'The disk is full. Free up space or choose another download folder, then press Retry.';
   if (m.includes('flush') || m.includes('disk cache') || m.includes('cannot write') || m.includes('write to file') || m.includes('file i/o'))
     return 'Couldn’t write to the disk — it may be full or disconnected. Free up space (or pick another folder) and press Retry to resume.';
+  // aria2's own wording for a refused or dropped connection, captured from a server that went away.
+  if (m.includes('network problem') || m.includes('no connection could be made') || m.includes('actively refused')) return 'The connection to the server was lost.';
   if (m.includes('name resolution') || m.includes('could not resolve')) return 'No internet connection, or the server name is wrong.';
   if (m.includes('file already exists') || m.includes('already exists')) return 'A file with this name already exists in the download folder.';
-  return message || 'Download stopped unexpectedly.';
+  return message?.trim() || 'Download stopped unexpectedly.';
 }
 
 export interface Aria2Status {
@@ -139,7 +205,17 @@ export interface Aria2Status {
   files?: { index: string; path: string; length: string; completedLength: string; selected: string }[];
   bittorrent?: { info?: { name?: string } };
   followedBy?: string[];
+  infoHash?: string;
 }
+
+/**
+ * Is this the download of a magnet link's metadata rather than of the files themselves?
+ *
+ * aria2 runs the two as separate downloads and reports the first with a pseudo-file called
+ * "[METADATA]<name>". Its size is the few KB of the .torrent, so it climbs to 100% in a moment and the
+ * row read "100%" for a download that had not started (measured). It is not progress on the real thing.
+ */
+export const isMetadataPhase = (s: Aria2Status): boolean => Boolean(s.files?.some((f) => f.path.startsWith('[METADATA]')));
 
 export function aria2Progress(s: Aria2Status) {
   const total = Number(s.totalLength) || null;

@@ -98,9 +98,17 @@ export function applyProgressEvent(state: ProgressModelState, ev: YtdlpEvent, o:
 
     case 'progress': {
       if (ev.status === 'finished') {
+        // The last aria2 readout is a rounded 93-98%, never 100, so the stream is completed here
+        // from the exact byte count on the `finished` line itself.
+        const done = ev.total ?? ev.downloaded;
         return {
           state: { ...state, streamIndex: Math.min(o.streamsPerItem - 1, state.streamIndex + 1), lastFraction: 0 },
-          patch: null,
+          patch: {
+            percent: overallPercent(state, 1, o.streamsPerItem),
+            filePercent: 100 * itemFraction(state, 1, o.streamsPerItem),
+            downloadedBytes: done,
+            totalBytes: done,
+          },
         };
       }
       const fraction = ev.total && ev.downloaded != null
@@ -108,6 +116,25 @@ export function applyProgressEvent(state: ProgressModelState, ev: YtdlpEvent, o:
         : ev.fragment
           ? ev.fragment[0] / ev.fragment[1]
           : state.lastFraction;
+      const next = { ...state, lastFraction: fraction };
+      return {
+        state: next,
+        patch: {
+          percent: overallPercent(next, fraction, o.streamsPerItem),
+          filePercent: 100 * itemFraction(next, fraction, o.streamsPerItem),
+          speedBps: ev.speed,
+          etaSec: ev.eta,
+          downloadedBytes: ev.downloaded,
+          totalBytes: ev.total,
+          stage: downloadStage(next, o),
+        },
+      };
+    }
+
+    case 'aria2': {
+      // Percent is the printed whole number, the only exact thing aria2 reports; the byte counts
+      // are rounded. A readout before the size is known keeps the last fraction instead of zero.
+      const fraction = ev.percent != null ? ev.percent / 100 : state.lastFraction;
       const next = { ...state, lastFraction: fraction };
       return {
         state: next,

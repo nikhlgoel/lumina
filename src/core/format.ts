@@ -1,9 +1,14 @@
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  const value = bytes / 1024 ** i;
-  return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+  let i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  // Show whole numbers from 100 up, one decimal below. Decide on the figure as it will be PRINTED:
+  // 99.95 prints as "100.0" and 1023.9 rounds to "1024", and a number is not allowed to reach 1024
+  // of one unit when it is 1.0 of the next (1,048,500 bytes used to read "1024 KB").
+  const shown = (v: number, unit: number) => (unit === 0 || Number(v.toFixed(1)) >= 100 ? Math.round(v) : Number(v.toFixed(1)));
+  if (i < units.length - 1 && shown(bytes / 1024 ** i, i) >= 1024) i += 1;
+  const n = shown(bytes / 1024 ** i, i);
+  return `${i > 0 && n < 100 ? n.toFixed(1) : n} ${units[i]}`;
 }
 
 /** "1 song", "3 songs". */
@@ -26,9 +31,14 @@ export function formatDuration(totalSec: number | null | undefined): string {
 
 export function formatEta(sec: number | null | undefined): string {
   if (sec == null || !Number.isFinite(sec) || sec < 0) return '—';
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  // Round once, then split: rounding the seconds part on its own printed "2m 60s" for 179.6.
+  const total = Math.round(sec);
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+  // A download that has all but stopped has an ETA of years; a figure like "277777h" helps nobody.
+  if (total >= 30 * 86400) return '> 30 days';
+  if (total >= 86400) return `${Math.floor(total / 86400)}d ${Math.floor((total % 86400) / 3600)}h`;
+  return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
 }
 
 /** Human label for a video height, e.g. 2160 → "4K". */

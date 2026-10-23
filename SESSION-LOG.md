@@ -5,6 +5,483 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-10-23 (44) - Rest of Phase B: torrent ENOSPC, magnet cancel/retry, Cancelling, stray .torrent
+
+Plan: `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md` S1, S9–S11. Nothing committed.
+
+* **Torrent ENOSPC (real 300 MB drive):** with the space check on, filling the drive just *pauses* the torrent and it resumes
+  when space is freed (completed, 272,629,760 bytes). To reach the engine's own error path I disabled the check once
+  (temporary switch, removed): failed at 63.7% with a readable message, Retry resumed, **byte-identical**.
+* **Magnet cancel/retry found two real bugs.** (1) `stop()` removed only the first of aria2's two downloads, so cancelling
+  just after the metadata arrived left the real download running unseen (259 MB written after "Cancelled"; Retry failed
+  with "InfoHash … is already registered"). Now removes everything `followedBy` too. (2) The row read 100% during the
+  metadata phase (`isMetadataPhase`, `tests/torrentPhase.test.ts`). After the fixes: cancel mid-download ⇒ empty folder that
+  stays empty for 30 s; retry completes.
+* **Stray `.torrent`:** not `bt-save-metadata` at all — aria2's `rpc-save-upload-metadata` saves every RPC-uploaded .torrent
+  as `<SHA-1 of the file>.torrent` (not the info hash). Turned off. A magnet's own `<info hash>.torrent` copy is kept for resume
+  and cleaned up on cancel/complete (best effort while seeding). Also enabled `--bt-load-saved-metadata`, which was missing, so a
+  resumed magnet no longer re-fetches its metadata.
+* **Cancelling state:** a cancelled job stays "running" with "Cancelling…" until cleanup is really done (files deleted with
+  retry, because Windows refuses to delete a file aria2 still holds), then becomes "Cancelled"; Retry is not offered before that.
+  `isCurrent()` now also ignores a cancelling job's late callbacks.
+* **RETRACTION:** the "cancel cleanup lags ~5 s" claim from entries 41/43 is wrong. With absolute timestamps the files were
+  gone within 150 ms. The watcher's clock started ~5 s before the app's. The generation guard and the Cancelling state stay as
+  defensive measures, not as fixes for a proven problem.
+* **Rig mistakes worth not repeating:** I took a saved file's name for the info hash (it is the SHA-1 of the *file*), so my
+  first magnet tests were refused by the seeder; the seeder must be started and hashed before the leecher arrives; Windows
+  paths are case-insensitive (`t2` = `T2`); a "warm-up" run left a control file that made the seeder serve nothing.
+* tsc clean, vitest 1061/1061, build ok.
+* **Not proven:** a real swarm / real tracker (everything is one local seeder); magnet copy cleanup after a long seed; a real
+  mid-piece ENOSPC with the check on (it pauses first).
+
+## 2026-10-23 (43) - Phase B: outages, sleep/wake, and a silent-corruption bug in resume
+
+Plan: `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md` (S2, S3). Nothing committed.
+
+* **Measured first.** Local range server (`serve2.mjs`: throttle, scheduled outage, optional content change, ETag/If-Range).
+  Outage 10→80 s: the job failed at ~29 s, then waited fixed 30 s / 2 min timers and resumed at **199 s**; three tries
+  (≈12.5 min) is the whole budget, so a longer outage ended as permanent "Failed". The label said "Retrying in 1 min"
+  for 30 s, and failed rows never show the stage text at all.
+* **Silent corruption found.** File changed during the outage ⇒ resume appended new content to the old partial:
+  80 MiB old + 170 MiB new, status "Done". aria2 sends no `If-Range`; the size was identical.
+* **Fixed:** `core/resumeCheck.ts` (validators: parse/compare, 10 tests) + `main/resumeProbe.ts` (one-byte ranged GET) +
+  a check in `aria2.ts` before a resume; changed ⇒ delete partial and restart, unreachable ⇒ fail as a network problem
+  so the retry re-checks. Skipped for proxies and file-host links. Result: 0 old / 250 new MiB.
+* **Fixed:** `core/networkRetry.ts` (classify network/transient/permanent, probe schedule, labels, 9 tests) + queue waiter:
+  network failures wait for the connection with no try-cap (6 h limit), probe the URL, resume the moment it answers;
+  `powerMonitor` `resume` asks immediately; no "Download failed" notification for a job that will retry itself. Also
+  "503 Service Unavailable" no longer classed as permanent (old regex matched "unavailable").
+* **Proven on the real runner:** outage → resumed at 94 s from 26% (was 199 s); simulated wake resumed 5 s after the
+  server returned; outage + changed file → waiting, restart, all-new content. tsc, vitest 1058, build ok.
+* **Not proven:** a real sleep/wake (only the event path); torrents after sleep (the 60 s stall ladder covers them, no
+  wake nudge); yt-dlp's own resume; hosted links; behaviour through a proxy (validation skipped).
+
+## 2026-10-23 (42) - Real full disk, display audit, and the improvement plan
+
+Plan and evidence: `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md`. Nothing committed.
+
+* **Real full disk** (owner made `V:`, a 300 MB NTFS VHD): direct download failed cleanly in ~8 s but showed Windows' raw
+  text, and Retry made `big (1).bin` beside an orphaned 111 MB partial and died of the same space. Fixed:
+  `friendlyAria2Error` knows "not enough space"/ENOSPC (+ trims line breaks); an unresumable partial (no `.aria2`) is
+  deleted when the job fails. Re-run: friendly message; Retry after freeing space completed under the same name.
+* **My own check was wrong:** the torrent space check counted received bytes, but a non-sparse file's gap is zero-filled
+  and allocated at once, so it blocked a torrent that fit. New `allocatedBytes` in `core/diskSpace.ts`; the 246 MB torrent
+  now completes on the 286 MB drive. "Space is available again; resuming" also seen firing after real freeing.
+* **Display audit** (code + one photograph): a no-length download shows "0%", an empty bar, no bytes, no ETA while data
+  flows. Eleven display faults logged (D1–D11) — none of the *layout* ones changed, they need the owner's mockup approval.
+  Fixed the pure ones: `formatEta` ("2m 60s", "59m 60s", "72h", "277777h 46m") and `formatBytes` ("1024 KB"),
+  `tests/formatDisplay.test.ts` (9).
+* **Research:** aria2 manual read for the options that matter (`--lowest-speed-limit` does not apply to BitTorrent;
+  `--bt-stop-timeout` off by default); IDM's dynamic segmentation and qBittorrent's "force reannounce" noted as vendor/
+  community claims. Searches for Free Download Manager recovery and browser resume rules found nothing usable.
+* **Plan:** `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md` — display truth first, then failure survival, then speed.
+* tsc clean, vitest 1038/1038, build ok. New capture probes: `LUMINA_PROBE_FULLDISK`, `LUMINA_PROBE_SHOT`.
+* **Not proven:** torrent ENOSPC mid-piece; the owner's real RDR2 torrent; anything in plan phases A–E.
+* Cleanup: my test files on `V:` and local servers removed. The owner still needs to detach the VHD (steps in the plan).
+
+## 2026-10-23 (41) - Download engine: cancel, retry, full disk
+
+Details in `docs/desktop-services-plan.md` ("Cancel, retry, full disk"). Nothing committed.
+
+* **Worked as is:** pause/resume continues, cancel removes partial + control file, retry restarts and completes —
+  for a 2 GB direct file and a 120 MB torrent (real runner, folder watched from outside).
+* **Gap found and fixed:** a torrent bigger than the disk had no check at all. New `src/core/diskSpace.ts` + a poll check
+  in `aria2.ts`: it pauses with the reason and resumes when it fits (proven: 205 GB torrent on 77 GB free paused, picking
+  the 5 GB file resumed it in 3 s). Direct-file pre-check also seen working (95 GB on 77 GB free, instant failure).
+* **Defensive change:** per-job run number so a cancelled run's delayed cleanup (≈5 s measured) can't delete the files of
+  an immediate Retry. I could not make that race fail, so this is not proven to fix anything.
+* **Mistakes in my own tooling, not the app:** two fake-torrent generator bugs, a hung `python` fallback, and a probe
+  step ordered before the point it needed. Noted so they aren't mistaken for app faults.
+* **Not proven:** real mid-write ENOSPC (needs an elevated prompt to make a small VHD; recipe in the plan), magnet
+  cancel, retry after a real disk-full failure.
+
+## 2026-10-23 (40) - Download engine: the "fine for minutes, then 0 B/s, never restarts" stall
+
+Owner redirected to one thing at a time: downloading, normal/parallel/torrent. Details and numbers in
+`docs/desktop-services-plan.md` ("Download stability"). Nothing committed.
+
+* **Evidence first:** the owner's `lumina.log` shows aria2's RPC going silent after 3–10 min on a 4.2 GB direct file and
+  on a torrent, then `aria2 exited (1)` after Lumina's 3-poll restart, repeating.
+* **Cause (measured, not assumed):** NTFS zero-fills the gap before a write past the end of a file — one 1 MB write
+  20 GB in took 37 s on this disk, 0 ms on a sparse file. aria2 serves RPC on the writing thread, so it looked dead,
+  and killing it threw the zero-fill away.
+* **Changed:** `src/main/sparse.ts` (new), `src/core/engineWatch.ts` (new: `needsSparse`, `rpcAction`, `stallStep`),
+  `src/main/jobs/aria2.ts` (sparse guard, 120 s grace before restarting a live engine, stall ladder),
+  `src/main/capture.ts` (`LUMINA_PROBE_URL`, `LUMINA_PROBE_SECS`).
+* **Proven on the real runner:** 24 GB local file 188 s with RPC timeouts → 73 s without; torrent rig recovery
+  by the ladder; final build byte-identical on a 120 MB torrent. tsc, vitest 1016, build ok.
+* **Dead ends worth knowing:** my first "baseline" swarm runs were invalid twice (the scratch seeder wasn't seeding
+  until `--continue --check-integrity`; a leftover swarm held the tracker port). A quiet-but-cooperative swarm
+  recovers by itself in ~80 s, so that is *not* the owner's failure; the hung engine is.
+* **Not proven:** the owner's ~100 GB torrent on their disk; non-NTFS drives; the new status texts on screen.
+
+## 2026-10-23 (39) - Desktop services: honest progress on the yt-dlp + aria2 path (B1)
+
+Working plan and evidence live in `docs/desktop-services-plan.md`. Nothing committed.
+
+* **Reproduced** with the bundled yt-dlp 2026.08.19 + aria2c 1.37.0 and the real `buildDownloadArgs` argv: with
+  acceleration on, a download prints one `LUMINA_DL|finished` and no `downloading` lines; aria2's own readout carries the
+  live figures and nothing parsed it. YouTube's https formats take this path too (two aria2 runs, video then audio).
+* **Fixed in `src/core`:** `progress.ts` parses the readout (`aria2` event) and gains `splitYtdlpLine`;
+  `ytdlpProgress.ts` folds the event into the model and completes a stream on `finished`; `ytdlp.ts` splits lines first.
+* **A second cause only the app showed:** aria2 ends its last readout without a newline, so yt-dlp's `finished` arrives
+  glued to it and was lost; the audio stream never started and the bar fell 49% → 5%. Found by logging the raw line
+  inside the runner after the shell run looked fine — a replay of the shell capture could not have shown it.
+* **Proven:** `tests/aria2Readout.test.ts` (13, real lines); tsc clean, vitest 1004/1004, vite build ok; a real
+  Electron run on a scratch profile (new `probe-` capture step) sampled 37 running states, 0 → 100, no backward step,
+  video → audio → merging → completed.
+* **Not proven:** the Queue row was not photographed live; readout byte totals are aria2-rounded; native (non-accelerated)
+  path not re-run; `CN:` parsed but shown nowhere (a UI change needs the owner's yes).
+* **Playlist question settled by code:** one playlist job (`JobRow.tsx:84` is the only `N of M`; groups say `N of M done`).
+  The "0%" half cannot be reproduced with current code.
+* Added `probe-` support to `src/main/capture.ts` (`LUMINA_PROBE_DIR`, `downloadProbe`). Note `electron .` runs
+  `dist-electron`; run `npx vite build` first or the app runs old code (it did, once, and nothing was captured).
+* Next: item 2 (parallel playlist downloads: concurrency, cancel, retry, full disk).
+
+## 2026-10-23 (38) - Fire TV: new signing key, and real YouTube/YouTube Music design research
+
+* **Follow-up, same day: the redesign was first reported "done" when it was not.** A first pass changed Library
+  chips, Settings tab grouping and added a Related tab, and I declared it finished; the owner opened the stick and
+  saw the same app, with the old top bar. I had dropped the sidebar (the main request) because `AppShell.kt`'s
+  comment said earlier sidebar designs were rejected. Second pass, built and **seen on the stick**: `ui/SideRail.kt`
+  (new) replaces the top bar; `Cards.kt` (square covers, 16:9 videos, duration badge, white ring, no glow);
+  `HomeScreen.kt` (one search bar, white chips, small Shuffle); `LibraryScreen.kt` (coloured heading, sidebar picks the
+  section); `SettingsScreen.kt` (two-pane, grouped); `NowPlayingScreen.kt`/`VideoScreen.kt` (Song | Video switch,
+  Related tab). 135 unit tests pass; zero crashes in the stick's crash log. Mistake to avoid next time: do not
+  treat a code comment as the owner's decision, and do not report "done" before looking at the screen.
+
+* **Re-signed for release under a new key.** Created `lumina-tv-nikhlgoel.jks` (RSA 2048, default
+  Android passwords, `CN=NIKHLGOEL`) at the owner's request, replacing `lumina-tv.jks` for new builds.
+  `tv/keystore.properties` points at it; both keys and `SIGNING-INFO.txt` files are kept in
+  `C:\Users\datan\LuminaSigning\` and the backup folder. Built and verified `tv/dist/lumina-tv-0.1.0.apk`
+  (v2 scheme, one signer, `apksigner verify` passed). **Not yet installed anywhere** — any stick
+  signed with the old key needs an uninstall first.
+* **Emulator checks (Google TV AVD, API 34):** found and fixed a bug from the debug build — the video
+  player's Settings sheet showed an empty "Quality —" row for saved videos with no quality list; now
+  hidden like the Audio/Subtitles rows already were. Fixed in `VideoScreen.kt`, confirmed on screen.
+  135 Kotlin tests pass.
+* **YouTube Music TV: tried and confirmed impossible on Fire OS as shipped.** Pulled the real
+  `YouTubeMusicTVPrebuilt.apk` off a Google TV emulator and separately downloaded the published
+  APKMirror release; both installed but both fail identically: logcat shows
+  `requires the Google Play Store, but it is missing`, then Fire OS blocks the resulting market-link
+  redirect ("External Market links disabled"). Fire OS has no Google Play Services at all, so no APK
+  swap fixes this. Uninstalled afterward — nothing non-functional left on the stick.
+* **YouTube (video) works natively** on the stick as `com.amazon.firetv.youtube` (a Cobalt build),
+  installed from the Amazon Appstore and signed in. Used it live for design research.
+  **New: [docs/18_YOUTUBE_DESIGN_RESEARCH.md](docs/18_YOUTUBE_DESIGN_RESEARCH.md)** — real screens
+  this time, not just text guidelines like doc 17: the YouTube TV rail's collapsed/expanded states,
+  the Library screen's colour-block category pattern (its strongest, most transferable find), the
+  watch-page control layout, and Settings' grouped sections, all screenshotted live, signed in, on
+  the real stick. Combined with Google's 2020 official YouTube-Music-on-TV blog post (archival, dated,
+  labelled as such) and the owner's own current phone YouTube Music screenshots (mobile reference only,
+  not TV layout). Closes doc 17 §8's own gap: "nothing was seen on a real YouTube Music TV screen."
+  Produces a concrete to-do list against `tv/`'s actual files (LibraryScreen, the rail in AppShell,
+  VideoScreen, NowPlayingScreen, Settings) — not yet implemented.
+* **Also investigated and declined:** wiping the stick for Google TV (bootloader is locked,
+  `verifiedbootstate=green`, confirmed via `adb shell getprop`; no unlock exists for this chip family
+  that doesn't mean losing Fire OS entirely); a bootloader-unlock exploit chain for this exact model
+  and firmware (researched on XDA — a real, maintained exploit exists for the karat/mantra family, but
+  the newest tested build in its compatibility table is one increment behind the stick's actual
+  firmware, so it's unverified for this device; not run). Settled instead on the no-root "Home on
+  Fire" accessibility-service launcher-swap approach, researched but not yet installed.
+* **Not done this session:** no code changes to `tv/` beyond the one-line Settings-sheet fix; the
+  design research's §5 to-do list is unimplemented; the re-signed release isn't installed anywhere.
+
+## 2026-10-22 (37) - Fire TV app: one page layout everywhere, a YouTube-style video player, profile picture, playlist page
+
+* **Release signed and installed (2026-10-23).** The release key was created: `C:\Users\datan\LuminaSigning\lumina-tv.jks`
+  (PKCS12, alias `lumina`, RSA 4096, SHA-384 with RSA, valid until 2054, owner `CN=NHHLUUL, OU=Lumina, O=NHHLUUL, C=IN`, the
+  country was assumed), with `SIGNING-INFO.txt` beside it holding the passwords and fingerprint
+  (SHA-256 `20:C5:E3:9B:...:9A:D1:AF`), and a copy in `D:\main\LuminaSigning-backup\`. `tv/keystore.properties` points at
+  it (git-ignored). `bash tv/tools/release.sh` ran the tests, built the minified release, and `apksigner` verified it
+  (v2 scheme, one signer, certificate matches the key): `tv/dist/lumina-tv-0.1.0.apk`, sha256
+  `48077b89bf3ab82146b645bb37a44c7ef6a1422c240c090142edab41d552a155`. Installed on the stick as `com.lumina.tv` and
+  launched once (first-start welcome shown). `pm trim-caches` freed about 215 MB (1.53 GB to 1.75 GB free). The debug
+  build `com.lumina.tv.debug` is still installed, with its own saved songs; it was not removed because that would delete them.
+  **Both key copies are on this PC: put one on a USB drive or in a password manager.**
+
+* **Later in this session (verified on the stick unless marked).**
+  * **Home categories:** each account playlist is classed music / video / mixed from the YouTube category of its first 20
+    videos (`PlaylistKinds`, `AccountPlaylistsRepo.kinds`, cached on disk); "Liked videos" is always video. Seen: the Videos
+    chip lists only Liked videos and Training. The Music chip was not looked at.
+  * **Lyrics:** why "null"/"No lyrics" appeared: every failure (a dropped connection, a 429) showed as "no lyrics", the
+    song length was read before the player knew it, and LRCLIB was asked one way only. Now: exact LRCLIB lookup, then
+    field search, then word search, under every plausible reading of the YouTube title/channel (`Lrc.queryVariants`),
+    then lyrics.ovh (plain only, no length check, so it can return another version); a 429 waits once; "none exist" and
+    "could not ask" are different answers with a Try again button. Tested sources from the PC: NetEase now returns
+    encrypted search results and Lyrist/Textyl failed, so they are not used.
+  * **Other-language songs:** each line as written, then in Latin letters when the script is not Latin, then English
+    (`LyricsTranslator`: the free endpoint Google's Chrome extension uses; undocumented, so it may stop working; the screen
+    says the English is machine translated; done once per song and cached). Seen on the stick with a Hindi song.
+    Romanised-Hindi lyrics are translated using the language voted from all lines; not seen on the stick.
+  * **Music screen:** artwork large in the middle; one bottom block (progress bar with times, title left, Previous/Play/Next
+    centre, Lyrics/Up next/Like/More/Watch right); after 4.5 s everything but the picture fades and the picture grows.
+    Lyrics fill the screen over the artwork behind a translucent veil and fade down to the words. The old drifting cover
+    and bouncing bars are gone (nothing animates while the controls are hidden).
+  * **Audio:** measured `dumpsys media.audio_flinger`: HDMI, 48 kHz 16-bit stereo, underrun counters 0, so the output path
+    is not the problem. Changed: audio buffer 0.5-1 s (was the default 0.25-0.75 s), decoder fallback on, sink errors logged
+    (`adb logcat -s LuminaAudio`). **Not proven by ear** that broken sound is gone.
+  * **Splash:** none existed before (the earlier concept was never built). Now `ui/Splash.kt`: six copper facets fly in
+    spinning and snap into a gem, which winks; a light sweep, a ring and sparks burst out; LUMINA rises letter by letter;
+    fades into the app (built underneath; keys are ignored meanwhile). The first light version was replaced at the
+    owner's request. Seen: the finished gem with the letters rising; **not seen**: the fly-in and the burst (screenshots too slow).
+  * Tests: all pass (new: `PlaylistKindTest`, `LrcVariantsTest`, `InitialsTest`).
+  * **More settings (2026-10-23).** Settings now has eight tabs. New **Sound**: streaming audio quality (Best / Balanced
+    up to 128 kbps / Data saver up to 64 kbps, never refusing to play if nothing is that small; downloads keep the best),
+    equalizer presets (Off, Bass boost, Vocal, Treble boost, Bass and treble, through the system equalizer, capped at 6 dB, and
+    silently off on a device without one), audio buffer (Standard 0.5-1 s or Large 1-2 s, read at start), and a read-out of
+    where the sound goes (HDMI, 48 kHz). Playback: subtitle size. Music: translate lyrics, Latin letters, clear lyrics cache.
+    New **General**: hide-controls delay (3-20 s, used by both players) and the opening animation on/off. Tests: 135, all pass.
+    Seen on the stick: the Sound, Playback and General tabs and the audio read-out. **Not tried**: changing the equalizer
+    (whether this Fire OS build's equalizer works is unknown), the Large buffer, Balanced/Data saver on a real song, and the
+    lyrics toggles.
+
+* **Why.** The owner found Settings, Playlists and Downloads still in the old layout (loose buttons and paragraphs, a box
+  per playlist, buttons beside each box) while Library had been fixed, and the video player old and missing audio and
+  subtitle languages. Standing instruction from this: when a design is corrected, correct it everywhere, and check every
+  page without being told.
+* **Shared page kit (`ui/PageKit.kt`).** `TabBar` (the row of tabs/actions every page opens with), `Panel` + `PanelRow` +
+  `PanelDivider` (one surface of divided rows), `PanelInfo`, `SectionHeading`, `PanelNote`, `panelShape` (rounds only the
+  outer ends so a lazy list draws as one panel). Library, Settings, Playlists and Downloads all use it now.
+* **Settings** is six tabs (Storage, Playback, Music, Streaming, Updates, About), each a panel of divided rows with an
+  icon, a title, one line of explanation and the current value at the right. The country picker is a scrolling grid
+  that opens on the current country (it used to be an unscrolled stack of buttons).
+* **Playlists** is a Library-style grid: actions in one row on top, covers underneath, "Kept on this device" below.
+  Per-playlist actions (play, sync now, music/video, stop keeping) moved into a dialog opened by holding Select on a
+  cover, the same gesture Library uses to delete. **Downloads** is one panel of divided rows with an info line.
+* **Playlist page (`ui/PlaylistScreen.kt`).** Select on any playlist card (Home or Playlists) opens a page: cover, name,
+  facts (song count, total length, source, on this device), Play all / Shuffle / Keep on this device, and every song in
+  order to pick from; Select on a song plays from it and queues the rest. The song being played is in the accent colour.
+  Back returns to where you were. Track durations are blank for account playlists (the YouTube API call used does not
+  return them); not fixed.
+* **Profile picture.** The signed-in account's YouTube channel picture (new `YouTubeApi.myChannel()`) sits at the right end of
+  the top row; without a sign-in, the initials of the name typed at a first-start welcome (or changed later from the
+  picture) are drawn on the accent colour (`core/Initials`, tested). Select on it: sign in / sign out / change name.
+  First-start welcome asks for a name, offers sign-in, or skip; asked once (`AppSettings.onboarded`).
+* **Video player rewritten on YouTube's model (`ui/VideoScreen.kt`).** Title and channel at the top; progress bar; round
+  Play/Pause with Previous/Next on the left; CC and Settings on the right. Settings is a sheet at the right edge with
+  Quality, Playback speed, **Audio language**, **Subtitles**, Listen only, Download and Stats for nerds, each opening a
+  list with a tick on the current choice. Audio: tracks grouped by language, original first (never a dub chosen only for
+  bitrate); a language other than the original needs a picture-only stream plus that sound, so the quality may step
+  down one level. Subtitles: every caption track the video has (written before auto-generated, the last-used language
+  first, English next, capped at 12), the choice remembered in `AppSettings.subtitleLanguage`. New tests for both
+  rules (`SubtitlesAndAudioTracksTest`, `InitialsTest`): 134 Kotlin tests pass.
+* **Verified on the stick:** the profile picture at the top (it showed the real channel photo), the playlist page
+  (cover, name, facts, actions, song list), the Library tab row. **Not verified:** the video player on a real
+  multi-language video (audio switch, subtitle switch, the settings sheet), the first-start welcome, the rename and
+  sign-out dialogs, the playlist options dialog, Back from the playlist page, and Settings tabs and Downloads with
+  active jobs on the stick.
+* **Stability run (release build, before these changes):** 0 crashes in the whole run, 1 audio underrun, memory flat over an
+  8-minute soak with a skip every 25 s (PSS 171-181 MB). Playback state showed *stopped* at minutes 7-8 of the soak;
+  not explained (the queue may simply have ended). During the real-video segment frames were 18-25 ms (the video decoder
+  and the page compose together); not investigated.
+* **Problems seen:** the stick becomes very slow after hours of use (about 650 MB swapped, screenshots taking a minute or
+  more), which cost much time in checking; a debug build cold-starts in 8 s (the release build's 1.4 s is the real
+  figure). On Home, when a lower row is focused the row above leaves a clipped strip of captions under the filter
+  chips: not fixed.
+
+## 2026-10-22 (36) - Fire TV app: smoothness, one accent, a rebuilt Home and Now Playing, speed dial, country shuffle
+
+* **Why the screen "shook" (measured, not guessed).** `dumpsys gfxinfo` showed a median 69 ms frame (100% janky), debug
+  and release alike. Switching pieces off from the command line (a temporary `--es perf` extra, since removed) showed each
+  of four things cost 8-21 ms of GPU work and added up: the full-screen backdrop (two radial gradients plus ~45 large
+  stroked arcs, redrawn every frame), the focused card's elevation shadow, the card clip, and a looping background drift.
+  Fixes: the backdrop is painted once off the main thread into a bitmap and cross-faded when the tint changes; the
+  glow is two translucent rectangles; nothing loops. Median frame now 9-11 ms, 90th percentile 24-32 ms.
+* **A second cause of "the page jumps":** a lazy list scrolls by whatever nudge the focused card needs, at the same moment
+  as the row scrolls sideways. Rows now anchor to one fixed height with one eased move (`rowAnchoredScroll`). Rows that
+  load late are keyed placeholders in a fixed slot, so a row appearing above the remote cannot drop focus; first focus is
+  re-asked once when the account's playlists arrive, if the remote has not been used.
+* **One accent colour.** `LuminaColors.Amber` is now a state-backed accent taken from the cover art (light tone of its
+  hue; lavender when nothing plays); the brand amber is only the launcher banner. Focus is a white ring + lift + glow;
+  primary buttons take the accent. Background and surfaces are a little greyer and lighter (`#1A1920`).
+* **Home.** Cards are wider than tall (250 dp, picture 1.45:1; videos 306 dp so heights match), text sits on the page,
+  not in a box. Filter chips (All / Music / Videos / On this device). **Every** playlist on the account shows with its
+  cover (new `AccountPlaylistsRepo`, shared with the Playlists page) and a tap plays it straight from the internet; the
+  Shuffle shape mixes hits from the country chosen in Settings (`ShuffleMix`, tested). A hero panel that followed the
+  focus, and a pinnable **speed dial**, were built and then **removed on the owner's say-so** (the hero lagged behind the
+  remote and ate the header; speed dial is wanted later, as a separate piece of work).
+* **Now Playing rebuilt:** big accent Play with bare Previous/Next, Like and More, "Lyrics" and "Up next" as text tabs,
+  everything else (download, shuffle, repeat, speed, not-for-me) in a labelled More panel, a Watch video pill that
+  switches a song to its video at the same moment, controls that fade when idle.
+* **Audio.** The player's `onAudioUnderrun` is logged (`adb logcat -s LuminaAudio`). Across idle on Now Playing, three
+  rapid skips, five seeks, four pause/resumes and browsing Home while playing: player state stayed "playing" and there
+  were **0 underruns**, before and after the changes below. The 1.5-3 s audio buffer added earlier (never proven to
+  help) was removed because crackling was reported afterwards; next-track prefetch now runs on one background-priority
+  thread. **Not proven:** that the crackle is gone (it cannot be measured from here; it needs a listen), network
+  drops, speed changes, audio-to-video switches.
+* **Verified on the stick:** frame times, Home layout and first focus, all account playlists with covers, hold-to-pin both
+  ways (a pin saved by an earlier run made the first hold read as "Removed"; I briefly mistook that for a double fire
+  and removed the handler, which stopped the feature, then restored it), the new Now Playing's layout, Lyrics tab and More
+  panel. **Not verified:** the controls' idle fade, Shuffle playback, the country picker, the regenerated launcher banner on
+  the real launcher (the image file only), the Library grid at the new card size.
+* **The sidebar is gone.** Three designs were shown and none accepted (a glass capsule, an arc of beads, a pill with a
+  tray). All sidebar code, the left-edge fade mask and the "bleed" layout that existed only for it were deleted; the logo
+  is no longer on any screen. Navigation is now a deliberately plain row of four buttons across the top (`TopNav`), only
+  so that every page stays reachable until a design is chosen. Splash screen (a beam/prism/engraved-lines concept) and
+  an icon-only Shuffle shape were shown as mockups and are **not built** (not approved). Video player redesign not started.
+* 97 Kotlin tests pass (5 new: shuffle mix, countries).
+
+## 2026-10-22 (35) - Fire TV app: USB drives, a living Now Playing, small corrections
+
+* **USB**: see BUGS TV-8 for the hardware fact (a pendrive in the TV's USB port cannot reach the stick). In the app:
+  live drive list (volume callback + mount broadcasts), a one-time "USB drive found - use it?" prompt remembered on disk
+  (an earlier version kept it in screen state and lost it when the system backgrounded the app on mount), songs on an
+  unplugged drive hide instead of failing, Settings explains OTG/portable/FAT32-exFAT.
+* **Now Playing is alive**: song tint and accent cross-fade, cover drifts and zooms (clipped, masked to fade into the
+  moving background; a measured 6-12 level seam was found by reading pixels and fixed), equaliser bars, lyrics ease in
+  size/colour/opacity by distance from the current line, accent from the cover. Poppins now set as the Material
+  typography, so unstyled text cannot fall back to the system font.
+* **Fixed**: keyboard staying open over the player; video player had no Download; "1 songs"; empty-state wording;
+  duplicate headings under the Library tabs; refresh button moved to an icon aligned with the tabs.
+* 92 Kotlin tests pass. Not done: playlists you create yourself, a download-all button on a synced playlist, motion on
+  the other screens, Settings restyle, splash for the ~5 s cold start.
+
+## 2026-10-22 (34) - Fire TV app: direct play, new Now Playing, lyrics, queue, like/dislike, card grids
+
+* **No more menu.** Tapping a song on Home or in Search plays it straight away and queues the rest of that row
+  (Next/Previous work across it, a finished song moves on, an unavailable one is skipped with a short message). The
+  Play/Download sheet and every Download button in lists are gone; Download lives in the player. Search results and the
+  Library are card rows / a cover grid (long-press a cover to delete, with a confirmation).
+* **Now Playing** redesigned: the cover bleeds off the right edge, tinted by its own colours (no framed square); the
+  +/-10 buttons are gone (Left/Right on the focused seek bar and the media keys seek); one big Play; Like, Not-for-me,
+  Queue, Lyrics, Download, Shuffle, Repeat and a small speed chip. Lyrics (LRCLIB, free, time-synced when available)
+  replace the artwork; the queue slides in. Lyrics matching is by cleaned title/artist and song length, so a different
+  recording's words are refused; a song LRCLIB lacks (checked: a Punjabi track) says "No lyrics found".
+* **Taste**: Liked songs row on Home; "Not for me" hides the song and mutes that artist in Recommended.
+* **Smoothness**: the next queued song is resolved while the current one plays; resolved streams cached 20 min;
+  steady-state playback measured on the stick (state PLAYING, real-time position, ~44 s buffered ahead). First start is
+  still several seconds (extractor on a slow CPU); not measured precisely.
+* Focus: after a search, focus moves once to the first result. A "jump to Settings" seen during testing was someone
+  using the real remote at the same time, not an app navigation (the app starts on Home with the search bar focused).
+* 91 Kotlin tests pass. Not done: add-to-playlist/create-playlist, "download whole playlist" button on the playlist
+  view, system media-notification Next for streamed queues, a splash for the ~5 s dark cold start, Settings restyle.
+
+## 2026-10-22 (33) - Fire TV app: calm Home, search bar, 4-item sidebar, faster streaming, debloat round 3
+
+* **Home** rebuilt as rows: greeting, a minimal search bar, three small round quick-action buttons (was three big "Get
+  started" banners), Your playlists (with thumbnails), Recommended (related to what was saved; popular songs when the
+  library is empty - YouTube has no public "my feed" API), Your music, Your videos. Placeholder cards hold the
+  Recommended slot while it loads, because a row inserted above the focused card made the lazy list drop focus to the
+  sidebar. Cards have a fixed text height so rows are tidy.
+* **Sidebar** is Home, Search, Library, Settings; Library has Music/Videos/Playlists/Downloads tabs. Deleting a song also
+  excludes it from every playlist.
+* **Scale** comes from the real pixel width (1300 dp design width), so 720p/1080p/4K share one layout. 720p checked on an
+  emulator; **4K not rendered** (the emulator ignores sizes above its screen), only unit-tested. Background is dynamic:
+  tinted from the playing/latest artwork, with two drifting glows.
+* **Streaming**: resolved streams cached 20 min and pre-resolved when a card is focused (500 ms); retries and downloads
+  bypass the cache; load control starts playback after 1 s of data; audio output buffer raised to 1.5-3 s. The "music
+  pauses when something busy happens" report was NOT reproduced (playback state stayed PLAYING across Home presses), so
+  the deeper buffer is a mitigation for CPU/IO starvation, not a confirmed cure.
+* **Stick**: disabled Amazon Kids, Photos, MX Player TV (miniTV); JioHotstar is an Amazon-injected promo tile that
+  returns after a restart (not removable from the app side). Launcher banner: see BUGS TV-6.
+* 84 Kotlin tests pass. Not done: Now Playing redesign (lyrics, queue, like/dislike, add-to-playlist, full-bleed cover,
+  no confined artwork box), video search path check, Netflix-style transitions, Search/Library restyle.
+
+## 2026-10-22 (32) - Fire TV app: real stick, playlists/account, redesign, self-update
+
+* **Real stick reached** (ADB over Wi-Fi). Verified: AFTMA08C15, Android 11/API 30, `armeabi-v7a` only, 1.7 GB RAM, ~1.4 GB
+  free. Debug APK installs and runs; Home, Playlists and Settings render on it.
+* **Debloat of the user's own stick**, each step backed up and logged in `tv/tools/stick-backup/REVERT.md`: uninstalled
+  LocalSend, VLC, Pixel Music, Downloader, the "TV File Manager"; disabled Prime Video and Luna (system apps); removed
+  YouTube for the user. JioHotstar and MX Player are *not installed* - they are promoted tiles the Fire launcher injects.
+  NetMirror, Brave, Steam Link untouched. Amazon telemetry services deliberately left alone.
+* **New in `tv/`:** playlist sync (public links + Google account via device flow), phone setup page, `SyncWorker`;
+  redesigned Home (hero + rows), smaller rail, Poppins (OFL) type, 0.85 density scale (the stick runs 1080p at 320 dpi,
+  so Compose saw 960x540dp and drew everything 2x), ambient background; self-update (`UpdateLogic` pure + 12 tests,
+  `Updater`, `UpdateWorker`, dialog + Settings panel). 73 Kotlin tests pass.
+* **Not solved:** the launcher banner (BUGS TV-6). Six single-variable experiments ruled out; cause unknown.
+* **Not proven:** Google sign-in live (needs the user's own Cloud client), update download/install (no release exists yet).
+* A wrong theory worth keeping: "Fire OS caches the tile until a reboot" - disproved, a reboot changed nothing.
+
+## 2026-10-22 (31) - Player fixes (PC) and the Fire TV app (`tv/`)
+
+Nothing committed. Two pieces of work, one folder of new code.
+
+**PC player, all checked by rendering it offscreen** (new capture steps `41a-c`, `42a-h`):
+
+* **Video controls were across the top of the screen.** In video mode the stage is `absolute`, so the dock
+  wrapper fell into the empty middle grid row. Pinned to row 3. Now a YouTube-style bar: auto-hides after 3 s
+  while playing (rule in `src/core/idleControls.ts`, tested), comes back on any movement or key, never hides while
+  paused or with a menu open. Gear menu: playback speed (0.25-2x, `core/playbackSpeed.ts`), subtitles, a *read-only*
+  quality row (a file on disk has one quality; a chooser would do nothing), and a **Stats for nerds** panel with real
+  numbers (resolution, codec, bitrate, dropped frames, buffer, loudness gain, direct vs ffmpeg). Keys: `K` `J` `L`
+  `0-9` `<` `>` `I`, double-click for fullscreen, a brief message in the middle of the picture after each.
+  Measured, not assumed: auto-hide true while playing, false after movement, `playbackRate` 1.5 with pitch
+  preserved, `>` steps to 1.75.
+* **Vinyl.** The old animation was exactly 33 1/3 rpm but stopped dead and spun its own sheen. Now one turn per 2.8 s,
+  with spin-up and coast-down (`core/platter.ts`, tested), the sheen stays still, and it runs on the compositor.
+  **A probe caught that my first version never started** (`animations=0`): the effect ran once on mount, before the
+  record existed. Measured afterwards: 131.5 deg/s against an expected 128.6.
+* **Cut-off artwork.** The vinyl label cropped a square cover to a circle (title text lost its corners): now the whole
+  picture inside the label. The big cover now sizes to the picture's shape. **Not changed, needs your decision:** the
+  "Square artwork" download setting crops YouTube's wide thumbnails to a centre square *inside the file*.
+* `AudioContext` asks for `latencyHint: 'playback'` (fewer dropouts). Downloads already default to untouched original audio.
+* 991 vitest tests (47 files), `tsc` clean, `vite build` ok. Not heard by an ear, not run in a live window.
+
+**Fire TV app, in `tv/`** (design and the full verified / not-proven table: `docs/15_FIRE_TV.md`; decisions D22, D23):
+native Kotlin + Compose, NewPipe Extractor v0.26.5 (GPL-3.0, so `tv/` is GPL-3.0), Media3. Built and run on an
+Android TV API 30 emulator: search with the TV keyboard, play, download, offline playback, video with auto-hiding
+controls, a video download joined by the on-device muxer (plays as H.264 + AAC), release build with R8. 29 Kotlin tests.
+The PC app and the TV app share one tested contract: `shared/contract/portable-names.json` (generated from the PC
+functions; 30 vitest cases and the Kotlin `FileNamesTest` both read it).
+**Bugs found only by running it**, all fixed: missing `desugar_jdk_libs_nio` (every search crashed), the text field
+swallowing Down, a disabled Download button throwing focus into the search box, overflowing Now Playing controls, the
+wrong (wide) cover, the rail pushing content and drawing over video, focus lost after leaving a player.
+
+**NOT proven, and I would not claim otherwise:** anything on a real Fire TV Stick (32-bit ARM, 2 GB, hardware decode, the
+real remote and keyboard, the launcher row showing the banner); voice (the Alexa button is system-owned; the in-app
+Speak button depends on a recogniser the stick may not have); USB drive storage; subtitles and the TV speed/quality menus;
+cancel/retry/resume; a full drive; a dropped connection. The emulator's slow 1080p60 start and "frames dropped" are
+software decoding and network, not evidence about the stick.
+
+**A test-harness trap worth keeping:** `adb shell input keyevent` sends key-down and key-up ~2 ms apart. When the app is
+busy the up can arrive before Android has marked the press trackable, so a Back press is silently dropped. I spent real
+time chasing this as a product bug. A real remote does not behave like that.
+
+**Next:** put the debug APK on the stick (`tv/README.md`), run the not-proven list, fix what it finds. Then Lumina Sync
+between PC and TV, an extractor updater, and the three waiting items from (30). Please also decide the square-artwork
+setting.
+
+---
+
+## 2026-10-11 (30) - Lengine: design, a partial audit, and two measurements that moved the plan
+
+No product code changed this session. Docs only: `docs/14_LENGINE_FRAMEWORK.md` (new), `BUGS.md`
+(B1 reopened, audit section added), this entry.
+
+**The audit mostly did not happen.** A 71-agent workflow (15 code slices x 3 lenses, skeptic
+verification, 7 research tracks, a connection probe) lost 69 agents to a session limit. Two slices
+returned (queue/scheduler: 32 findings, host driver: 40) and nothing was independently verified. I
+re-read the code behind the most important of them and recorded which are confirmed-by-reading and
+which are leads, in `BUGS.md`. The other 13 slices need a re-run. A wrong theory worth keeping: I
+first read `handoff.ts:28`'s filename regex as one that would turn digits into underscores; the file
+holds raw control bytes (`[NUL-US<>:"|?*]`) and is correct — but git treats it as binary because of
+them, which is a real, small annoyance.
+
+**Measured (public samples only, ~200 MB total):**
+
+* With acceleration on, yt-dlp->aria2 prints one `finished` line and **no** `downloading` lines; aria2's
+  readout reaches stdout and nothing parses it. This reopens B1 for the accelerated path and
+  contradicts the earlier "no `[#...]` line reaches stdout" note. Not yet checked: whether YouTube's
+  own https formats take this path in the app.
+* aria2 reaches `CN:16` with `-x16` (the parallelism is real) and 1 vs 16 connections took the same
+  time. Cloudflare's speed endpoint gave 2.8 MB/s on one stream and 3.0 MB/s across four: the line is
+  ~24 Mbit/s right now, not the ~650 Mbps in HANDOVER. The same sample ran 8x faster minutes earlier,
+  so one evening proves little.
+
+**Docs read for the design (primary sources):** Cloudflare clearance and Turnstile pages, Electron
+`session` and `DownloadItem`, the aria2 manual, Microsoft's `MpCmdRun` page. The consequences are in
+`docs/14` section 0 (E9-E12): a clearance cookie is device-bound and reusable only in its browser; a
+Turnstile widget token is single-use; Defender custom scans need elevation.
+
+**Not done / next:** nothing is built. Phase 0 in `docs/14` section 10 is the start (parse the aria2
+readout in `core` with the captured log as the fixture; bench script; the quick scheduler/host-driver
+fixes). Five decisions are waiting on the maintainer in `docs/14` section 11, the cookie-replay one
+because it touches hard rule 1. Re-run the 13 unaudited slices — in smaller batches this time.
+
+---
+
 ## 2026-09-25 (29) - Four asks, and three of them turned on a measurement
 
 ### Volume past 100%, without the distortion that usually comes with it

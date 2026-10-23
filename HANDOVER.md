@@ -16,7 +16,15 @@ earlier notes in this file and the session log saying "not pushed" were true whe
 **Sessions 13–20 (roughly 49 changed paths) are uncommitted on top of it.** **Ask before committing or pushing**
 (standing rule).
 
-**Verified right now:** `npx tsc --noEmit` clean · `npx vitest run` **937 passed (44 files)** · `npx vite build`
+**Added 2026-10-22 (session 31): the Fire TV app lives in `tv/`** — a separate native Kotlin project (GPL-3.0), not part
+of the Electron build. Read [docs/15_FIRE_TV.md](docs/15_FIRE_TV.md) and [tv/README.md](tv/README.md). It has been run
+only on an emulator; **nothing is proven on a real Fire TV Stick yet**. The PC player also changed (YouTube-style video
+controls, speed, stats, vinyl and cover fixes). Everything is still uncommitted.
+
+**Verified right now (2026-10-22):** `npx tsc --noEmit` clean · `npx vitest run` **991 passed (47 files)** · `npx vite build`
+ok · `tv/` Kotlin unit tests **29 passed**. (The line below is from session 20 and is kept for history.)
+
+**Earlier:** `npx tsc --noEmit` clean · `npx vitest run` **937 passed (44 files)** · `npx vite build`
 ok. `src/main/capture.ts` now defines **71 steps**; the last *full* regression (session 15) covered **56/56**, and
 the ones added since (`13a`–`18b`, `13b`/`13c`) were each captured individually as they were written. **A full
 71-step regression has not been run** — worth doing before the next release.
@@ -95,7 +103,12 @@ which is where the reported problem lives (see BUGS.md B1).
 filling during a copy. In a dev build the "not a packaged build" check masks the other install guards at runtime,
 so room/read-only/self-copy/folder-conflict are unit-tested only.
 
-**Open, not explained (session 22):** a playlist row was seen reading "215 of 433" beside **0%**. Neither code
+**Settled (2026-10-23, session 39):** the question below is answered by code — it is **one playlist job**; the only
+`N of M` label is `JobRow.tsx:84` (a group of separate jobs reads `N of M done`). The accelerated yt-dlp path's progress
+is fixed and proven on a real run (see BUGS B1, `docs/desktop-services-plan.md`). The "0%" half still cannot be
+reproduced with current code.
+
+**Was open (session 22):** a playlist row was seen reading "215 of 433" beside **0%**. Neither code
 path can produce that — one playlist job reports `100 * 214/433 ≈ 49%` (`overall()` in `src/main/jobs/ytdlp.ts`
 already folds the playlist position into `percent`, and `Runner.progress` *merges* rather than replaces), and a
 group of 433 jobs scores each completed member 100. Two theories were built and both disproved — see session log

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildDownloadArgs, outputTemplate } from '../../core/ytdlpArgs';
 import { diskCacheMb } from '../../core/tuning';
-import { friendlyYtdlpError, isCookieReadError, parseYtdlpLine } from '../../core/progress';
+import { friendlyYtdlpError, isCookieReadError, parseYtdlpLine, splitYtdlpLine } from '../../core/progress';
 import { applyProgressEvent, initialProgressState, type ProgressModelOptions, type ProgressModelState } from '../../core/ytdlpProgress';
 import { aggregateProgress, allItems, planShards, playlistItemsArg } from '../../core/playlistShards';
 import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from '../cookieHealth';
@@ -199,7 +199,11 @@ export const ytdlpRunner: Runner = (ctx) => {
     }, 'running');
   };
 
-  const handleLine = (w: Worker) => (line: string) => {
+  const handleLine = (w: Worker) => (raw: string) => {
+    for (const line of splitYtdlpLine(raw)) handlePiece(w, line);
+  };
+
+  const handlePiece = (w: Worker, line: string) => {
     const ev = parseYtdlpLine(line);
     if (!ev) {
       if (/^(ERROR|WARNING):/.test(line)) w.stderrTail = [w.stderrTail, line].join('\n').slice(-6000);

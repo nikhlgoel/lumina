@@ -19,7 +19,126 @@ export const goto = (label: string) =>
 export const openSettings = (label: string) =>
   `${goto('Settings')}; setTimeout(() => [...document.querySelectorAll('nav[aria-label="Settings sections"] button')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click(), 400)`;
 
+/**
+ * Add one download through the real IPC path and sample the job the way the Queue sees it, every
+ * 500 ms until it settles. Returns the samples as JSON. The destination is `LUMINA_PROBE_DIR`, never
+ * the user's library.
+ */
+export const downloadProbe = (url: string, dir: string, kind: 'video' | 'audio') => `(async () => {
+  const url = ${JSON.stringify(url)};
+  const format = ${kind === 'video'
+    ? "{ kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }"
+    : "{ kind: 'audio', target: 'mp3', bitrateKbps: 128 }"};
+  const info = await window.lumina.invoke('media:inspect', { url });
+  const options = { contentType: ${JSON.stringify(kind === 'video' ? 'video' : 'music')}, format, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const job = await window.lumina.invoke('jobs:add', { url, info, options });
+  const t0 = Date.now(), samples = [];
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 500));
+    const j = (await window.lumina.invoke('jobs:list')).find((x) => x.id === job.id);
+    if (!j) break;
+    const p = j.progress;
+    samples.push({ t: Date.now() - t0, status: j.status, engine: j.engine, percent: p.percent, filePercent: p.filePercent ?? null, speedBps: p.speedBps, etaSec: p.etaSec, totalBytes: p.totalBytes, stage: p.stage, error: j.error && j.error.message });
+    if (['completed', 'cancelled'].includes(j.status) || (j.status === 'failed' && ${process.env.LUMINA_PROBE_WATCH ? 'false' : 'true'}) || Date.now() - t0 > ${Number(process.env.LUMINA_PROBE_SECS) * 1000 || 420000}) break;
+  }
+  return JSON.stringify(samples);
+})()`;
+
+/**
+ * Drive one download through pause → resume → cancel → retry using the real IPC and record what the
+ * app reports at each point. What is on disk at those moments is watched from outside the app.
+ */
+export const lifecycleProbe = (url: string, dir: string, fastRetry = false, selectFiles = false, fullDisk = false, cancelOnly = false) => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ev = [], t0 = Date.now();
+  const get = async (id) => (await inv('jobs:list')).find((x) => x.id === id);
+  const snap = (j) => j && ({ status: j.status, pct: +j.progress.percent.toFixed(1), bytes: j.progress.downloadedBytes, stage: j.progress.stage, err: j.error && j.error.message });
+  const note = (m, j) => ev.push({ t: Date.now() - t0, m, ...snap(j) });
+  const until = async (id, pred, ms) => { const end = Date.now() + ms; for (;;) { const j = await get(id); if (!j || pred(j) || Date.now() > end) return j; await sleep(300); } };
+  const url = ${JSON.stringify(url)};
+  const info = await inv('media:inspect', { url });
+  const options = { contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const { id } = await inv('jobs:add', { url, info, options });
+  note('added', await get(id));
+  if (${cancelOnly}) {
+    // Cancel and retry while still waiting for a magnet link's metadata, timing the "Cancelling…" state.
+    await sleep(8000);
+    note('before cancel', await get(id));
+    await inv('jobs:cancel', { id });
+    note('just after cancel', await get(id));
+    note('settled', await until(id, (x) => x.status === 'cancelled', 30000));
+    await sleep(1500);
+    await inv('jobs:retry', { id });
+    note('retried', await until(id, (x) => x.status === 'running', 20000));
+    await sleep(6000);
+    await inv('jobs:cancel', { id });
+    note('second cancel, immediately', await get(id));
+    note('second settled', await until(id, (x) => x.status === 'cancelled', 30000));
+    return JSON.stringify(ev);
+  }
+  if (${fullDisk}) {
+    // The disk is filled and later freed from outside; this only watches the job and presses Retry.
+    note('settled', await until(id, (x) => ['failed', 'completed', 'cancelled'].includes(x.status), 120000));
+    await sleep(40000);
+    await inv('jobs:retry', { id });
+    note('retried', await until(id, (x) => x.status === 'running', 20000));
+    note('final', await until(id, (x) => ['completed', 'failed', 'cancelled'].includes(x.status), 150000));
+    return JSON.stringify(ev);
+  }
+  if (${selectFiles}) {
+    // A torrent too big for the disk waits; picking fewer files must let it go.
+    note('blocked?', await until(id, (x) => /Not enough disk space/.test(x.progress.stage), 30000));
+    await inv('torrent:select-files', { id, indices: [1] });
+    note('after selecting file 1', await until(id, (x) => !/Not enough disk space/.test(x.progress.stage), 30000));
+    return JSON.stringify(ev);
+  }
+  note('reached 15%', await until(id, (x) => x.progress.percent >= 15, 120000));
+  if (${fastRetry}) {
+    // Cancel and retry with no pause between, as a double-click would.
+    await inv('jobs:cancel', { id });
+    await inv('jobs:retry', { id });
+    note('retried at once', await get(id));
+    note('final', await until(id, (x) => ['completed', 'failed', 'cancelled'].includes(x.status), 300000));
+    return JSON.stringify(ev);
+  }
+  await inv('jobs:pause', { id });
+  note('paused', await until(id, (x) => x.status === 'paused', 15000));
+  await sleep(3000);
+  await inv('jobs:resume', { id });
+  note('resumed', await until(id, (x) => x.status === 'running' && x.progress.percent > 0, 40000));
+  note('reached 30%', await until(id, (x) => x.progress.percent >= 30, 120000));
+  await inv('jobs:cancel', { id });
+  note('cancelled', await until(id, (x) => x.status === 'cancelled', 15000));
+  await sleep(4000);
+  note('4s after cancel', await get(id));
+  await inv('jobs:retry', { id });
+  note('retry running', await until(id, (x) => x.status === 'running' && x.progress.percent > 0, 60000));
+  note('final', await until(id, (x) => ['completed', 'failed', 'cancelled'].includes(x.status), 300000));
+  return JSON.stringify(ev);
+})()`;
+
+/** Add a download, let it run, open the Queue and stop there so the harness photographs the live row. */
+export const shotProbe = (url: string, dir: string, waitMs: number) => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const info = await inv('media:inspect', { url: ${JSON.stringify(url)} });
+  const options = { contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  await inv('jobs:add', { url: ${JSON.stringify(url)}, info, options });
+  await new Promise((r) => setTimeout(r, ${waitMs}));
+  ${goto('Queue')};
+  await new Promise((r) => setTimeout(r, 1500));
+  return 'shown';
+})()`;
+
+const probeDir = process.env.LUMINA_PROBE_DIR ?? '';
+/** Any other URL to push through the real runner, e.g. a local range server for stall tests. */
+const probeUrl = process.env.LUMINA_PROBE_URL ?? '';
+
 const STEPS: { name: string; script: string; delay?: number }[] = [
+  ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
+  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
+  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE !== 'lifecycle' ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
+  ...(probeDir && !probeUrl ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
   { name: '01-download-light', script: "document.documentElement.dataset.theme='light'" },
   { name: '02-download-dark', script: "document.documentElement.dataset.theme='dark'" },
   { name: '03-inspect', script: `(() => { const i = document.querySelector('input[aria-label^="Link to download"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); })()`, delay: 9000 },
@@ -181,7 +300,10 @@ export async function runCapture(win: BrowserWindow, dir: string, extra: { name:
   const only = process.env.LUMINA_CAPTURE_ONLY ? new RegExp(process.env.LUMINA_CAPTURE_ONLY) : null;
   for (const step of [...STEPS, ...extra].filter((s) => !only || only.test(s.name))) {
     try {
-      await win.webContents.executeJavaScript(step.script, true);
+      const result = await win.webContents.executeJavaScript(step.script, true);
+      // A `probe-` step measures rather than photographs: whatever string it returns is kept, because
+      // the main process's console.log never reaches the shell on Windows.
+      if (step.name.startsWith('probe-') && typeof result === 'string') fs.writeFileSync(path.join(dir, `${step.name}.json`), result);
     } catch (err) {
       process.stdout.write(`[capture] ${step.name} script failed: ${err}\n`);
     }
@@ -195,6 +317,13 @@ export async function runCapture(win: BrowserWindow, dir: string, extra: { name:
 
 /**
  * The tray menu is native, so it can't be screenshotted. This drives the same path a click takes —
+  // A sleep cannot be done to a test machine, but the app's listener sits on powerMonitor's `resume`
+  // event, so emitting that event runs the same code path a real wake would.
+  const wakeAt = Number(process.env.LUMINA_PROBE_WAKE_AT);
+  if (wakeAt > 0) {
+    const { powerMonitor } = await import('electron');
+    setTimeout(() => powerMonitor.emit('resume'), wakeAt * 1000);
+  }
  * the exact command the menu item carries, sent to the renderer — and then reads back what the player
  * reported to the tray, proving each control changes the player AND that the tray's ticks follow.
  */
