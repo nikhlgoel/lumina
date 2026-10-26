@@ -1,0 +1,19 @@
+# Baseline profile: tells the system to compile these classes and methods ahead of time when Lumina is installed, so the
+# first minutes of use do not run slow, uncompiled code (the main cause of stutter on a 32-bit Fire TV Stick).
+# Hand-written with wildcards because the screens are Compose: H hot, S startup, P post-startup, L loaded class.
+# The libraries below ship their own profiles too; these rules add Lumina's own code and the pieces it leans on hardest.
+
+HSPLcom/lumina/tv/**;->**(**)**
+Lcom/lumina/tv/**;
+
+HSPLandroidx/compose/foundation/**;->**(**)**
+HSPLandroidx/compose/ui/**;->**(**)**
+HSPLandroidx/compose/runtime/**;->**(**)**
+HSPLandroidx/compose/animation/**;->**(**)**
+HSPLandroidx/tv/**;->**(**)**
+
+HSPLandroidx/media3/exoplayer/**;->**(**)**
+HSPLandroidx/media3/common/**;->**(**)**
+HSPLandroidx/media3/session/**;->**(**)**
+
+HSPLcoil/**;->**(**)**

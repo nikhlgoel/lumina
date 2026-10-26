@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window is painted in the app's own dark colour before Compose draws a frame, so there
+         is no white flash on a TV when the app opens. -->
+    <style name="Theme.Lumina" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/lumina_bg</item>
+        <item name="android:colorBackground">@color/lumina_bg</item>
+        <item name="android:statusBarColor">@color/lumina_bg</item>
+        <item name="android:navigationBarColor">@color/lumina_bg</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>
