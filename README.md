@@ -7,13 +7,13 @@
 
 ## Download
 
-Get the latest version from the [Releases page](https://github.com/nikhlgoel/lumina/releases/latest).
+Get the latest version from the [Releases page](https://github.com/nikhlgoel/lumina/releases/latest), or see the [website](https://nikhlgoel.github.io/lumina/).
 
 | File | What it is |
 | :--- | :--- |
 | `Lumina-<version>-Standard-Setup.exe` | Windows. The downloader, the player and the built-in browser. Start here. |
 | `Lumina-<version>-Full-Setup.exe` | Windows. Everything in Standard, plus a code editor, terminal, source control and MCP client. |
-| `lumina-tv-<version>.apk` | Android TV and Fire TV app. It has its own version number. |
+| `lumina-tv-<version>.apk` | The Android app. It has its own version number. |
 | `lumina-chromium.zip`, `lumina-firefox.zip` | Browser extension that sends links to Lumina. |
 
 The Windows installers are not code-signed, so Windows SmartScreen may warn once: choose **More info**, then **Run anyway**.

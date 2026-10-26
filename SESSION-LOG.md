@@ -5,6 +5,43 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-10-27 (49) - First public release (desktop 1.1.0, TV 0.2.0), a clean removal, and the website
+
+* **Committed and pushed** in three commits (`3d312e0` desktop, `2ded494` TV, `bfa142c` release prep) after the `.gitignore` and the staged files
+  were audited for a public repo: signing material was already ignored; `tv/shots/` (TV screenshots) is now ignored; private details in notes
+  (a supplied link's site, a network address, a large game torrent, LAN IPs, a key file path) were reworded; a real video ID in a comment and a
+  test was replaced. The full suite (1164 + TV 173) passed before committing.
+* **Version policy.** The owner reset the desktop numbering: the unpublished 3.0.0 / 3.0.0-alpha.0 are retired, the first release is **1.1.0**, TV
+  is **0.2.0**. Old tags `v1.0.0`..`v2.0.0` exist from September, so the release tag is **`1.1.0` without a "v"** (the updater parses either);
+  the old tags were left alone. Installed 3.0.0 builds will not be offered this as an update (lower number): install by hand.
+* **Release `1.1.0`** (https://github.com/nikhlgoel/lumina/releases/tag/1.1.0): Standard (305 MB) and Full (308 MB) installers, the signed TV APK
+  (same certificate as 0.1.0, SHA-256 `e90c06dc…`), both extension zips (rebuilt; the old ones predated the committed source), `SHA256SUMS.txt`.
+  Verified against GitHub: 7 assets, digests equal the local hashes, tag on `bfa142c`, "latest". Standard has 3 renderer chunks and no
+  Monaco/xterm; Full has 96. **Not done:** an installer was never run (an install touches the user's link handlers); the installers are unsigned.
+* **Removal of the installed Lumina** at the owner's request: ran the app's own uninstaller, then removed `%APPDATA%\lumina-media` and `\Lumina`,
+  the cached updater installer, six `%TEMP%` folders (3.8 GB, mostly Big Buck Bunny test partials), the Start Menu/Desktop shortcuts, the
+  `lumina:` and `magnet:` handlers (they pointed into `release\win-unpacked`; magnet falls back to uTorrent Web), and Windows' notification/tile
+  records. No PATH, startup, task, service or Defender entries existed. **Kept on purpose:** the project, `release/`, the owner's music and
+  video folders, `C:\Users\datan\LuminaSigning` (the TV signing key: losing it breaks TV updates). **Backup:** `Documents\Lumina-backup-2026-10-27`
+  holds only `lumina.db` and `settings.json`. **Left for the owner (needs admin):** 7 Windows Firewall rules named Lumina.
+* **Packaged builds ignore `LUMINA_CAPTURE`** (it is gated on `!app.isPackaged`), so a packaged launch with it set is a visible window. Test
+  the packaged app by listing its asar, or ask first.
+* **Website** (`website/`, replaces the September page that described a "repack suite"): static HTML/CSS/JS, the app's own tokens and fonts
+  (OFL licences included), no third-party requests except GitHub's public API for the live release card, the "last updated" figure. No top bar: the
+  logo and name sit in the page, the sections are a small menu on the right edge (dots, labels on hover; one round button on a phone) with a
+  two-icon light/dark switch and a GitHub icon. The first version had an animated link-bar illustration; the owner rejected it ("all
+  downloaders are the same"), so it was removed and replaced by a live "At a glance" panel and a numbered "Why Lumina" list (what a plain
+  download manager lacks: play before keep, a real player, plain-words status, awkward links, TV, stays local). Also a chooser that shows the
+  real download link, size and SHA-256, an honest "where it stands" section, FAQ, light/dark, phone layout, 404, social image.
+* **"Fire TV" is not used in anything public** (page, README, changelog, release notes): the owner wants one Android app, not per-device
+  promises. It is called "the Android app"; the APK file keeps the name `lumina-tv-<version>.apk` because the app's own updater matches it.
+  Internal docs and `tv/README.md` still use the old wording.
+  `.github/workflows/pages.yml` deploys it; **Pages is currently set to deploy from the `gh-pages` branch**, so the owner switches Settings >
+  Pages > Source to "GitHub Actions" to put it live. Checked in a browser: 1280 px dark and light, 390 px, no console errors, no sideways overflow.
+* **Gap found:** `package.json` says MIT but there is **no `LICENSE` file at the repo root** (only `tv/LICENSE`, GPL-3.0). The owner decides the holder.
+
+---
+
 ## 2026-10-27 (48) - Play a link without downloading it, and the lighter link bar
 
 Owner approved the mockup ("Yes, build the lighter link bar with Play beside Download exactly as drawn, including streaming the link into the

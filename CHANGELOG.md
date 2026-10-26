@@ -16,7 +16,7 @@ this as an update (its number is lower), so run the installer yourself. Your dow
 
 Lumina comes in two Windows installers. **Standard** is the downloader, the player and the built-in browser. **Full** adds the code
 editor, terminal, source control and MCP client. A feature left out of Standard is not in the program at all, so it costs no memory.
-There is also an Android TV and Fire TV app (0.2.0) with its own version number.
+There is also an Android app (0.2.0) with its own version number.
 
 ### Added
 - **Play a link without downloading it.** A Play button sits beside Download in the link bar and on the result card. It plays web pages

@@ -27,6 +27,14 @@ passed (61 files)** · `vite build` ok · TV Kotlin **173 passed** · live in El
 build was started hidden). **Still not proven:** real sleep/wake, a real swarm/the owner's large game torrent, the yt-dlp accelerator fallback,
 the installer itself. Queue-row display items D1–D3/D11 wait for a mockup and a yes. Everything is uncommitted.
 
+**Added 2026-10-27 (session 49): the first public release, and a website.** Desktop **1.1.0** (the unpublished 3.0.x numbering is retired) and TV
+**0.2.0** are published at `github.com/nikhlgoel/lumina/releases/tag/1.1.0` (tag `1.1.0`, no "v", because `v1.1.0` already exists from September):
+Standard and Full installers, the signed TV APK, extension zips, `SHA256SUMS.txt`; verified against GitHub. Everything is committed and pushed. The
+installed Lumina was removed from the owner's PC (kept: the project, `release/`, media folders, `LuminaSigning`, a small DB/settings backup in
+Documents); 7 firewall rules remain (need admin). `website/` is a new calm, live-data site; **to publish it set Settings > Pages > Source to
+GitHub Actions** (it is still on `gh-pages`, which serves the old page). **Open:** no root `LICENSE` file though `package.json` says MIT; the
+installers are unsigned and have never been run; see SESSION-LOG 49.
+
 **Added 2026-10-27 (session 48): Play a link without downloading it, and the lighter link bar** (SESSION-LOG 48, BUGS B14, CHANGELOG). A link is
 resolved in main to a plan (`src/core/streamPlan.ts`: `proxy` for a progressive file, `pipe` through ffmpeg for HLS/DASH/split streams/odd
 containers) behind `lumina-media://stream/<token>` and `remux/stream-<token>`; IPC `media:play`; `PlayableItem.pipe`. The bar and result card were
