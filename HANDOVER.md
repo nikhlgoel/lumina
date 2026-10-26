@@ -16,6 +16,27 @@ earlier notes in this file and the session log saying "not pushed" were true whe
 **Sessions 13–20 (roughly 49 changed paths) are uncommitted on top of it.** **Ask before committing or pushing**
 (standing rule).
 
+**Added 2026-10-26 (session 45): the installed release's own log was read and the desktop engine given a stability pass** (BUGS
+B12, SESSION-LOG 45). Graceful quit (downloads keep their progress; measured: killed → restart from 0, graceful → resumed at 22
+MB), a crash guard and renderer auto-reload, plain-words failure messages and a retry rule that knows `fetch failed`, a drive watcher
+that no longer launches PowerShell every 5 s, the volume-boost schema fix, and a guard against deleting a file aria2 refused to
+overwrite. The download lab is now in `scripts/dl-lab/` (README there). **Verified now (2026-10-26):** `tsc` clean · `vitest` **1107
+passed (61 files)** · `vite build` ok · TV Kotlin **173 passed** · live in Electron: 300 MB direct download, a 3-seeder torrent at
+~3.1 MB/s with 3 peers (hash-identical), a 30 s network outage resumed without going backwards, a forced renderer crash recovered,
+82-step capture with 0 script failures. A local **unsigned** installer is in `release/candidate/` (not installed or run; the unpacked
+build was started hidden). **Still not proven:** real sleep/wake, a real swarm/the owner's large game torrent, the yt-dlp accelerator fallback,
+the installer itself. Queue-row display items D1–D3/D11 wait for a mockup and a yes. Everything is uncommitted.
+
+**Added 2026-10-27 (session 48): Play a link without downloading it, and the lighter link bar** (SESSION-LOG 48, BUGS B14, CHANGELOG). A link is
+resolved in main to a plan (`src/core/streamPlan.ts`: `proxy` for a progressive file, `pipe` through ffmpeg for HLS/DASH/split streams/odd
+containers) behind `lumina-media://stream/<token>` and `remux/stream-<token>`; IPC `media:play`; `PlayableItem.pipe`. The bar and result card were
+redrawn as approved. **Verified now (offscreen, the real app, `LUMINA_PROBE_PLAY`):** passthrough mp4 / webm / mp3, HLS and DASH (two sources) all
+play with the clock advancing and seek working; Play from the card passes the already-read info. Playing it found a real bug (a manifest with no
+resolution was read as music, so Download would have saved audio only), fixed. **Not proven:** YouTube's own split streams (this profile hit the
+bot check; the DASH sample uses the same path), a playlist's later items (Play starts the first), a sleep/wake mid-stream, sound heard by an ear.
+**Known limit:** a DASH manifest takes ~9 s to open and 13–21 s to seek into. `tsc` clean · `vitest` 1164 passed (64 files) · `vite build` ok.
+Everything is uncommitted. Multi-network downloading is still not built (see session 47).
+
 **Added 2026-10-22 (session 31): the Fire TV app lives in `tv/`** — a separate native Kotlin project (GPL-3.0), not part
 of the Electron build. Read [docs/15_FIRE_TV.md](docs/15_FIRE_TV.md) and [tv/README.md](tv/README.md). It has been run
 only on an emulator; **nothing is proven on a real Fire TV Stick yet**. The PC player also changed (YouTube-style video

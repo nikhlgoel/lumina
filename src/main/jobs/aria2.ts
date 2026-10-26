@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { aria2Progress, friendlyAria2Error, isDiskCacheFailure, isMetadataPhase, type Aria2Status } from '../../core/progress';
+import { aria2Progress, etaFromSpeed, friendlyAria2Error, isControlFileMissing, isDiskCacheFailure, isMetadataPhase, smoothSpeed, type Aria2Status } from '../../core/progress';
 import { toSelectFileSpec, toTorrentFiles, type TorrentFile } from '../../core/torrentFiles';
 import { pushSample, shareRatio, type SpeedSample } from '../../core/speedHistory';
 import type { TorrentDetail } from '../../shared/types';
@@ -111,6 +111,9 @@ class Aria2Daemon {
         `--file-allocation=${process.platform === 'win32' ? 'none' : 'falloc'}`, '--summary-interval=0', '--console-log-level=warn', `--disk-cache=${diskCacheMb(os.totalmem())}M`,
         `--max-connection-per-server=${s.network.connectionsPerServer}`, `--split=${s.network.connectionsPerServer}`, '--min-split-size=1M',
         '--retry-wait=3', `--max-tries=${Math.max(5, s.downloads.retries * 2)}`, '--connect-timeout=20', '--timeout=60',
+        // The control file that lets a download continue is saved every 60 s by default and when aria2 stops cleanly; a crash
+        // or a power cut in the first minute left a file with no control file, which aria2 refuses to touch. Every 10 s.
+        '--auto-save-interval=10',
         // Saving the metadata copy is pointless unless it is also read back: without this a magnet link
         // that is resumed (after a pause or a restart) fetches its metadata from the swarm all over again.
         '--follow-torrent=true', '--bt-save-metadata=true', '--bt-load-saved-metadata=true',
@@ -161,11 +164,16 @@ class Aria2Daemon {
   }
 
   async call<T = unknown>(method: string, ...params: unknown[]): Promise<T> {
+    // Adding a download can take far longer than reading a status: aria2 checks and allocates what is already on disk
+    // before it answers (a game torrent with 20 GB present). At 10 s those calls timed out, the job failed with
+    // "The operation was aborted due to timeout", and the retry did the same thing again: 10 failures in a row in the log.
+    // They are not retried instead, because a timed-out add may still have gone through and would then be added twice.
+    const timeoutMs = method.startsWith('aria2.add') ? 90_000 : 10_000;
     const res = await fetch(`http://127.0.0.1:${this.port}/jsonrpc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: randomBytes(4).toString('hex'), method, params: [`token:${this.secret}`, ...params] }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const body = (await res.json()) as { result?: T; error?: { message: string } };
     if (body.error) throw new Error(body.error.message);
@@ -184,6 +192,21 @@ class Aria2Daemon {
     this.limitTimer = null;
     killTree(this.child);
     this.child = null;
+  }
+
+  /**
+   * Stop the daemon the polite way, for quitting: ask it to shut down (it then writes every download's control file, which
+   * is what lets a download continue next time), wait for it to go, and kill it only if it has not within [timeoutMs].
+   * Killing it at once left a partial file with no control file, which aria2 then refuses to continue
+   * ("File … exists, but a control file(*.aria2) does not exist", seen in the log).
+   */
+  async gracefulStop(timeoutMs = 3000): Promise<void> {
+    const child = this.child;
+    if (!child || child.exitCode !== null) return;
+    const gone = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+    await Promise.race([this.call('aria2.shutdown').then(() => gone).catch(() => undefined), timeout]);
+    this.stop();
   }
 }
 
@@ -309,7 +332,7 @@ export const aria2Runner: Runner = (ctx) => {
     if (!isTorrent && files.length === 1) {
       const file = files[0]!;
       const expected = Number(status.totalLength) || ctx.job().source.direct?.sizeBytes || null;
-      ctx.progress({ stage: 'Verifying', speedBps: null, etaSec: null }, 'processing');
+      ctx.progress({ stage: 'Verifying', speedBps: null, etaSec: null, connections: null, activity: null }, 'processing');
       try {
         const result = await verifyDownload(file, expected, (pct) => ctx.progress({ stage: `Verifying checksum · ${Math.floor(pct)}%` }), verifyAbort.signal);
         if (stopped) return;
@@ -333,6 +356,9 @@ export const aria2Runner: Runner = (ctx) => {
   let silentSince = 0;
   let recoveries = 0;
   let cacheRetried = false;
+  let nameRetried = false;
+  /** Running average of the download speed, for the ETA (see core/progress smoothSpeed). */
+  let avgSpeed: number | null = null;
   let stall: StallState = initialStall(Date.now());
   let spaceBlocked = false;
 
@@ -388,6 +414,7 @@ export const aria2Runner: Runner = (ctx) => {
         status = await aria2.call<Aria2Status & { seeder?: string }>('aria2.tellStatus', gid, FIELDS);
       }
       const p = aria2Progress(status);
+      avgSpeed = smoothSpeed(avgSpeed, p.speedBps);
       const name = status.bittorrent?.info?.name;
       if (name && name !== ctx.job().title) ctx.patch({ title: name });
 
@@ -450,11 +477,32 @@ export const aria2Runner: Runner = (ctx) => {
             log.warn('Could not retry with the cache off', e);
           }
         }
+        // aria2 will not continue into a file that has no control file (it cannot tell a partial from someone else's
+        // file, and refuses rather than truncate it; seen in the log). The existing file is not ours to touch, so
+        // start again under a new name beside it instead of failing.
+        if (!isTorrent && !nameRetried && isControlFileMissing(status.errorMessage) && addSpec) {
+          const existing = (status.files ?? []).find((f) => f.path)?.path;
+          if (existing) {
+            nameRetried = true;
+            const fresh = uniqueName(path.dirname(existing), path.basename(existing));
+            log.warn('A file with this name already exists without a control file; saving under a new name', { job: job.title, name: fresh });
+            addSpec.opts = { ...addSpec.opts, dir: path.dirname(existing), out: fresh };
+            ctx.progress({ stage: `A file with this name already exists; saving as ${fresh}`, speedBps: null, etaSec: null }, 'running');
+            try {
+              await addToAria();
+              timer = setTimeout(poll, 1000);
+              return;
+            } catch (e) {
+              log.warn('Could not retry under a new name', e);
+            }
+          }
+        }
         // A partial with a `.aria2` control file resumes on Retry. One without (the server gave no
         // length or no ranges) never can: aria2 would start "name (1)" beside it, and the orphan keeps
         // eating the disk — measured on a full drive, where the retry then died of the very space the
         // first attempt's leftover held. So an unresumable partial is removed with the failure.
-        if (!isTorrent) {
+        // Never in the control-file case above: that file was already there, it is not this download's partial.
+        if (!isTorrent && !isControlFileMissing(status.errorMessage)) {
           for (const f of status.files ?? []) {
             if (!f.path || fs.existsSync(`${f.path}.aria2`)) continue;
             try { fs.rmSync(f.path, { force: true }); } catch (e) { log.debug('Could not remove unresumable partial', e); }
@@ -469,7 +517,7 @@ export const aria2Runner: Runner = (ctx) => {
       stall = step.state;
       if (step.action !== 'none') {
         log.warn(`Download stalled; ${step.action}`, { job: job.title, stalledForS: Math.round((Date.now() - stall.progressAt) / 1000), peers: status.connections, seeds: status.numSeeders });
-        ctx.progress({ stage: 'No data arriving, reconnecting…', speedBps: null, etaSec: null }, 'running');
+        ctx.progress({ stage: 'Downloading', activity: 'reconnecting', speedBps: null, etaSec: null }, 'running');
         try {
           if (step.action === 'nudge') {
             // Pausing and resuming makes a torrent announce to its trackers again.
@@ -489,13 +537,17 @@ export const aria2Runner: Runner = (ctx) => {
         return;
       }
       ctx.progress({
-        percent: metadata ? 0 : p.percent, speedBps: p.speedBps, etaSec: p.etaSec,
+        percent: metadata ? 0 : p.percent, speedBps: p.speedBps,
+        // From a running average of the speed, not the last moment's: the raw one swings, and so did the ETA built on it.
+        etaSec: metadata || !p.totalBytes ? null : etaFromSpeed(p.totalBytes - p.downloadedBytes, avgSpeed),
         downloadedBytes: metadata ? null : p.downloadedBytes, totalBytes: metadata ? null : p.totalBytes,
         stage: metadata ? 'Finding peers' : isTorrent
           ? `${status.numSeeders ?? 0} seeds · ${status.connections ?? 0} peers`
-          // Bytes are deliberately left out: the row already prints "7.6 MB of 29.3 MB" from the
-          // progress itself, and putting them here too printed the same figure twice in one line.
-          : `${status.connections ?? 0} connection${status.connections === '1' ? '' : 's'}`,
+          // The count of open connections is a chip beside the title now (progress.connections), not part of this line.
+          : 'Downloading',
+        connections: isTorrent ? null : Number(status.connections) || 0,
+        // Still "reconnecting" while recovery steps have run and no bytes have moved since: the next poll must not claim all is well.
+        activity: stall.steps > 0 ? 'reconnecting' : null,
       }, 'running');
     } catch (err) {
       if (stopped) return;
@@ -505,7 +557,7 @@ export const aria2Runner: Runner = (ctx) => {
       // A live engine that stops answering is usually mid-way through a slow disk write, not dead
       // (see core/engineWatch); restarting it throws that work away. Only a dead or long-silent one is restarted.
       if (rpcAction(silentForMs, aria2.running()) === 'wait') {
-        ctx.progress({ stage: 'Writing to disk, please wait…', speedBps: null, etaSec: null }, 'running');
+        ctx.progress({ stage: 'Downloading', activity: 'writing', speedBps: null, etaSec: null }, 'running');
       } else {
         if (recoveries >= 5) {
           ctx.fail('The download engine kept stopping. Your progress is saved on disk — press Retry to resume.');
@@ -513,7 +565,7 @@ export const aria2Runner: Runner = (ctx) => {
         }
         recoveries++;
         silentSince = 0;
-        ctx.progress({ stage: 'Reconnecting to the download engine…', speedBps: null, etaSec: null }, 'running');
+        ctx.progress({ stage: 'Downloading', activity: 'reconnecting', speedBps: null, etaSec: null }, 'running');
         try {
           await aria2.restart();
           await addToAria();

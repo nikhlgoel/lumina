@@ -7,6 +7,8 @@ import { library } from '../library';
 import { FOLDER_IMAGE_NAMES, artBucket, artCacheName, fitWithin, videoThumbnailAttempts } from '../../core/artwork';
 import { artworkCacheDir } from '../paths';
 import { runTool, spawnTool, killTree } from '../process';
+import { pipeArgs } from '../../core/streamPlan';
+import { isStreamId, streamPlan } from './streams';
 import { tools } from '../tools';
 import { logger } from '../log';
 
@@ -57,8 +59,14 @@ async function sourceArt(item: NonNullable<ReturnType<typeof library.getById>>):
   if (fs.existsSync(full) && fs.statSync(full).size > 0) return fs.readFileSync(full);
 
   if (item.kind === 'audio') {
-    const meta = await parseFile(item.path, { duration: false });
-    const cover = selectCover(meta.common.picture);
+    // A tag that cannot be read (a corrupt base64 picture block in an .opus or .flac threw "The string to be decoded is
+    // not correctly encoded" 491 times in the log) must not cost the file its folder cover as well.
+    let cover: ReturnType<typeof selectCover> = null;
+    try {
+      cover = selectCover((await parseFile(item.path, { duration: false })).common.picture);
+    } catch (err) {
+      log.debug(`Could not read the tags of ${item.path}; trying its folder for a cover`, err);
+    }
     if (cover) {
       const bytes = Buffer.from(cover.data);
       fs.writeFileSync(full, bytes);
@@ -99,9 +107,19 @@ async function artwork(id: string, requested: string | null): Promise<Response> 
   const sized = path.join(artworkCacheDir(), artCacheName(item.id, item.mtimeMs, size));
   if (fs.existsSync(sized)) return imageResponse(fs.readFileSync(sized));
 
+  // A file with no usable artwork was re-opened and re-parsed on every request, and a list shows it many times.
+  // Remembered per file version (id + mtime) for this run; the cap keeps it from growing with a huge library.
+  const missKey = `${item.id}:${item.mtimeMs}`;
+  if (noArtwork.has(missKey)) return new Response(null, { status: 404 });
+  const miss = () => {
+    if (noArtwork.size >= 5000) noArtwork.clear();
+    noArtwork.add(missKey);
+    return new Response(null, { status: 404 });
+  };
+
   try {
     const source = await sourceArt(item);
-    if (!source) return new Response(null, { status: 404 });
+    if (!source) return miss();
     const image = nativeImage.createFromBuffer(source);
     // An image Chromium can't decode is passed through untouched rather than dropped.
     if (image.isEmpty()) return imageResponse(source);
@@ -113,29 +131,81 @@ async function artwork(id: string, requested: string | null): Promise<Response> 
     return imageResponse(resized);
   } catch (err) {
     log.debug(`No artwork for ${item.path}`, err);
-    return new Response(null, { status: 404 });
+    return miss();
   }
 }
 
+/** Files (by id and modification time) already found to have no artwork, so they are not parsed again on every request. */
+const noArtwork = new Set<string>();
+
+/**
+ * ffmpeg's output as a response body. The pipe is paused whenever the player has all it asked for: a link can be read
+ * far faster than it plays, and an unpaused pipe would pile the whole film up in memory.
+ */
+function ffmpegResponse(args: string[]): Response {
+  const child = spawnTool(tools.require('ffmpeg'), args, { detached: false });
+  let stderr = '';
+  child.stderr?.on('data', (c: Buffer) => { stderr = (stderr + c.toString()).slice(-1500); });
+  let open = true;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      child.stdout?.on('data', (c: Buffer) => {
+        if (!open) return;
+        controller.enqueue(new Uint8Array(c));
+        if ((controller.desiredSize ?? 1) <= 0) child.stdout?.pause();
+      });
+      child.stdout?.on('end', () => { if (open) controller.close(); });
+      child.on('error', (err) => { if (open) controller.error(err); });
+      child.on('close', (code) => { if (code && open) log.warn(`ffmpeg stopped with code ${code}`, stderr.trim()); });
+    },
+    pull() {
+      child.stdout?.resume();
+    },
+    cancel() {
+      open = false;
+      killTree(child);
+    },
+  }, { highWaterMark: 64 });
+  return new Response(stream, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+}
+
 function remux(id: string, startSec: number): Response {
+  if (isStreamId(id)) {
+    const plan = streamPlan(id);
+    if (!plan) return new Response(null, { status: 404 });
+    return ffmpegResponse(pipeArgs(plan.mode === 'pipe' ? plan.sources : [plan.source], Math.max(0, startSec)));
+  }
   const item = library.getById(id);
   if (!item || !fs.existsSync(item.path)) return new Response(null, { status: 404 });
-  const child = spawnTool(tools.require('ffmpeg'), [
+  return ffmpegResponse([
     '-v', 'error', '-ss', String(Math.max(0, startSec)), '-i', item.path,
     '-map', '0:v:0?', '-map', '0:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-ac', '2',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1',
-  ], { detached: false });
-  const stream = new ReadableStream({
-    start(controller) {
-      child.stdout?.on('data', (c: Buffer) => controller.enqueue(new Uint8Array(c)));
-      child.stdout?.on('end', () => controller.close());
-      child.on('error', (err) => controller.error(err));
-    },
-    cancel() {
-      killTree(child);
-    },
-  });
-  return new Response(stream, { headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+  ]);
+}
+
+/** A progressive file somewhere on the web, passed through with the player's Range requests. */
+async function proxyStream(token: string, request: Request): Promise<Response> {
+  const plan = streamPlan(token);
+  if (!plan || plan.mode !== 'proxy') return new Response('Not found', { status: 404 });
+  const headers = new Headers(plan.source.headers);
+  const range = request.headers.get('range');
+  if (range) headers.set('Range', range);
+  let upstream: Response;
+  try {
+    upstream = await fetch(plan.source.url, { headers, redirect: 'follow', signal: request.signal });
+  } catch (err) {
+    log.warn('A stream could not be reached', err);
+    return new Response('Bad gateway', { status: 502 });
+  }
+  if (!upstream.ok) return new Response(null, { status: upstream.status });
+  const out = new Headers({ 'Content-Type': plan.mime, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+  if (upstream.status === 206 || /bytes/i.test(upstream.headers.get('accept-ranges') ?? '')) out.set('Accept-Ranges', 'bytes');
+  for (const name of ['content-length', 'content-range']) {
+    const v = upstream.headers.get(name);
+    if (v) out.set(name, v);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: out });
 }
 
 const VTT_HEADERS = { 'Content-Type': 'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin': '*' };
@@ -187,6 +257,7 @@ export function handleMediaProtocol() {
         return fileResponse(item.path, request);
       }
       if (kind === 'remux') return remux(id, Number(url.searchParams.get('t') ?? 0));
+      if (kind === 'stream') return await proxyStream(id, request);
       if (kind === 'art') return await artwork(id, url.searchParams.get('s'));
       if (kind === 'subs') return await subtitles(id);
       return new Response('Not found', { status: 404 });

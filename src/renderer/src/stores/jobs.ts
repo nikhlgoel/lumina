@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Job } from '@shared/types';
 import { groupJobs, summarizeGroup } from '@core/jobGroups';
 import { queuePosition } from '@core/jobOrder';
+import { isWaitingForNetwork } from '@core/jobDisplay';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { useApp } from './app';
 
@@ -81,7 +82,8 @@ export const selectQueueRows = (s: JobsState): { active: string; done: string } 
   for (const group of groupJobs(jobs)) {
     const members = group.ids.map((id) => s.byId[id]).filter((j): j is Job => Boolean(j));
     const entry = `${group.key}»${group.ids.join(',')}`;
-    (isFinishedStatus(summarizeGroup(members).status) ? done : active).push(entry);
+    // A job waiting for the network has "failed" its attempt but is going to resume by itself: it stays with the active ones.
+    (isFinishedStatus(summarizeGroup(members).status) && !members.some(isWaitingForNetwork) ? done : active).push(entry);
   }
   return { active: active.join('|'), done: done.join('|') };
 };
@@ -101,4 +103,4 @@ export const parseQueueRows = (encoded: string): QueueRow[] =>
 
 /** Selector: counts for the sidebar badge. */
 export const selectActiveCount = (s: JobsState) =>
-  s.order.reduce((n, id) => (s.byId[id] && (isActive(s.byId[id]!) || s.byId[id]!.status === 'queued') ? n + 1 : n), 0);
+  s.order.reduce((n, id) => (s.byId[id] && (isActive(s.byId[id]!) || s.byId[id]!.status === 'queued' || isWaitingForNetwork(s.byId[id]!)) ? n + 1 : n), 0);

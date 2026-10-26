@@ -298,3 +298,103 @@ doing nothing. The public lists refresh weekly into userData on top of it.
 **Not implemented, and skipped rather than half-applied:** `$redirect`, `$rewrite`, `$removeparam`,
 scriptlet injection, and procedural cosmetic selectors. A rule carrying one of those is dropped, not
 approximated — approximating it would let a request through while believing it had been handled.
+
+## D21 — Builds that exclude a feature exclude its code, not just its button
+
+**Decided:** Lumina ships in three Windows builds — full, **no-IDE**, and **player** (no IDE, no
+browser). `LUMINA_NO_IDE` / `LUMINA_NO_BROWSER` set build-time constants in `src/shared/features.ts`,
+and `vite.config.ts` **aliases the excluded view's module path to a stub**. The nav entry, its
+keyboard shortcut and its settings sections all disappear with it.
+
+**Why the alias, and not a flag:** the obvious version is
+`HAS_IDE ? lazy(() => import('…/IdeView')) : null`. That was written first and measured: the no-IDE
+bundle did not shrink **by a single byte**. Rollup will not drop a dynamic import to a module with
+side effects just because the branch holding it is dead, and Monaco is nothing but side effects.
+Replacing the module is the only version of this that is true.
+
+**Measured, full → no-IDE:** renderer **16 MB → 1.1 MB**, 96 chunks → 3, 3312 modules → 2056. The
+editor was most of the renderer.
+
+**What it does not change, stated because the number matters more than the feature list:** the
+installer is dominated by the bundled tools, not by the app. ffmpeg's DLLs are ~180 MB, the Whisper
+model is **142 MB** and yt-dlp is 18 MB. Dropping the editor is a real saving in what has to be
+parsed at launch, but it is a small fraction of the download. Dropping the *browser* saves almost
+nothing at all — `WebContentsView` is part of Electron — and is offered because some people do not
+want a browser in their media player, not because it is smaller.
+
+**A profile from a full build still opens in a smaller one.** `App.tsx` falls back to Download when
+the remembered view is one this build does not have, rather than rendering an empty pane.
+
+## D22 — The TV app is a separate native program, and it uses an in-process extractor, not yt-dlp
+
+**Decided:** the Fire TV app lives in `tv/` as its own Gradle project, written in Kotlin and Jetpack
+Compose, and gets streams from **NewPipe Extractor** running inside the app. It is not a port of the
+Electron app and does not reuse its renderer.
+
+**Why not reuse the PC app.** Its engines are Windows executables (`aria2c`, `yt-dlp`, `ffmpeg`,
+7-Zip) and a Node main process; none of it runs on Android. Its UI is mouse-first, and a TV is a
+remote with a D-pad, a 10-foot screen, 8 GB of storage and 2 GB of RAM. Nearly all of the PC app's
+features — torrents, the IDE, the terminal, MCP, the in-app browser — are things nobody does on a TV,
+so they are simply not in the TV app (and are untouched in the PC app).
+
+**Why not React Native or a WebView.** Either would still need native code for extraction and
+playback, and would add a JavaScript engine on a 2 GB device to reuse a small amount of logic. D-pad
+focus, the launcher banner and background audio are first-class in the native toolkit.
+
+**Why the extractor and not yt-dlp.** yt-dlp is a Python program. Shipping Python for 32-bit ARM
+means a large runtime, native libraries and a way to update it, on the weakest hardware we target.
+NewPipe Extractor is pure Java, a few megabytes, and actively maintained. **The cost is its licence:
+GPL-3.0.** Linking it makes the whole `tv/` project GPL-3.0 (`tv/LICENSE`). The PC app stays MIT; they
+are separate programs. A second cost, stated plainly: when a site changes, search stops working until
+the app is rebuilt against a newer extractor. Settings > Test connection says so rather than failing
+mysteriously; there is no in-app updater yet.
+
+**Toolchain pinned on purpose.** AGP 8.13.2 / Gradle 8.14.6 / Kotlin 2.2.21, compileSdk 36. The
+newest AndroidX releases (mid-2026) demand AGP 9.1+ and compileSdk 37, so AndroidX is held to the last
+releases for compileSdk 36. **targetSdk 30** equals Fire OS 8, so behaviour on the stick is what was
+tested; the Play Store's "target 33+" lint rule is switched off because the app is never published
+to a store.
+
+**Two bugs this decision made visible, both found only by running it:** the extractor calls
+`URLEncoder.encode(String, Charset)`, which Android has only from API 33, so below that the *plain*
+desugaring library is not enough (`desugar_jdk_libs_nio` is) — every search died with "No static
+method encode"; and the newest AndroidX will not compile against the older AGP.
+
+## D23 — Shared behaviour between the two apps is pinned by a fixture both test, not by agreement
+
+**Decided:** where the PC app and the TV app must behave identically, the rule is written once as data
+in `shared/contract/` and **both test suites read it**. Today that is one contract: how files are named
+and filed (`portable-names.json`).
+
+**Why.** The two apps are in different languages and different repositories-within-a-repository, and
+the failure to avoid is silent drift: a song saved on the TV that the PC cannot find, or a USB stick
+that needs renaming. Agreement in prose does not stop that; a failing test does.
+
+**How it was made honest.** The expected values were **generated by running the PC app's own
+functions** (`safeSegment`, `portableTargetFor`) over a list of awkward inputs, not written by hand
+from reading the code. Control characters become spaces, reserved device names get a `_`, trailing
+dots go, long names are cut. `tests/portableContract.test.ts` (30 cases) and the Kotlin `FileNamesTest`
+both check it. Change a naming rule on one side and the other side fails until it is updated on purpose.
+
+**Not shared yet:** Lumina Sync. Its crypto core is already portable TypeScript (`syncCryptoWeb.ts`),
+and the same approach — a fixture of known inputs and outputs — is how it should be ported.
+
+## D24 — The TV app updates itself from GitHub releases, and never installs without a yes
+
+**Decision.** `tv/` checks `nikhlgoel/lumina` releases in the background (WorkManager every 12 h on an unmetered
+network, plus once ~45 s after launch), downloads a newer `lumina-tv-<version>.apk` into the cache, and offers it with
+a dialog ("Install and restart" / "Later"). "Later" lasts until the app is next opened, when the already-downloaded file
+is offered again. The install itself goes through `PackageInstaller`, so Android shows its own confirmation.
+
+**Why not silent.** A non-system app cannot update itself silently on API 30; pretending otherwise would be a promise
+the platform breaks. The two-step (download quietly, install on a yes) is the closest honest version of "update by
+itself".
+
+**Rules that decide what is installable** (`UpdateLogic`, tested): the version comes from the APK's file name, not the
+release tag (the PC and TV apps share a repo but not a version number); the list of recent releases is searched, not
+only `/latest`, so a PC-only release cannot hide a TV update; no drafts, pre-releases or `debug` files; the URL must
+start with this repository's release-download prefix over HTTPS; size capped at 150 MB. After download: size, SHA-256
+(when GitHub supplies a digest), and "this package, higher version code". Android's same-signing-key rule is the final,
+unforgeable check.
+
+**Unproven.** Download-to-install has not run end to end (BUGS TV-7).

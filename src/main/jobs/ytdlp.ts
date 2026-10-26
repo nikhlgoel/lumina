@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildDownloadArgs, outputTemplate } from '../../core/ytdlpArgs';
 import { diskCacheMb } from '../../core/tuning';
-import { friendlyYtdlpError, isCookieReadError, parseYtdlpLine, splitYtdlpLine } from '../../core/progress';
+import { friendlyYtdlpError, isAcceleratorFailure, isCookieReadError, parseYtdlpLine, splitYtdlpLine } from '../../core/progress';
 import { applyProgressEvent, initialProgressState, type ProgressModelOptions, type ProgressModelState } from '../../core/ytdlpProgress';
 import { aggregateProgress, allItems, planShards, playlistItemsArg } from '../../core/playlistShards';
 import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from '../cookieHealth';
@@ -87,6 +87,9 @@ export const ytdlpRunner: Runner = (ctx) => {
     speedLimitKbps: speedLimitActive(s) ? s.downloads.speedLimitKbps : 0,
   });
 
+  /** Set when the accelerator failed and the job is being retried over yt-dlp's own downloader. */
+  let nativeOnly = false;
+
   const buildArgs = (opts: { batchFile?: string; browserCookies: boolean; playlistItemsArg?: string; archiveFile?: string | null }) => buildDownloadArgs({
     url: job.url, batchFile: opts.batchFile, options: job.options, outputDir, tempDir: downloadTemp, outputTemplate: template,
     ffmpegDir: tools.ffmpegDir(), jsRuntime: tools.jsRuntime(),
@@ -100,7 +103,7 @@ export const ytdlpRunner: Runner = (ctx) => {
     aria2cPath,
     connectionsPerServer: s.network.connectionsPerServer,
     diskCacheMb: diskCacheMb(os.totalmem()),
-    accelerate: s.downloads.accelerate,
+    accelerate: s.downloads.accelerate && !nativeOnly,
     sponsorBlock: s.downloads.sponsorBlock,
     sponsorCategories: s.downloads.sponsorCategories,
     embedThumbnail: s.downloads.embedThumbnail,
@@ -261,6 +264,18 @@ export const ytdlpRunner: Runner = (ctx) => {
     const stderrTail = workers.map((w) => w.stderrTail).filter(Boolean).join('\n').slice(-8000);
     const allErrors = `${errors.join('\n')}\n${stderrTail}`;
     const failedCodes = workers.map((w) => w.code).filter((c) => c !== 0);
+
+    // The accelerator (aria2c inside yt-dlp) failing is not the download failing: a server that answers parallel range
+    // requests badly gives "aria2c exited with code 22" (seen in the log), while the same file downloads fine over
+    // yt-dlp's own single connection. Retry once that way before giving up. A partial the accelerator left is picked
+    // up by yt-dlp's own resume.
+    if (failedCodes.length && !outputs.length && aria2cPath && s.downloads.accelerate && !nativeOnly && isAcceleratorFailure(allErrors)) {
+      nativeOnly = true;
+      log.warn(`The fast downloader failed for ${job.title}; retrying with a single connection`);
+      ctx.progress({ stage: 'The fast mode was refused, retrying with a single connection', speedBps: null, etaSec: null }, 'running');
+      start({ ...opts });
+      return;
+    }
 
     // A locked or encrypted browser cookie store shouldn't sink public downloads: retry once without it.
     if (failedCodes.length && opts.browserCookies && isCookieReadError(allErrors) && !outputs.length) {

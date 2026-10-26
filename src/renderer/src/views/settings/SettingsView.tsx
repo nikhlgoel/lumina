@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { HAS_IDE } from '@shared/features';
 import {
   Captions, Cast, Code2, Download, Film, Globe, HardDrive, Magnet, Monitor, Music2, Palette, Plug, Puzzle, RefreshCw, Search, Settings2, Shield, Sparkles, Usb, UserRound, Wrench, X,
 } from 'lucide-react';
@@ -27,7 +28,7 @@ interface SectionDef {
   index: [string, string, string?][];
 }
 
-const SECTIONS: SectionDef[] = [
+const ALL_SECTIONS: SectionDef[] = [
   { id: 'general', label: 'General', icon: <Settings2 />, group: 'App', component: GeneralSection, index: [
     ['closeToTray', 'Keep running when the window is closed', 'tray background'], ['startWithSystem', 'Start with your computer', 'startup login boot'],
     ['startMode', 'When Lumina opens, show'], ['resumeQueue', 'Resume unfinished downloads'], ['confirmQuit', 'Ask before quitting'],
@@ -120,6 +121,15 @@ const SECTIONS: SectionDef[] = [
     ['verbose', 'Detailed logs', 'debug'], ['export', 'Export or import settings', 'backup'], ['reset', 'Reset all settings'],
   ] },
 ];
+
+/**
+ * Settings for features this build does not contain are not listed.
+ *
+ * The editor theme and the MCP client only mean anything with the editor present; leaving them in a
+ * no-IDE build would be settings for something that is not there. See D21.
+ */
+const IDE_ONLY = new Set(['editorTheme', 'mcp']);
+const SECTIONS: SectionDef[] = ALL_SECTIONS.filter((s) => HAS_IDE || !IDE_ONLY.has(s.id));
 
 const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 

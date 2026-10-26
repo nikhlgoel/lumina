@@ -1,6 +1,6 @@
 {
   "name": "lumina-media",
-  "version": "3.0.0-alpha.0",
+  "version": "3.0.0",
   "description": "Lumina - media downloader and player",
   "main": "dist-electron/main/index.js",
   "author": {
@@ -19,7 +19,9 @@
     "package:dir": "pnpm build && electron-builder --dir",
     "package:win": "pnpm tools:fetch --platform win32 && pnpm build && electron-builder --win nsis",
     "package:linux": "pnpm tools:fetch --platform linux && pnpm build && electron-builder --linux AppImage rpm",
-    "package:portable": "pnpm tools:fetch --platform win32 && pnpm build && electron-builder --win portable"
+    "package:portable": "pnpm tools:fetch --platform win32 && pnpm build && electron-builder --win portable",
+    "package:win:no-ide": "pnpm build && electron-builder --win nsis --config.nsis.artifactName=\"Lumina Setup_v${version}-no-ide.exe\"",
+    "package:win:player": "pnpm build && electron-builder --win nsis --config.nsis.artifactName=\"Lumina Setup_v${version}-player.exe\""
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.3.0",

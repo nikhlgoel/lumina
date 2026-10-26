@@ -16,8 +16,10 @@ export type FailureKind =
 
 // "unavailable" alone is not enough: "503 Service Unavailable" is exactly the kind of failure worth retrying.
 const PERMANENT = /(private|drm|(video|content|file|media) (is )?unavailable|not found|404|403|members|age-restricted|disk is full|not enough|can’t download|can't download)/;
-const NETWORK = /(network|connection|no internet|name resolution|could not resolve|getaddrinfo|unreachable|timed? ?out|reset|refused|eof|ssl|socket)/;
-const TRANSIENT = /(429|rate-limit|too many|503|502|500|temporar)/;
+// The raw network-layer errors are listed too ("fetch failed" is all Node's fetch says when a connection drops; it was
+// classed "permanent" and never retried), in case a message reaches here before it has been put into words.
+const NETWORK = /(network|connection|no internet|name resolution|could not resolve|getaddrinfo|unreachable|timed? ?out|reset|refused|eof|ssl|socket|fetch failed|other side closed|econnreset|etimedout|enotfound|eai_again)/;
+const TRANSIENT = /(429|rate-limit|too many|503|502|500|504|temporar|overloaded)/;
 
 /** Read a failure message (and any detail) and say what kind of waiting it deserves. */
 export function classifyFailure(message: string | null | undefined, detail?: string | null): FailureKind {

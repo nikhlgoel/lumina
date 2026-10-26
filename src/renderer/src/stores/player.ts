@@ -6,6 +6,7 @@ import { useApp } from './app';
 import { useLibrary } from './library';
 import { nextVolume } from '@core/trayMenu';
 import { clampVolume, volumeSplit } from '@core/volume';
+import { clampSpeed } from '@core/playbackSpeed';
 import { createShuffle, shuffleMatches, stepShuffle, syncShuffle, type ShuffleState } from '@core/shuffle';
 
 export type Repeat = 'off' | 'all' | 'one';
@@ -24,9 +25,12 @@ interface PlayerState {
   repeat: Repeat;
   stage: StageView;
   subtitles: boolean;
+  /** Playback speed, kept across tracks the way YouTube keeps it across videos. */
+  rate: number;
   lyrics: Lyrics | null;
   lyricsState: 'idle' | 'loading' | 'ready' | 'missing';
   current: () => PlayableItem | null;
+  setRate: (rate: number) => void;
   playQueue: (items: PlayableItem[], startIndex?: number) => void;
   playIds: (ids: string[], startIndex?: number) => Promise<void>;
   toggle: () => void;
@@ -52,6 +56,8 @@ media.playsInline = true;
 // When Chromium can't decode a file, it is streamed through ffmpeg; seeking then restarts the stream at an offset.
 let remuxOffset = 0;
 let usingRemux = false;
+/** Whether the current file is being converted live by ffmpeg (shown in the stats panel). */
+export const isRemuxing = () => usingRemux;
 let lyricsToken = 0;
 let artworkBlobUrl: string | null = null;
 
@@ -79,8 +85,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
     const { queue } = get();
     const item = queue[index];
     if (!item) return;
-    usingRemux = false;
+    // A link that can only be played through ffmpeg already points at it; seeking then restarts that pipe.
+    usingRemux = Boolean(item.pipe);
     remuxOffset = 0;
+    // Assigning a new src runs the load algorithm, which resets playbackRate to defaultPlaybackRate
+    // — so a chosen speed would silently snap back to 1x on every track unless the default carries it.
+    media.defaultPlaybackRate = get().rate;
     media.src = item.src;
     for (const t of Array.from(media.querySelectorAll('track'))) t.remove();
     if (item.kind === 'video') {
@@ -267,10 +277,21 @@ export const usePlayer = create<PlayerState>((set, get) => {
     repeat: 'off',
     stage: useApp.getState().settings?.player.autoOpenLyrics ? 'lyrics' : 'art',
     subtitles: false,
+    rate: 1,
     lyrics: null,
     lyricsState: 'idle',
 
     current: () => get().queue[get().index] ?? null,
+
+    setRate: (value) => {
+      const rate = clampSpeed(value);
+      media.defaultPlaybackRate = rate;
+      media.playbackRate = rate;
+      // Speed without a chipmunk: keep the pitch where it was. Chromium defaults to true; said
+      // outright so a future default change cannot quietly turn 2x into a squeak.
+      media.preservesPitch = true;
+      set({ rate });
+    },
 
     playQueue: (items, startIndex = 0) => {
       if (!items.length) return;

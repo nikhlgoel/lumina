@@ -24,6 +24,35 @@ export const openSettings = (label: string) =>
  * 500 ms until it settles. Returns the samples as JSON. The destination is `LUMINA_PROBE_DIR`, never
  * the user's library.
  */
+/**
+ * Types a link into the bar, presses Play, then reads the player's `<video>` twice and after a seek key, so "it plays" is a
+ * measurement (time advancing, a picture of the right size) rather than a screenshot that happens to look right. The last step
+ * pauses it: nothing is left playing after a run.
+ */
+function playProbe(url: string) {
+  // `seek` is the position the player's own slider shows: the music view has no <video> on the page to read.
+  const state = `(() => { const v = document.querySelector('video'); const seek = Number(document.querySelector('[role=slider][aria-label=Seek]')?.getAttribute('aria-valuenow') ?? NaN); return JSON.stringify(v ? { seek, t: Math.round(v.currentTime * 10) / 10, dur: v.duration, ready: v.readyState, w: v.videoWidth, h: v.videoHeight, paused: v.paused, err: v.error ? v.error.code : null, src: v.currentSrc.slice(0, 48) } : { seek, video: false }); })()`;
+  // LUMINA_PROBE_PLAY_FROM=card reads the link first (the Download button) and presses Play on the result card, which hands main the already-read info.
+  const fromCard = process.env.LUMINA_PROBE_PLAY_FROM === 'card';
+  const type = `const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(url)}); i.dispatchEvent(new Event('input', { bubbles: true }));`;
+  const wait = Number(process.env.LUMINA_PROBE_PLAY_WAIT ?? 20000);
+  return [
+    ...(fromCard ? [{ name: 'probe-play-read', script: `(() => { ${type} i.form.requestSubmit(); return 'submitted'; })()`, delay: 8000 }] : []),
+    {
+      name: 'probe-play-click',
+      script: fromCard
+        ? `(() => { const play = [...document.querySelectorAll('section[aria-label="Link ready"] button')].find((b) => b.textContent.trim() === 'Play'); if (!play) return JSON.stringify({ clicked: false, card: false }); play.click(); return JSON.stringify({ clicked: true, card: true }); })()`
+        : `(() => { ${type} const play = [...i.form.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Play'); if (!play) return JSON.stringify({ clicked: false }); play.click(); return JSON.stringify({ clicked: true, disabled: play.disabled }); })()`,
+      delay: wait,
+    },
+    { name: 'probe-play-a', script: state, delay: 4000 },
+    { name: 'probe-play-b', script: state, delay: 600 },
+    { name: 'probe-play-seeked', script: `(() => { dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return 'sent'; })()`, delay: 6000 },
+    { name: 'probe-play-c', script: state, delay: 600 },
+    { name: 'probe-play-stop', script: `(() => { const v = document.querySelector('video'); v?.pause(); return ${JSON.stringify('stopped')}; })()`, delay: 800 },
+  ];
+}
+
 export const downloadProbe = (url: string, dir: string, kind: 'video' | 'audio') => `(async () => {
   const url = ${JSON.stringify(url)};
   const format = ${kind === 'video'
@@ -130,18 +159,47 @@ export const shotProbe = (url: string, dir: string, waitMs: number) => `(async (
   return 'shown';
 })()`;
 
+/**
+ * Three real downloads for the Queue-row photographs: a quick one that finishes, a slow known-size one that is paused part way,
+ * and one whose server never says how big it is. Then the Queue is opened and left for the harness to photograph.
+ * `urls` are the quick, known-size and unknown-size URLs, in that order.
+ */
+export const rowsProbe = (urls: string[], dir: string, pauseAfterMs: number, settleMs: number) => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const options = { contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const add = async (url) => inv('jobs:add', { url, info: await inv('media:inspect', { url }), options });
+  const urls = ${JSON.stringify(urls)};
+  await add(urls[0]);
+  const known = await add(urls[1]);
+  await add(urls[2]);
+  await sleep(${pauseAfterMs});
+  await inv('jobs:pause', { id: known.id });
+  await sleep(${settleMs});
+  ${goto('Queue')};
+  await sleep(1500);
+  return 'shown';
+})()`;
+
 const probeDir = process.env.LUMINA_PROBE_DIR ?? '';
 /** Any other URL to push through the real runner, e.g. a local range server for stall tests. */
 const probeUrl = process.env.LUMINA_PROBE_URL ?? '';
 
+const probeRows = (process.env.LUMINA_PROBE_ROWS ?? '').split(',').filter(Boolean);
+
 const STEPS: { name: string; script: string; delay?: number }[] = [
+  ...(probeDir && probeRows.length === 3 ? [{ name: 'probe-rows', script: rowsProbe(probeRows, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_MS) || 7000, Number(process.env.LUMINA_PROBE_SETTLE_MS) || 5000), delay: 300 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE !== 'lifecycle' ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
-  ...(probeDir && !probeUrl ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
+  ...(probeDir && !probeUrl && probeRows.length !== 3 ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
   { name: '01-download-light', script: "document.documentElement.dataset.theme='light'" },
   { name: '02-download-dark', script: "document.documentElement.dataset.theme='dark'" },
-  { name: '03-inspect', script: `(() => { const i = document.querySelector('input[aria-label^="Link to download"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); })()`, delay: 9000 },
+  // The same step with a link of the caller's choosing (LUMINA_PROBE_INSPECT), to photograph how a particular failure looks.
+  ...(process.env.LUMINA_PROBE_INSPECT ? [{ name: 'probe-inspect-shot', script: `(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(process.env.LUMINA_PROBE_INSPECT)}); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); return 'submitted'; })()`, delay: 12000 }] : []),
+  // Press Play on a link the way a person would, then read back whether the picture is really moving (LUMINA_PROBE_PLAY).
+  ...(process.env.LUMINA_PROBE_PLAY ? playProbe(process.env.LUMINA_PROBE_PLAY) : []),
+  { name: '03-inspect', script: `(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); })()`, delay: 9000 },
   { name: '04-queue', script: goto('Queue') },
   { name: '05-library', script: goto('Library'), delay: 2500 },
   { name: '05b-library-videos', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 900)`, delay: 12000 },
@@ -234,6 +292,24 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '14a-player-video', script: `(() => { const nav = [...document.querySelectorAll('nav[aria-label=Main] button'), ...document.querySelectorAll('button')]; (nav.find((b) => b.textContent.trim() === 'Library'))?.click(); setTimeout(() => { const tab = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos'); if (tab) tab.click(); else console.log('[video] no Videos tab'); }, 1200); setTimeout(() => { const tile = [...document.querySelectorAll('button[aria-label^="Play "]')].pop(); if (!tile) { console.log('[video] no video tile'); return; } console.log('[video] opening ' + tile.getAttribute('aria-label')); tile.click(); }, 2600); })()`, delay: 7000 },
   // Same view after the chrome has auto-hidden: the picture should be edge to edge.
   { name: '14b-player-video-idle', script: `(() => { const root = document.querySelector('.player'); console.log('[video] player=' + Boolean(root) + ' isVideo=' + (root ? root.hasAttribute('data-video') : false)); const sec = root && root.querySelector('section'); if (sec) { const r = sec.getBoundingClientRect(); console.log('[video] stage=' + Math.round(r.width) + 'x' + Math.round(r.height) + ' of ' + innerWidth + 'x' + innerHeight); } const v = document.querySelector('.p-video video'); if (v) { const r = v.getBoundingClientRect(); console.log('[video] video=' + Math.round(r.width) + 'x' + Math.round(r.height)); } })()`, delay: 4000 },
+  // Songs in the full player. The earlier player steps play whatever is first in the library, which
+  // can be a video — so the cover and the record were never photographed. These pin the theme, play a
+  // real song from the Music tab, and open the player.
+  { name: '41a-player-song-aurora', script: `(async () => { await window.lumina.invoke('settings:update', { player: { theme: 'aurora' } }); ${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Music')?.click(), 900); setTimeout(() => document.querySelector('button[data-play]')?.click(), 2200); setTimeout(() => document.querySelector('[aria-label^="Open player"]')?.click(), 3400); setTimeout(() => [...document.querySelectorAll('[role=radio]')].find((b) => b.textContent.trim() === 'Art')?.click(), 4800); })()`, delay: 8500 },
+  { name: '41b-player-song-vinyl', script: `window.lumina.invoke('settings:update', { player: { theme: 'vinyl' } })`, delay: 4500 },
+  // Measure the record rather than trust the CSS: its animation, its playback rate, and how far it
+  // actually turned in half a second. Full speed should be 360deg per PLATTER_PERIOD_MS.
+  { name: '41c-record-rotation', script: `(async () => { const el = document.querySelector('.p-record'); if (!el) { console.log('[record] no .p-record'); return; } const angle = () => { const m = new DOMMatrix(getComputedStyle(el).transform); return (Math.atan2(m.b, m.a) * 180 / Math.PI + 360) % 360; }; const a = el.getAnimations(); console.log('[record] animations=' + a.length + ' rate=' + (a[0] ? a[0].playbackRate.toFixed(3) : 'n/a') + ' state=' + (a[0] ? a[0].playState : 'n/a')); const t0 = performance.now(); const a0 = angle(); await new Promise((r) => setTimeout(r, 500)); const a1 = angle(); const dt = performance.now() - t0; console.log('[record] turned ' + (((a1 - a0) + 360) % 360).toFixed(1) + 'deg in ' + dt.toFixed(0) + 'ms => ' + ((((a1 - a0) + 360) % 360) / dt * 1000).toFixed(1) + ' deg/s (full speed = ' + (360000 / 2800).toFixed(1) + ')'); const l = document.querySelector('.p-label-art'); console.log('[record] label art ' + (l ? Math.round(l.getBoundingClientRect().width) + 'px inside ' + Math.round(el.querySelector('.p-label').getBoundingClientRect().width) + 'px label' : 'missing')); })()`, delay: 1500 },
+  // The video controls, end to end. Each step measures as well as photographs: whether the chrome is
+  // hidden, what the element's playbackRate really is. A screenshot alone cannot tell "hidden" from "never shown".
+  { name: '42a-video-open', script: `(() => { ${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 1200); setTimeout(() => [...document.querySelectorAll('button[aria-label^="Play "]')].pop()?.click(), 2600); setTimeout(() => { const v = document.querySelector('.p-video video'); if (v) v.play().catch((e) => console.log('[vctl] play blocked ' + e)); }, 5200); })()`, delay: 8000 },
+  { name: '42b-video-hidden', script: `(() => { const r = document.querySelector('.player'); const v = document.querySelector('.p-video video'); console.log('[vctl] playing=' + (v && !v.paused) + ' hidden=' + (r && r.hasAttribute('data-idle')) + ' (expect true once 3s of stillness pass while playing)'); })()`, delay: 4500 },
+  { name: '42c-video-wake', script: `(() => { window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })); setTimeout(() => { const r = document.querySelector('.player'); console.log('[vctl] after movement hidden=' + (r && r.hasAttribute('data-idle')) + ' (expect false)'); }, 300); })()`, delay: 700 },
+  { name: '42d-video-gear', script: `document.querySelector('[aria-label="Settings"]')?.click()`, delay: 700 },
+  { name: '42e-video-speed-page', script: `[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Playback speed'))?.click()`, delay: 600 },
+  { name: '42f-video-speed-set', script: `(() => { [...document.querySelectorAll('[role=menuitemradio]')].find((b) => b.textContent.trim().startsWith('1.5'))?.click(); setTimeout(() => { const v = document.querySelector('.p-video video'); console.log('[vctl] playbackRate=' + (v && v.playbackRate) + ' preservesPitch=' + (v && v.preservesPitch) + ' (expect 1.5, true)'); }, 400); })()`, delay: 1200 },
+  { name: '42g-video-stats', script: `dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }))`, delay: 1400 },
+  { name: '42h-video-speed-key', script: `(() => { dispatchEvent(new KeyboardEvent('keydown', { key: '>', bubbles: true })); setTimeout(() => { const v = document.querySelector('.p-video video'); console.log('[vctl] after > key playbackRate=' + (v && v.playbackRate) + ' (expect 1.75)'); }, 300); })()`, delay: 500 },
   // Drive the REAL export twice against a scratch folder: first run converts, second must skip.
   { name: '15a-usb-tv-export', script: `(() => { const root = 'C:/Users/datan/AppData/Local/Temp/lumina-tvdrive2'; const go = async () => { await window.lumina.invoke('library:rescan').catch(() => {}); await new Promise((r) => setTimeout(r, 2500)); const stats = await window.lumina.invoke('library:stats').catch(() => null); console.log('[usb] library ' + JSON.stringify(stats)); const first = await window.lumina.invoke('usb:export', { root, kinds: ['audio', 'video'] }); console.log('[usb] run1 ' + JSON.stringify(first)); const second = await window.lumina.invoke('usb:export', { root, kinds: ['audio', 'video'] }); console.log('[usb] run2 ' + JSON.stringify(second)); }; go().catch((e) => console.log('[usb] failed ' + (e && e.message))); })()`, delay: 90000 },
   // Turn the DLNA server on and let an external probe (run separately) talk to it.
@@ -277,7 +353,7 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   // through the real slider so the store's setVolume does the split, rather than poking settings.
   { name: '13d-player-volume-boost', script: "(() => { const i = document.querySelector('input[aria-label=Volume]'); if (!i) { console.log('[volume] no slider'); return; } const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '1.7'); i.dispatchEvent(new Event('input', { bubbles: true })); })()", delay: 1600 },
   { name: '14-video', script: "dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); setTimeout(() => { [...document.querySelectorAll('[role=radio]')].find((b) => b.textContent === 'Videos')?.click(); setTimeout(() => document.querySelector('article button')?.click(), 1500); }, 800)", delay: 5000 },
-  { name: '15-batch', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); [...document.querySelectorAll('nav[aria-label=Main] button')][0].click(); setTimeout(() => { const nl = String.fromCharCode(10); const h = 'https://files.example.net/'; const parts = Array.from({ length: 24 }, (_, i) => h + 'k' + i + '/Sample_Release_--_example-site.net_--_.part' + String(i + 1).padStart(2, '0') + '.rar').filter((_, i) => i !== 17); const extra = ['german', 'japanese', 'spanish'].map((l) => h + l + '/fg-optional-' + l + '-vo.bin').concat([h + 'v1/fg-optional-hd-videos.part1.rar', h + 'v2/fg-optional-hd-videos.part2.rar', h + 'm/Sample_Release.md5']); const dt = new DataTransfer(); dt.setData('text/plain', parts.concat(extra).join(nl)); document.querySelector('input[aria-label^=\"Link to download\"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, 600)", delay: 2000 },
+  { name: '15-batch', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); [...document.querySelectorAll('nav[aria-label=Main] button')][0].click(); setTimeout(() => { const nl = String.fromCharCode(10); const h = 'https://files.example.net/'; const parts = Array.from({ length: 24 }, (_, i) => h + 'k' + i + '/Sample_Release_--_example-site.net_--_.part' + String(i + 1).padStart(2, '0') + '.rar').filter((_, i) => i !== 17); const extra = ['german', 'japanese', 'spanish'].map((l) => h + l + '/fg-optional-' + l + '-vo.bin').concat([h + 'v1/fg-optional-hd-videos.part1.rar', h + 'v2/fg-optional-hd-videos.part2.rar', h + 'm/Sample_Release.md5']); const dt = new DataTransfer(); dt.setData('text/plain', parts.concat(extra).join(nl)); document.querySelector('input[aria-label^=\"Link to\"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, 600)", delay: 2000 },
   { name: '16-batch-expanded', script: "document.querySelector('button[aria-label=\"Show parts\"]').click(); document.querySelector('button[aria-label^=\"Include German\"]').click()", delay: 900 },
   { name: '17-batch-light', script: "document.documentElement.dataset.theme='light'", delay: 700 },
   { name: '30-about', script: `document.documentElement.dataset.theme='dark'; ${goto('About')}`, delay: 1400 },
@@ -296,6 +372,16 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
 
 export async function runCapture(win: BrowserWindow, dir: string, extra: { name: string; script: string; delay?: number }[] = []) {
   fs.mkdirSync(dir, { recursive: true });
+  // A sleep cannot be done to a test machine, but the app's listener sits on powerMonitor's `resume`
+  // event, so emitting that event runs the same code path a real wake would.
+  const wakeAt = Number(process.env.LUMINA_PROBE_WAKE_AT);
+  if (wakeAt > 0) {
+    const { powerMonitor } = await import('electron');
+    setTimeout(() => powerMonitor.emit('resume'), wakeAt * 1000);
+  }
+  // Kill the page process on purpose, to watch src/main/crashGuard.ts bring the window back.
+  const crashAt = Number(process.env.LUMINA_PROBE_CRASH_AT);
+  if (crashAt > 0) setTimeout(() => win.webContents.forcefullyCrashRenderer(), crashAt * 1000);
   await wait(3500);
   const only = process.env.LUMINA_CAPTURE_ONLY ? new RegExp(process.env.LUMINA_CAPTURE_ONLY) : null;
   for (const step of [...STEPS, ...extra].filter((s) => !only || only.test(s.name))) {
@@ -317,13 +403,6 @@ export async function runCapture(win: BrowserWindow, dir: string, extra: { name:
 
 /**
  * The tray menu is native, so it can't be screenshotted. This drives the same path a click takes —
-  // A sleep cannot be done to a test machine, but the app's listener sits on powerMonitor's `resume`
-  // event, so emitting that event runs the same code path a real wake would.
-  const wakeAt = Number(process.env.LUMINA_PROBE_WAKE_AT);
-  if (wakeAt > 0) {
-    const { powerMonitor } = await import('electron');
-    setTimeout(() => powerMonitor.emit('resume'), wakeAt * 1000);
-  }
  * the exact command the menu item carries, sent to the renderer — and then reads back what the player
  * reported to the tray, proving each control changes the player AND that the tray's ticks follow.
  */

@@ -20,6 +20,17 @@ export function formatSpeed(bps: number | null | undefined): string {
   return bps && bps > 0 ? `${formatBytes(bps)}/s` : '—';
 }
 
+/**
+ * A speed rounded for a figure that is shown live, so it does not re-render on every few bytes. The step gets finer as the
+ * speed gets slower: a fixed 10 KB/s step printed "—" for anything under 5 KB/s, so a slow download that was moving looked
+ * dead. Never returns 0 for a download that is moving.
+ */
+export function coarseSpeed(bps: number): number {
+  if (!(bps > 0)) return 0;
+  const step = bps < 100 * 1024 ? 1024 : bps < 1024 * 1024 ? 10 * 1024 : 100 * 1024;
+  return Math.max(step, Math.round(bps / step) * step);
+}
+
 export function formatDuration(totalSec: number | null | undefined): string {
   if (totalSec == null || !Number.isFinite(totalSec) || totalSec < 0) return '—';
   const s = Math.floor(totalSec % 60);

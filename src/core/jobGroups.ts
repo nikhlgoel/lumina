@@ -73,6 +73,33 @@ export function groupJobs(jobs: Job[]): JobGroup[] {
 }
 
 /** Roll a group's members up into the single status + progress the collapsed row shows. */
+export interface PercentSource {
+  percent: number;
+  downloadedBytes: number | null;
+  totalBytes: number | null;
+}
+
+/**
+ * One progress figure for several downloads running together (the taskbar button). When every download's size is known it
+ * is weighted by bytes: the plain average of percentages put a 1 KB file at 100% and a 50 GB file at 1% at "50%". When any size
+ * is unknown the bytes cannot be added up honestly, so it falls back to the average.
+ */
+export function overallPercent(items: PercentSource[]): number {
+  if (items.length === 0) return 0;
+  const clamp = (n: number) => Math.max(0, Math.min(100, n));
+  if (items.every((i) => i.totalBytes && i.totalBytes > 0)) {
+    let done = 0;
+    let total = 0;
+    for (const i of items) {
+      const t = i.totalBytes as number;
+      total += t;
+      done += Math.min(t, i.downloadedBytes ?? (clamp(i.percent) / 100) * t);
+    }
+    return (done / total) * 100;
+  }
+  return items.reduce((sum, i) => sum + clamp(i.percent), 0) / items.length;
+}
+
 export function summarizeGroup(members: Job[]): GroupSummary {
   const counts = { total: members.length, completed: 0, failed: 0, active: 0, queued: 0, paused: 0, cancelled: 0 };
   let status: JobStatus = 'completed';

@@ -56,16 +56,20 @@ export function parseStreams(formats: RawFormat[], durationSec: number | null): 
   for (const f of formats) {
     if (!f.format_id || f.protocol === 'mhtml') continue;
 
-    if (has(f.vcodec) && f.height) {
+    // A stream manifest often lists no resolution at all (Apple's own test stream doesn't). Dropping those formats left only
+    // its audio variant, and the whole link was read as music. Height 0 means "a picture, size unknown"; the one with the
+    // highest bitrate is kept, since the key below is the same for all of them.
+    if (has(f.vcodec)) {
       const codec = normalizeVideoCodec(f.vcodec);
       const hdr = Boolean(f.dynamic_range && f.dynamic_range.toUpperCase() !== 'SDR');
       const fps = Math.round(f.fps ?? 30);
       const kbps = f.vbr ?? f.tbr ?? null;
-      const key = `${f.height}-${fps}-${codec}-${hdr}`;
+      const height = f.height ?? 0;
+      const key = `${height}-${fps}-${codec}-${hdr}`;
       const prev = video.get(key);
       if (!prev || (kbps ?? 0) > (prev.bitrateKbps ?? 0)) {
         video.set(key, {
-          id: f.format_id, width: f.width ?? 0, height: f.height, fps, codec, codecRaw: f.vcodec ?? '',
+          id: f.format_id, width: f.width ?? 0, height, fps, codec, codecRaw: f.vcodec ?? '',
           hdr, bitrateKbps: kbps ? Math.round(kbps) : null, sizeBytes: size(f, kbps), ext: f.ext ?? '',
         });
       }

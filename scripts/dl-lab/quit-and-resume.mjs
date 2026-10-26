@@ -1,0 +1,27 @@
+// usage: node scripts/dl-lab/quit-and-resume.mjs <kill|graceful> <outDir> <aria2c> <range-server.mjs>: stop aria2 3.5 s into a download, restart it, and read which byte offset the resume asked the server for
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+const [, , mode, outDir, aria, serve] = process.argv;
+fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recursive: true });
+const port = 18710 + (mode === 'kill' ? 0 : 1), rpcPort = 6910 + (mode === 'kill' ? 0 : 1);
+const srvLog = path.join(outDir, 'serve.log');
+const srv = spawn('node', [serve, String(port), '200'], { env: { ...process.env, RATE: '3', LOG: srvLog }, stdio: 'ignore' });
+const rpc = async (method, ...params) => (await (await fetch(`http://127.0.0.1:${rpcPort}/jsonrpc`, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: ['token:x', ...params] }) })).json());
+const start = () => spawn(aria, ['--enable-rpc', `--rpc-listen-port=${rpcPort}`, '--rpc-secret=x', '--continue=true', '--auto-file-renaming=true', '--allow-overwrite=false', '--file-allocation=none', '--console-log-level=warn', `--auto-save-interval=${process.env.SAVE ?? 60}`, `--dir=${outDir}`], { windowsHide: true });
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+let a = start();
+await sleep(1500);
+await rpc('aria2.addUri', [`http://127.0.0.1:${port}/f.bin`], { out: 'f.bin' });
+await sleep(3500);
+const onDisk = fs.statSync(path.join(outDir, 'f.bin')).size;
+if (mode === 'kill') spawn('taskkill', ['/F', '/PID', String(a.pid), '/T']); else await rpc('aria2.shutdown').catch(() => {});
+await sleep(2500);
+fs.writeFileSync(srvLog, '');
+a = start(); await sleep(1500);
+const add = await rpc('aria2.addUri', [`http://127.0.0.1:${port}/f.bin`], { out: 'f.bin' });
+await sleep(3000);
+const st = add.result ? (await rpc('aria2.tellStatus', add.result, ['status', 'completedLength', 'errorMessage'])).result : add.error;
+const ranges = fs.readFileSync(srvLog, 'utf8').split('\n').filter(l => /GET/.test(l)).map(l => (/range=(\S+)/.exec(l) ?? [])[1]);
+console.log(`${mode} (auto-save ${process.env.SAVE ?? 60}s): file on disk at stop ${onDisk} B; after restart -> ${JSON.stringify(st)}; first requested ranges: ${ranges.slice(0, 3).join(', ')}`);
+srv.kill(); a.kill(); process.exit(0);

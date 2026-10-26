@@ -9,9 +9,15 @@ import { AuroraCanvas } from './AuroraCanvas';
 import { Dock } from './Dock';
 import { QueueSheet } from './QueueSheet';
 import { ArtView, LyricsView, VideoView } from './Stage';
+import { StatsPanel, VideoControls } from './VideoControls';
 import { extractPalette, toCss, type RGB } from './palette';
 import { cueCss } from '@core/subtitleStyle';
+import { CONTROLS_IDLE_MS, controlsHidden } from '@core/idleControls';
+import { speedLabel, stepSpeed } from '@core/playbackSpeed';
 import './player.css';
+
+/** Anything that counts as "the person is here" and brings hidden controls back. */
+const WAKE_EVENTS = ['pointermove', 'pointerdown', 'keydown', 'wheel'] as const;
 
 const THEME_INFO: Record<PlayerTheme, { name: string; hint: string; swatch: string }> = {
   aurora: { name: 'Aurora', hint: 'Soft color from the artwork', swatch: 'radial-gradient(circle at 30% 30%,#FF7A59,transparent 60%),radial-gradient(circle at 70% 70%,#1FC8B4,transparent 60%),#7B5CFF' },
@@ -37,6 +43,13 @@ export function PlayerView() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [idle, setIdle] = useState(false);
+  const [overChrome, setOverChrome] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [osd, setOsd] = useState<{ id: number; text: string } | null>(null);
+  const osdId = useRef(0);
+  /** A brief message in the middle of the picture, the way YouTube confirms a key press. */
+  const flash = (text: string) => setOsd({ id: ++osdId.current, text });
   const root = useRef<HTMLDivElement>(null);
   const isVideo = item?.kind === 'video';
   const reduced = settings.appearance.reducedMotion === 'on' || (settings.appearance.reducedMotion === 'system' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -69,24 +82,49 @@ export function PlayerView() {
     return () => document.removeEventListener('fullscreenchange', onFs);
   }, []);
 
-  // Hide controls after a moment of stillness while a video plays.
+  // Hide controls after a few seconds of stillness while a video plays; any movement or key brings
+  // them straight back. `playing` is a dependency so the countdown restarts on resume — otherwise a
+  // video paused long enough to go "idle" would lose its controls the instant it started again.
   useEffect(() => {
     if (!isVideo) return;
-    let timer = setTimeout(() => setIdle(true), 2500);
+    let timer = setTimeout(() => setIdle(true), CONTROLS_IDLE_MS);
     const wake = () => {
       setIdle(false);
       clearTimeout(timer);
-      timer = setTimeout(() => setIdle(true), 2500);
+      timer = setTimeout(() => setIdle(true), CONTROLS_IDLE_MS);
     };
-    addEventListener('pointermove', wake);
-    addEventListener('keydown', wake);
+    wake();
+    for (const ev of WAKE_EVENTS) addEventListener(ev, wake, { passive: true });
     return () => {
       clearTimeout(timer);
-      removeEventListener('pointermove', wake);
-      removeEventListener('keydown', wake);
+      for (const ev of WAKE_EVENTS) removeEventListener(ev, wake);
       setIdle(false);
     };
-  }, [isVideo]);
+  }, [isVideo, playing]);
+
+  // A new video starts with a clean slate: no leftover menu or stats from the last one.
+  useEffect(() => { setSettingsOpen(false); setOverChrome(false); }, [item?.id]);
+
+  /** Play or pause, and say which — a click on the picture otherwise gives no sign it registered. */
+  const togglePlay = () => {
+    const p = usePlayer.getState();
+    const willPlay = !p.playing;
+    p.toggle();
+    if (isVideo) flash(willPlay ? '▶  Play' : '❚❚  Paused');
+  };
+
+  const seekBy = (seconds: number) => {
+    const p = usePlayer.getState();
+    p.seek(p.time + seconds);
+    if (isVideo) flash(`${seconds > 0 ? '+' : '−'}${Math.abs(seconds)} s`);
+  };
+
+  const changeRate = (direction: 1 | -1) => {
+    const p = usePlayer.getState();
+    const next = stepSpeed(p.rate, direction);
+    p.setRate(next);
+    flash(`Speed ${speedLabel(next)}`);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -97,26 +135,47 @@ export function PlayerView() {
         case ' ':
           if (target.matches('button, [role="slider"]')) return;
           e.preventDefault();
-          p.toggle();
+          togglePlay();
           break;
-        case 'ArrowRight': if (!target.matches('[role="slider"]')) p.seek(p.time + 5); break;
-        case 'ArrowLeft': if (!target.matches('[role="slider"]')) p.seek(p.time - 5); break;
-        case 'ArrowUp': e.preventDefault(); p.setVolume(p.volume + 0.05); break;
-        case 'ArrowDown': e.preventDefault(); p.setVolume(p.volume - 0.05); break;
-        case 'l': case 'L': if (!isVideo) p.setStage(p.stage === 'art' ? 'lyrics' : 'art'); break;
+        // K is YouTube's play/pause, so it works for anyone who already types it.
+        case 'k': case 'K': togglePlay(); break;
+        case 'ArrowRight': if (!target.matches('[role="slider"]')) seekBy(5); break;
+        case 'ArrowLeft': if (!target.matches('[role="slider"]')) seekBy(-5); break;
+        case 'j': case 'J': if (isVideo) seekBy(-10); break;
+        case 'ArrowUp': case 'ArrowDown': {
+          e.preventDefault();
+          p.setVolume(p.volume + (e.key === 'ArrowUp' ? 0.05 : -0.05));
+          if (isVideo) flash(`Volume ${Math.round(usePlayer.getState().volume * 100)}%`);
+          break;
+        }
+        // In a video L skips ahead (YouTube); on a song it flips between art and lyrics.
+        case 'l': case 'L':
+          if (isVideo) seekBy(10);
+          else p.setStage(p.stage === 'art' ? 'lyrics' : 'art');
+          break;
         case 'q': case 'Q': setQueueOpen((o) => !o); break;
         case 'h': case 'H': void p.toggleLike(); break;
-        case 'm': case 'M': p.toggleMute(); break;
-        case 'c': case 'C': if (isVideo) p.toggleSubtitles(); break;
+        case 'm': case 'M': p.toggleMute(); if (isVideo) flash(usePlayer.getState().muted ? 'Muted' : 'Sound on'); break;
+        case 'c': case 'C': if (isVideo) { p.toggleSubtitles(); flash(usePlayer.getState().subtitles ? 'Subtitles on' : 'Subtitles off'); } break;
+        case 'i': case 'I': if (isVideo) setStatsOpen((on) => !on); break;
+        case '<': if (isVideo) changeRate(-1); break;
+        case '>': if (isVideo) changeRate(1); break;
         case 'f': case 'F': toggleFullscreen(); break;
         case 'n': case 'N': p.next(); break;
         case 'p': case 'P': p.previous(); break;
         case 't': case 'T': setTheme(PLAYER_THEMES[(PLAYER_THEMES.indexOf(theme) + 1) % PLAYER_THEMES.length]!); break;
         case 'Escape':
-          if (menuOpen) setMenuOpen(false);
+          if (settingsOpen) setSettingsOpen(false);
+          else if (menuOpen) setMenuOpen(false);
           else if (queueOpen) setQueueOpen(false);
           else if (!document.fullscreenElement) exit();
           break;
+        default:
+          // 0–9 jump to that tenth of the video, as on YouTube.
+          if (isVideo && /^[0-9]$/.test(e.key) && p.duration > 0) {
+            p.seek((p.duration * Number(e.key)) / 10);
+            flash(`${Number(e.key) * 10}%`);
+          }
       }
     };
     addEventListener('keydown', onKey);
@@ -130,6 +189,16 @@ export function PlayerView() {
     return () => removeEventListener('pointerdown', close);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('[data-video-menu]')) setSettingsOpen(false); };
+    addEventListener('pointerdown', close);
+    return () => removeEventListener('pointerdown', close);
+  }, [settingsOpen]);
+
+  // The pointer resting on the bar or header must keep them up; see controlsHidden.
+  const chromeHover = { onPointerEnter: () => setOverChrome(true), onPointerLeave: () => setOverChrome(false) };
+
   const view = isVideo ? 'art' : stage;
 
   return (
@@ -139,7 +208,7 @@ export function PlayerView() {
       data-player-theme={theme}
       data-playing={playing || undefined}
       data-video={isVideo || undefined}
-      data-idle={(isVideo && idle && playing && !queueOpen) || undefined}
+      data-idle={(isVideo && controlsHidden({ idle, playing, pointerOverChrome: overChrome, menuOpen: settingsOpen, queueOpen })) || undefined}
       data-lyrics-size={settings.player.lyricsSize}
       style={{ viewTransitionName: 'player', ['--p-c1' as string]: toCss(colors[0]!), ['--p-c2' as string]: toCss(colors[1]!) }}
     >
@@ -149,18 +218,23 @@ export function PlayerView() {
       {!isVideo && <div className="scrim pointer-events-none absolute inset-0 -z-10" />}
 
       <header className={cn('p-top drag flex items-center justify-between px-[clamp(16px,3vw,32px)] pt-3', isVideo && 'relative z-10', window.lumina.platform !== 'darwin' && !fullscreen && 'pr-[150px]')}>
-        <button onClick={exit} title="Exit player (Esc)" className={cn('p-btn no-drag flex items-center gap-2 rounded-xl py-2 pr-3 pl-2 text-sm font-medium', window.lumina.platform === 'darwin' && !fullscreen && 'ml-[70px]')}>
+        <button onClick={exit} title="Exit player (Esc)" {...chromeHover} className={cn('p-btn no-drag flex shrink-0 items-center gap-2 rounded-xl py-2 pr-3 pl-2 text-sm font-medium', window.lumina.platform === 'darwin' && !fullscreen && 'ml-[70px]')}>
           <ChevronLeft className="size-5" /> Exit
         </button>
+        {/* The title lives up here for video, so the bottom bar can be a thin strip over the picture. */}
+        {isVideo && item && <span className="min-w-0 flex-1 truncate px-3 text-[15px] font-medium" data-selectable>{item.title}</span>}
         <div className="no-drag relative flex gap-1" data-theme-menu>
           {!isVideo && (
             <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label="Player theme" title="Theme (T)" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
               <Palette className="size-5" />
             </button>
           )}
-          <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} title="Full screen (F)" onClick={toggleFullscreen}>
-            {fullscreen ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
-          </button>
+          {/* Video has its own full-screen button in the control bar. */}
+          {!isVideo && (
+            <button className="p-btn grid size-10 place-items-center rounded-xl" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'} title="Full screen (F)" onClick={toggleFullscreen}>
+              {fullscreen ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
+            </button>
+          )}
           {menuOpen && (
             <div role="menu" className="p-menu absolute top-12 right-11 z-20 w-[240px] rounded-2xl p-1.5 animate-rise">
               {PLAYER_THEMES.map((t) => (
@@ -200,7 +274,7 @@ export function PlayerView() {
             </div>
           </div>
         ) : isVideo ? (
-          <VideoView off={false} />
+          <VideoView off={false} onTap={togglePlay} onDoubleTap={toggleFullscreen} />
         ) : (
           <>
             <ArtView item={item} theme={theme} off={view !== 'art'} />
@@ -211,11 +285,27 @@ export function PlayerView() {
 
       {item
         ? (
-          <div className={cn(isVideo && 'relative z-10')}>
-            <Dock item={item} stage={view} onStage={setStage} queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)} />
+          // Row 3 on purpose: in video mode the stage is absolutely positioned and leaves the grid, so
+          // without an explicit row this wrapper slid up into the empty middle row, directly under
+          // the header — the controls ended up across the top of the screen.
+          <div className={cn('row-start-3', isVideo && 'relative z-10')} {...(isVideo ? chromeHover : {})}>
+            {isVideo
+              ? (
+                <VideoControls
+                  fullscreen={fullscreen} onFullscreen={toggleFullscreen}
+                  queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)}
+                  settingsOpen={settingsOpen} onSettings={setSettingsOpen}
+                  statsOpen={statsOpen} onStats={setStatsOpen}
+                />
+              )
+              : <Dock item={item} stage={view} onStage={setStage} queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)} />}
           </div>
         )
         : <div className="h-6" />}
+
+      {isVideo && statsOpen && item && <StatsPanel item={item} onClose={() => setStatsOpen(false)} />}
+      {/* Keyed so each message restarts the animation, even when the text is the same twice running. */}
+      {isVideo && osd && <div key={osd.id} className="p-osd" role="status">{osd.text}</div>}
 
       <QueueSheet open={queueOpen} onClose={() => setQueueOpen(false)} />
     </div>

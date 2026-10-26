@@ -38,6 +38,10 @@ src/shared/    Types and the typed IPC contract shared by main and renderer.
 tests/         Vitest. Imports @core and @shared only.
 resources/bin/ Bundled tools: aria2c, yt-dlp, ffmpeg, ffprobe, 7-Zip, whisper-cli.
 docs/          Design specs, numbered. Background, not current state.
+tv/            The Fire TV / Android TV app. Kotlin, its own Gradle project, GPL-3.0. Separate from
+               everything above; see docs/15_FIRE_TV.md and tv/README.md.
+shared/        Contracts both apps are tested against (shared/contract/*.json). Change one side of a
+               contract and the other side's tests fail — that is the point.
 ```
 
 **Put logic in `src/core` whenever it can go there.** It is the difference between a rule that can be
@@ -84,6 +88,31 @@ LUMINA_CAPTURE=<dir> LUMINA_CAPTURE_ONLY=<regex> \
 **Read the run mechanically, not by eye**: hash every screenshot and flag any two steps that produced
 an identical image. An identical pair means that step changed nothing, which is exactly what a
 silently broken feature looks like. That technique found three real bugs in a single pass.
+
+### Building the release variants
+
+Three Windows builds, all from the same source (D21):
+
+```bash
+npx vite build && npx electron-builder --win nsis                      # full
+
+LUMINA_NO_IDE=1 npx vite build && \
+  npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v${version}-no-ide.exe"
+
+LUMINA_NO_IDE=1 LUMINA_NO_BROWSER=1 npx vite build && \
+  npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v${version}-player.exe"
+```
+
+The flags alias the excluded view's module path to a stub, so its dependencies are never bundled.
+
+**Check the result rather than trusting the flag.** A no-IDE renderer is about **1.1 MB in 3
+chunks**; the full one is **16 MB in 96**. If a no-IDE build still comes out at 16 MB, the exclusion
+silently did nothing — which is exactly how this was written the first time, because a dead ternary
+around a dynamic import does not drop the module.
+
+```bash
+du -sh dist && ls dist/assets/*.js | wc -l
+```
 
 ### Rules for testing on this machine
 

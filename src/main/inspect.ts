@@ -5,7 +5,7 @@ import { classifyUrl, cleanUrl, isMusicSite, siteName } from '../core/url';
 import { directApiUrl, isPageHost } from '../core/hosts';
 import { fileNameFromUrl } from '../core/batch';
 import { parseStreams, parseSubtitles, type RawFormat } from '../core/streams';
-import { friendlyYtdlpError, isCookieReadError } from '../core/progress';
+import { friendlyYtdlpError, httpStatusMessage, isCookieReadError, plainFailure } from '../core/progress';
 import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from './cookieHealth';
 import { requestArgs } from '../core/ytdlpArgs';
 import { parseExtraArgs } from '../shared/settings';
@@ -50,13 +50,23 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
   // File hosts: the link is a download page; the real file is fetched when the download starts.
   if (isPageHost(url) && !request) return inspectHosted(url);
   if (kind === 'direct') {
+    let unreachable: LinkUnreachable | null = null;
     const direct = await inspectDirect(url, request).catch((err) => {
       log.debug('Direct probe failed', err);
+      if (err instanceof LinkUnreachable) unreachable = err;
       return null;
     });
     if (direct) return direct;
-    // Named like a file but answered with a web page: an unknown file host's download page.
-    if (fileNameFromUrl(url) && !request) return inspectHosted(url);
+    // A missing file, or a server that could not be reached, is not a download page. It used to be treated as one: a 404 on a
+    // plain file link opened the file-host click-through flow and waited for a person ("Needs you: finish the download page").
+    if (unreachable) throw new Error((unreachable as LinkUnreachable).message);
+    // Named like a file but answered with a web page. It may be a page of a site yt-dlp knows (a Wikimedia Commons file page ends in
+    // ".webm" and is a web page), so ask yt-dlp's site-specific extractors first; the generic one is left out, because it would
+    // happily read an unknown file host's download page as media. Only if no extractor claims it is it a file host's download page.
+    if (fileNameFromUrl(url) && !request) {
+      const known = await inspectWithYtdlp(url, request, !browserCookiesUnreadable(), true).catch(() => null);
+      return known ?? inspectHosted(url);
+    }
   }
   if (kind === 'web' && !KNOWN_MEDIA_SITES.test(new URL(url).hostname)) {
     // Many "download" links don't end in a file extension; ask the server what it is before trying extractors.
@@ -98,7 +108,10 @@ async function inspectTorrentFile(file: string): Promise<MediaInfo> {
   return { ...base(file, 'BitTorrent'), sourceKind: 'torrent', title: name, torrent: { name, files, infoHash: null } };
 }
 
-const MEDIA_OR_FILE = /^(video|audio|application\/(octet-stream|zip|x-|pdf|vnd|gzip|java-archive)|image\/(?!svg))/i;
+/** The link was reached (or not) and the answer is final: the file is not there, or the server could not be asked. Not a web page. */
+class LinkUnreachable extends Error {}
+
+const MEDIA_OR_FILE =/^(video|audio|application\/(octet-stream|zip|x-|pdf|vnd|gzip|java-archive)|image\/(?!svg))/i;
 
 /**
  * Probe a URL for a downloadable file. Uses a 1-byte ranged GET (many servers mishandle HEAD)
@@ -110,8 +123,19 @@ async function inspectDirect(url: string, request?: RequestInfo): Promise<MediaI
   if (request?.cookies.length) headers.Cookie = request.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 
   const controller = new AbortController();
-  const res = await fetch(url, { method: 'GET', redirect: 'follow', headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'GET', redirect: 'follow', headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
+  } catch (err) {
+    // Not an answer of any kind: the server did not respond in time, the name does not resolve, the connection was reset.
+    // Node nests the real code: ECONNREFUSED sits on the cause, or on each attempt inside an AggregateError (IPv4 and IPv6 tried).
+    const cause = (err as { cause?: { code?: string; errors?: { code?: string }[] } }).cause;
+    const codes = [cause?.code, ...(cause?.errors?.map((e) => e.code) ?? [])].filter(Boolean).join(' ');
+    throw new LinkUnreachable(plainFailure(`${err instanceof Error ? err.message : String(err)} ${codes}`.trim()));
+  }
   controller.abort(); // we only need the headers
+  // A file that is not there is not a download page either; say so now instead of trying to click through it.
+  if (res.status === 404 || res.status === 410) throw new LinkUnreachable(httpStatusMessage(res.status) ?? 'The file wasn’t found on the server.');
   if (!res.ok && res.status !== 206) return null;
   const type = res.headers.get('content-type') ?? '';
   if (/text\/html|application\/(json|xhtml)/i.test(type)) return null;
@@ -160,22 +184,23 @@ interface YtdlpJson {
   extractor_key?: string;
 }
 
-async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCookies = true): Promise<MediaInfo> {
+async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCookies = true, specificOnly = false): Promise<MediaInfo> {
   const workDir = fs.mkdtempSync(path.join(tempDir(), 'inspect-'));
   try {
     const ctx = requestContext(request, workDir, { withBrowserCookies: browserCookies });
-    const args = ['--ignore-config', '--no-warnings', '--js-runtimes', tools.jsRuntime(), ...requestArgs(ctx), ...parseExtraArgs(settings.get().advanced.extraYtdlpArgs).args, '-J', '--flat-playlist', '--', url];
+    const args = ['--ignore-config', '--no-warnings', ...(specificOnly ? ['--use-extractors', 'default,-generic'] : []), '--js-runtimes', tools.jsRuntime(), ...requestArgs(ctx), ...parseExtraArgs(settings.get().advanced.extraYtdlpArgs).args, '-J', '--flat-playlist', '--', url];
     const r = await runTool(tools.require('yt-dlp'), args, { timeoutMs: 90_000, env: tools.env() });
 
     if (r.code !== 0 || !r.stdout.trim()) {
       if (browserCookies && ctx.cookies.browser && isCookieReadError(r.stderr)) {
         log.info('Browser cookies unreadable; inspecting without them');
         markBrowserCookiesUnreadable();
-        const info = await inspectWithYtdlp(url, request, false);
+        const info = await inspectWithYtdlp(url, request, false, specificOnly);
         return { ...info, notes: [...(info.notes ?? []), `Couldn’t read ${ctx.cookies.browser}’s cookies, so this was opened signed-out. Sign in under Settings › Accounts for private or members-only media.`] };
       }
       const msg = r.stderr.split(/\r?\n/).find((l) => l.startsWith('ERROR:'))?.slice(6).trim() ?? r.stderr.trim().split(/\r?\n/).pop() ?? 'yt-dlp could not read this link.';
-      log.warn('Inspect failed', { url, stderr: r.stderr.slice(-2000) });
+      // A quiet failure when only the site-specific extractors were asked: "no extractor knows this" is the expected answer for a file host.
+      (specificOnly ? log.debug : log.warn)('Inspect failed', { url, stderr: r.stderr.slice(-2000) });
       throw new Error(friendlyYtdlpError(msg));
     }
 

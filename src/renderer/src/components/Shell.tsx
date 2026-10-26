@@ -1,8 +1,9 @@
 import { withArtSize } from '@core/artwork';
+import { HAS_BROWSER, HAS_IDE } from '@shared/features';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine, ChevronUp, Code2, CircleCheck, CircleX, Globe, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { formatSpeed, plural } from '@core/format';
+import { coarseSpeed, formatSpeed, plural } from '@core/format';
 import { cn } from '@/lib/cn';
 import { useApp, type View } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
@@ -17,8 +18,10 @@ const NAV: NavItem[] = [
   { view: 'download', label: 'Download', icon: <ArrowDownToLine />, shortcut: `${mod}1` },
   { view: 'queue', label: 'Queue', icon: <ListTodo />, shortcut: `${mod}2` },
   { view: 'library', label: 'Library', icon: <Library />, shortcut: `${mod}3` },
-  { view: 'browser', label: 'Browser', icon: <Globe />, shortcut: `${mod}4` },
-  { view: 'ide', label: 'Code', icon: <Code2 />, shortcut: `${mod}5` },
+  // Filtered rather than hidden: a build without the editor has no editor to navigate to, and
+  // its keyboard shortcut must not land on an empty pane either. See D21.
+  ...(HAS_BROWSER ? [{ view: 'browser' as const, label: 'Browser', icon: <Globe />, shortcut: `${mod}4` }] : []),
+  ...(HAS_IDE ? [{ view: 'ide' as const, label: 'Code', icon: <Code2 />, shortcut: `${mod}5` }] : []),
   { view: 'settings', label: 'Settings', icon: <Settings />, shortcut: `${mod},` },
 ];
 const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };
@@ -133,7 +136,8 @@ function useQueueSummary() {
         speed += j.progress.speedBps ?? 0;
       } else if (j.status === 'queued') waiting++;
     }
-    return { active, waiting, speed: Math.round(speed / 10_000) * 10_000 };
+    // Rounded so the label does not re-render on every few bytes, but finely enough that a slow download still reads as moving.
+    return { active, waiting, speed: coarseSpeed(speed) };
   }));
 }
 

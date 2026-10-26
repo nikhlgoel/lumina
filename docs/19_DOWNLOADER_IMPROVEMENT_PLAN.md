@@ -1,6 +1,8 @@
 # 19 — Making the downloader trustworthy, then fast
 
-**Status:** plan, 2026-10-23. Written after a day of measuring the engine. Read `AGENTS.md` §1 first.
+**Status:** plan, 2026-10-23. **Update 2026-10-26:** Phase E is done (the rigs are in `scripts/dl-lab/`); Phase B is joined by a
+graceful quit, a crash guard and plain-words failures (BUGS B12, SESSION-LOG 45); D5, D7 and D8 are fixed (weighted taskbar
+progress, slow speeds shown, smoothed ETA). D1, D2, D3 and D11 were built from the owner-approved mockup (BUGS B9, SESSION-LOG 46); D4, D6, D9 and D10 are still open. Written after a day of measuring the engine. Read `AGENTS.md` §1 first.
 Related: `docs/13` (speed audit), `docs/14` (Lengine: hoster flow, discovery), `docs/desktop-services-plan.md`
 (evidence log). This file does not repeat them; it adds what they did not cover — *stability under failure* and
 *whether the screen tells the truth*.

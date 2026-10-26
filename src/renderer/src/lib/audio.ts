@@ -27,7 +27,10 @@ let boostGain = 1;
 function buildGraph() {
   if (graphBuilt) return;
   graphBuilt = true;
-  ctx = new AudioContext();
+  // 'playback' asks the OS for larger output buffers: a little more latency (irrelevant for a
+  // player, which is not an instrument) in exchange for far fewer underruns — the crackle and
+  // dropouts heard when the main thread is busy drawing lyrics or an Aurora background.
+  ctx = new AudioContext({ latencyHint: 'playback' });
   const source = ctx.createMediaElementSource(media);
   filters = EQ_BANDS.map((freq) => {
     const f = ctx!.createBiquadFilter();
@@ -154,6 +157,9 @@ export function initAudio() {
   void reportDevices();
   navigator.mediaDevices?.addEventListener?.('devicechange', () => void reportDevices());
 }
+
+/** The gains currently applied, for the stats panel: what loudness matching and the boost are doing. */
+export const audioGains = () => ({ track: trackGain, boost: boostGain });
 
 /**
  * Play the current track at the level everything else plays at.

@@ -8,6 +8,8 @@ import { settings } from '../settings';
 import { tempDir } from '../paths';
 import { logger } from '../log';
 import { classifyFailure, nextProbeDelayMs, retryLabel, waitedTooLong } from '../../core/networkRetry';
+import { plainFailure } from '../../core/progress';
+import { finishedSummary } from '../../core/jobDisplay';
 import { fetchValidators } from '../resumeProbe';
 
 const log = logger('queue');
@@ -30,6 +32,24 @@ export interface RunnerHandle {
 export type Runner = (ctx: RunnerContext) => RunnerHandle;
 
 const ACTIVE: JobStatus[] = ['running', 'processing'];
+
+/** Bytes the finished files occupy: a file's size, a folder's contents (bounded, so a huge torrent cannot stall the queue). */
+function sizeOnDisk(paths: string[]): number {
+  let total = 0;
+  let seen = 0;
+  const walk = (p: string) => {
+    if (seen++ > 5000) return;
+    try {
+      const st = fs.statSync(p);
+      if (st.isDirectory()) for (const name of fs.readdirSync(p)) walk(path.join(p, name));
+      else total += st.size;
+    } catch {
+      // a file that is gone or unreadable is simply not counted
+    }
+  };
+  for (const p of paths) walk(p);
+  return total;
+}
 const BROWSER_POOL = 16;
 const FINISHED: JobStatus[] = ['completed', 'failed', 'cancelled'];
 
@@ -165,7 +185,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     this.netWaiters.set(job.id, w);
     this.set(job, {
       error: { message: 'Connection lost. Lumina is waiting for the network and will resume by itself.', detail: first ? [job.error?.message, job.error?.detail].filter(Boolean).join('\n') : job.error?.detail },
-      progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Waiting for the network' },
+      progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Waiting for the network', activity: 'waiting', connections: null },
     });
     w.timer = setTimeout(() => void this.probeNetwork(job.id), delay);
   }
@@ -274,15 +294,22 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     }
   }
 
-  /** Stop every active job without changing its saved status, so it resumes next launch. */
-  shutdown() {
+  /**
+   * Stop every active job without changing its saved status, so it resumes next launch. Resolves when the runners have
+   * finished stopping (or after [timeoutMs]): their last act is asking the download engine to let go of the file, and the
+   * engine must not be killed before that is done, or it never writes the control file a download needs to continue.
+   */
+  async shutdown(timeoutMs = 4000): Promise<void> {
+    const stopping: Promise<unknown>[] = [];
     for (const [id, handle] of this.handles) {
-      handle.stop('pause');
+      const done = handle.stop('pause');
+      if (done) stopping.push(Promise.resolve(done).catch(() => undefined));
       const job = this.jobs.get(id);
       if (job) this.save(job, true);
     }
     this.handles.clear();
     for (const id of [...this.netWaiters.keys()]) this.clearNetWait(id);
+    if (stopping.length) await Promise.race([Promise.all(stopping), new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
   }
 
   activeCount(): number {
@@ -357,14 +384,24 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
         const source = current.source.request?.cookies.length
           ? { ...current.source, request: { ...current.source.request, cookies: [] } }
           : current.source;
-        this.set(current, { status: 'completed', source, progress: { ...current.progress, percent: 100, speedBps: null, etaSec: 0, stage: 'Done' } });
+        // What the finished row shows beyond "Done": the size on disk and the time it was actually active.
+        const since = this.runSince.get(job.id);
+        const tookMs = (current.engineState.activeMs ?? 0) + (since ? Date.now() - since : 0);
+        this.set(current, {
+          status: 'completed', source, summary: finishedSummary(sizeOnDisk(current.outputPaths), tookMs),
+          progress: { ...current.progress, percent: 100, speedBps: null, etaSec: 0, stage: 'Done', activity: null, connections: null },
+        });
         this.emit('completed', this.jobs.get(job.id)!);
         this.schedule();
       },
-      fail: (message, detail) => {
+      fail: (rawMessage, rawDetail) => {
         const current = this.jobs.get(job.id);
         if (!current || !isCurrent()) return;
         this.handles.delete(job.id);
+        // "fetch failed" and "The operation was aborted due to timeout" are what the network layer says; the person gets a
+        // sentence, and the original is kept as the detail so nothing is lost for a bug report.
+        const message = plainFailure(rawMessage);
+        const detail = rawDetail ?? (message !== rawMessage ? rawMessage : undefined);
         log.warn(`Job failed: ${current.title}`, { message, detail: detail?.slice(-4000) });
         this.set(current, { status: 'failed', error: { message, detail }, progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Failed' } });
         // Decide on a retry first, so the failure listener can tell a job that will start again by itself.
@@ -381,8 +418,21 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     }
   }
 
+  /** When each job last became active in this run; the time it then spends active is added to `engineState.activeMs` when it stops. */
+  private runSince = new Map<string, number>();
+
   private set(job: Job, patch: Partial<Job>, opts: { throttle?: boolean } = {}) {
     const next: Job = { ...job, ...patch, updatedAt: Date.now() };
+    // How long the job was really active (not queued, not paused, not waiting), for the finished row's "took 2 min 05 s".
+    const timing = next.status === 'running' || next.status === 'processing';
+    if (timing && !this.runSince.has(next.id)) this.runSince.set(next.id, Date.now());
+    else if (!timing && this.runSince.has(next.id)) {
+      const since = this.runSince.get(next.id)!;
+      this.runSince.delete(next.id);
+      next.engineState = { ...next.engineState, activeMs: (next.engineState.activeMs ?? 0) + (Date.now() - since) };
+    }
+    // "Waiting for network" belongs to the failed row that is waiting; once the job is anything else the mark is stale.
+    if (next.status !== 'failed' && next.progress.activity === 'waiting') next.progress = { ...next.progress, activity: null };
     this.jobs.set(job.id, next);
     const now = Date.now();
     const statusChanged = patch.status !== undefined && patch.status !== job.status;

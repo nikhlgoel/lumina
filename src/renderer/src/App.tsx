@@ -6,6 +6,7 @@ import { useApp, type View } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
 import { useLibrary } from '@/stores/library';
 import { applyStoredVolume, media, usePlayer } from '@/stores/player';
+import { HAS_BROWSER, HAS_IDE } from '@shared/features';
 import { MiniBar, Sidebar, Toasts } from '@/components/Shell';
 import { QuickCheck } from '@/components/QuickCheck';
 import { Shortcuts } from '@/components/Shortcuts';
@@ -19,8 +20,15 @@ import { AboutView } from '@/views/about/AboutView';
 // instead of at every launch. Measured on 2026-09-18: Monaco sat in the startup bundle, so every
 // launch paid to parse and compile it even for people who never open Code. Keep these two imports
 // lazy — a single static import of either anywhere pulls the whole editor back into startup.
-const BrowserView = lazy(() => import('@/views/browser/BrowserView').then((m) => ({ default: m.BrowserView })));
-const IdeView = lazy(() => import('@/views/ide/IdeView').then((m) => ({ default: m.IdeView })));
+// The flag has to gate the import itself, not just the route. Gating only the route left the
+// dynamic import referenced, so Monaco was still emitted into a no-IDE build - measured: the bundle
+// did not shrink by a single byte. See D21.
+const BrowserView = HAS_BROWSER
+  ? lazy(() => import('@/views/browser/BrowserView').then((m) => ({ default: m.BrowserView })))
+  : null;
+const IdeView = HAS_IDE
+  ? lazy(() => import('@/views/ide/IdeView').then((m) => ({ default: m.IdeView })))
+  : null;
 import { PlayerView } from '@/views/player/PlayerView';
 
 function useAppearance() {
@@ -48,14 +56,15 @@ function useAppearance() {
   }, [appearance, systemDark]);
 }
 
-const VIEWS: Record<View, React.ComponentType> = {
+// Partial, because a build without the editor genuinely has no editor component to name. See D21.
+const VIEWS: Partial<Record<View, React.ComponentType>> = {
   download: DownloadView,
   queue: QueueView,
   library: LibraryView,
   settings: SettingsView,
   about: AboutView,
-  browser: BrowserView,
-  ide: IdeView,
+  ...(BrowserView ? { browser: BrowserView } : {}),
+  ...(IdeView ? { ide: IdeView } : {}),
 };
 
 export function App() {
@@ -108,7 +117,9 @@ export function App() {
     return <div className="drag grid h-full place-items-center"><LoaderCircle className="size-6 animate-spin text-ink-3" /></div>;
   }
 
-  const Current = VIEWS[view];
+  // A profile carried over from a full build can still be pointing at a view this build does not
+  // have; sending it to Download is better than a blank pane.
+  const Current = VIEWS[view] ?? VIEWS.download!;
   return (
     <>
       <div className="flex h-full flex-col" aria-hidden={mode === 'player' || undefined}>

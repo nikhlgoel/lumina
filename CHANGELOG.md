@@ -11,6 +11,57 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 ## [Unreleased]
 
 ### Added
+- **Play a link without downloading it.** A Play button sits beside Download in the link bar and on the result card. It plays web pages
+  (YouTube-style sites), direct audio and video files, and stream links (HLS/DASH) straight in Lumina's player, with seeking, and
+  nothing is saved to disk. Torrents and file-host download pages have no Play, because there is nothing to stream until they are downloaded.
+  A DASH stream (as opposed to a plain file or HLS) can take around ten seconds to open.
+
+### Changed
+- **A lighter link bar.** A shorter heading, one quiet line of text, and a single bar with Torrent and Paste as icons, then Play and Download.
+  The dashed ".torrent" box is gone (drop a .torrent anywhere on the window). Once a link is read, the card shows a title, one line of facts
+  (site, length, format, best quality, size), a quality menu and a folder, and Play / Download; format, subtitles and series choices are under
+  "More options".
+- **The Queue tells you more about each download.** A download whose size the website never gives now shows how much has arrived
+  (instead of a stuck "0%") with a moving bar; a paused download says how far it got ("1.2 GB of 1.9 GB"); a finished one says its
+  size, how long it took and its average speed. A small label next to the title shows how many connections are open, and says
+  when Lumina is saving to disk, reconnecting, or waiting for the network.
+
+### Fixed
+- **A stream link with no listed resolution was taken for a song.** Apple's HLS test stream is one: its video was ignored, so the link was
+  read as music and would have downloaded as audio only. Such links are now read as video.
+- **A link to a file that is gone now says so at once** ("The file wasn't found on the server (404)") instead of opening a download-page
+  flow and waiting for you to finish it. The same goes for a server that cannot be reached.
+- **Pages whose address ends in a video file name** (such as Wikimedia Commons file pages) are now read by their site's own support
+  instead of being mistaken for a file host's download page.
+- **Error messages for links are readable.** No more curl codes, links to curl's manual, or "caused by TransportError". A site that needs
+  you signed in says so, and a site that does not answer (or is blocked on your network) says that and points you at Settings › Network.
+- **A download waiting for your connection no longer looks like a failure.** It stays with your active downloads in a calm amber, and
+  a link Lumina could not reach shows an amber "couldn't reach that site" card, not a red alarm.
+- **Quitting Lumina no longer throws away a download's progress.** Lumina used to close its download engine so abruptly that it
+  never saved where each download had got to, and a download restarted from the beginning. It now lets the engine save first
+  (a few seconds at most), and saves its place every 10 seconds rather than every minute.
+- **A download that stopped with "control file does not exist" now carries on** under a new name instead of failing, and Lumina
+  can no longer delete a file of yours that happens to have the same name.
+- **Downloads recover from a dropped connection on their own.** A lost connection ("fetch failed", a timeout) is waited out and
+  resumed from where it stopped, instead of ending as a failure you had to retry. Failures now say what happened in words
+  ("The server took too long to answer") instead of "aria2c exited with code 22" or "The operation was aborted due to timeout".
+- **Starting a large torrent that is already partly on your disk waits longer** before giving up, instead of failing with "timeout".
+- **If the fast download mode is refused by a site, Lumina retries once with a single connection** instead of giving up.
+- **A crash in one part of Lumina no longer takes the rest with it.** The window comes back by itself if its page crashes
+  (your downloads keep running meanwhile), and an unexpected error no longer pops up a raw error box.
+- **Lumina no longer launches PowerShell every five seconds** to look for USB drives. It checks the drive letters cheaply, so a
+  plugged-in drive is still noticed within a few seconds, and otherwise it stays quiet.
+- **Volume above 100%** no longer makes the tray's "now playing" state go stale.
+- **Albums with a damaged picture tag** show the cover from their folder instead of nothing.
+- **The taskbar progress** reflects how much of the total has been downloaded, not the average of each download's percentage; the
+  sidebar speed shows slow downloads instead of a dash; the time remaining no longer jumps about.
+- **The log file** no longer grows without limit while Lumina stays open for weeks.
+
+---
+
+## [3.0.0] — 2026-09-25
+
+### Added
 - **The volume goes to 200%.** Quiet recordings, laptop speakers and noisy rooms all need more than
   the 100% a browser will give you. Past 100% a limiter keeps the extra loudness from turning into
   distortion, and below 100% nothing is added to the sound at all. The reading is shown beside the
@@ -59,6 +110,21 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
   folders instead of 383.
 - **No stray cover image beside single tracks.** A folder picture is written only where the folder
   genuinely holds an album.
+
+### Builds
+
+Lumina now ships in three Windows builds from the same source. They are alternatives — install one.
+
+| Build | Contains | Renderer size |
+|---|---|---|
+| **Lumina** | Everything: downloader, player, browser, code editor | 16 MB |
+| **Lumina (no editor)** | Downloader, player, browser | 1.1 MB |
+| **Lumina Player** | Downloader and player only | 1.1 MB |
+
+An excluded feature is genuinely not in the build — its code is never bundled, not hidden behind a
+switch. The installer download is a similar size for all three regardless, because it is dominated
+by the bundled media tools (ffmpeg is ~180 MB, the offline-subtitles model 142 MB, yt-dlp 18 MB),
+not by the app.
 
 ### Documentation
 - Added `AGENTS.md` (canonical working rules), `CLAUDE.md`, `DECISIONS.md`, `BUGS.md` and this

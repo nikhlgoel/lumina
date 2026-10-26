@@ -8,7 +8,7 @@ import { usePlayer, type StageView } from '@/stores/player';
 import { useApp } from '@/stores/app';
 import { AudioPanel } from './AudioPanel';
 
-function SeekBar() {
+export function SeekBar() {
   const time = usePlayer((s) => s.time);
   const duration = usePlayer((s) => s.duration);
   const seek = usePlayer((s) => s.seek);

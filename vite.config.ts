@@ -10,7 +10,19 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 
 const r = (p: string) => path.resolve(import.meta.dirname, p);
 
+// Which features this build contains. Excluded ones are never bundled, so the editor's ~13 MB of
+// Monaco and its workers are genuinely absent from a no-IDE build rather than hidden. See D21.
+const features = {
+  __LUMINA_IDE__: JSON.stringify(process.env.LUMINA_NO_IDE !== '1'),
+  __LUMINA_BROWSER__: JSON.stringify(process.env.LUMINA_NO_BROWSER !== '1'),
+};
+
+// An excluded view's module path resolves to a stub, which is what actually keeps its dependencies
+// out of the build - a dead ternary around the dynamic import does not. See D21.
+const excluded = r('src/renderer/src/views/ExcludedView.tsx');
 const alias = {
+  ...(process.env.LUMINA_NO_IDE === '1' ? { '@/views/ide/IdeView': excluded } : {}),
+  ...(process.env.LUMINA_NO_BROWSER === '1' ? { '@/views/browser/BrowserView': excluded } : {}),
   '@': r('src/renderer/src'),
   '@shared': r('src/shared'),
   '@core': r('src/core'),
@@ -21,6 +33,7 @@ export default defineConfig({
   // Relative asset URLs so the built page works from file:// in Electron.
   base: './',
   resolve: { alias },
+  define: features,
   plugins: [
     react(),
     tailwindcss(),
@@ -33,6 +46,7 @@ export default defineConfig({
         },
         vite: {
           resolve: { alias },
+          define: features,
           build: {
             outDir: r('dist-electron/main'),
             emptyOutDir: true,
@@ -51,6 +65,7 @@ export default defineConfig({
         onstart: ({ reload }) => reload(),
         vite: {
           resolve: { alias },
+          define: features,
           build: {
             outDir: r('dist-electron/preload'),
             emptyOutDir: true,

@@ -1,9 +1,8 @@
 import { memo, useState } from 'react';
 import { ChevronDown, CircleCheck, CirclePause, FolderOpen, ListTree, PackageOpen, Play, RotateCw, Trash2, TriangleAlert, Tv, X } from 'lucide-react';
 import type { Job } from '@shared/types';
-import { formatBytes, formatEta, formatSpeed } from '@core/format';
+import { isWaitingForNetwork, pausedWord, rowDetail } from '@core/jobDisplay';
 import { mediaKindOf } from '@core/mediaKind';
-import { progressIndeterminate } from '@core/progress';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -80,16 +79,12 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
   const filePercent = p.filePercent == null ? null : Math.max(0, Math.min(100, p.filePercent));
   const headline = multi && filePercent != null ? filePercent : percent;
 
-  const meta: string[] = [];
-  if (job.status === 'running' && p.item) meta.push(`${p.item.index} of ${p.item.count}`);
-  if (job.status === 'running' && p.speedBps) meta.push(formatSpeed(p.speedBps));
-  if (job.status === 'running' && p.etaSec != null) meta.push(`${formatEta(p.etaSec)} left`);
-  if (job.status === 'running' && p.totalBytes) {
-    // On a playlist the byte counts belong to the file in hand, so they are labelled as such
-    // rather than looking like a total that keeps resetting.
-    const bytes = `${formatBytes(p.downloadedBytes)} of ${formatBytes(p.totalBytes)}`;
-    meta.push(multi ? `this file ${bytes}` : bytes);
-  }
+  // What the line after the status word says, the figure in the number slot, whether the bar loops, and the chip beside the title.
+  // All decided in core/jobDisplay (and tested there); see the approved mockup of 2026-10-26.
+  const detail = rowDetail(job, headline, multi);
+  // Waiting for the connection to come back is calm, not an alarm: amber text, not the danger red of a real failure.
+  const waiting = isWaitingForNetwork(job);
+  const meta = detail.meta;
 
   // A queued download waits its turn and starts on its own when a slot frees — say so, so there's
   // no need to babysit it or pause others by hand.
@@ -110,19 +105,20 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-sm font-semibold" title={job.title}>{job.title}</p>
+            {detail.chip && <Badge tone={detail.chip.tone}>{detail.chip.label}</Badge>}
             {job.compat && job.options.format.kind === 'video' && job.status === 'completed' && (
               job.compat.tvSafe ? <Badge tone="success"><Tv className="size-3" /> TV-ready</Badge> : null
             )}
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
-            <span className={cn('font-medium', job.status === 'failed' && 'text-danger', active && 'text-ink-2')}>
-              {job.status === 'failed' ? job.error?.message ?? 'Failed' : queuedLabel ? queuedLabel : active || job.status === 'paused' ? p.stage || STATUS_LABEL[job.status] : job.status === 'completed' ? doneSummary : STATUS_LABEL[job.status]}
+            <span className={cn('font-medium', job.status === 'failed' && !waiting && 'text-danger', waiting && 'text-warning', (active || job.status === 'paused' || job.status === 'completed') && 'text-ink-2')}>
+              {job.status === 'failed' ? job.error?.message ?? 'Failed' : queuedLabel ? queuedLabel : active ? p.stage || STATUS_LABEL[job.status] : job.status === 'paused' ? pausedWord(p.stage) : job.status === 'completed' ? doneSummary : STATUS_LABEL[job.status]}
             </span>
             {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
           </div>
           {(active || job.status === 'paused' || job.status === 'queued') && (
             <>
-              <ProgressBar className="mt-2" value={headline} tone={tone} indeterminate={active && progressIndeterminate(p)} />
+              <ProgressBar className="mt-2" value={headline} tone={tone} indeterminate={active && detail.indeterminate} />
               {multi && (
                 <div className="mt-1.5 flex items-center gap-2">
                   <ProgressBar thin className="flex-1" value={percent} tone="muted" />
@@ -133,7 +129,11 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
           )}
         </div>
 
-        {!compact && active && <span className="w-11 text-right text-sm font-semibold text-ink-2 tabular">{Math.floor(headline)}%</span>}
+        {/* The number slot: the live percentage, the bytes so far when the size is unknown, or the percentage at rest on a paused
+            row (muted). It keeps its width when empty so the buttons do not jump between rows. */}
+        {!compact && (active || job.status === 'paused') && (
+          <span className={cn('min-w-14 text-right text-sm font-semibold tabular', detail.right?.muted ? 'text-ink-3' : 'text-ink-2')}>{detail.right?.text}</span>
+        )}
 
         <div className={cn('flex items-center gap-0.5', compact && 'opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100')}>
           {playable && <IconButton label="Play" onClick={play}><Play /></IconButton>}

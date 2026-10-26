@@ -1,4 +1,5 @@
 import type { PlayerCommand } from '../core/trayMenu';
+import { MAX_VOLUME } from '../core/volume';
 import { z } from 'zod';
 import type {
   ShieldStatus,
@@ -69,6 +70,7 @@ export const inputSchemas = {
   'settings:update': z.record(z.string(), z.record(z.string(), z.unknown())),
   'presets:list': z.void(),
   'media:inspect': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
+  'media:play': z.object({ url: z.string().min(1).max(8192), info: z.unknown().optional(), request: requestInfoSchema.optional() }),
   'search:query': z.object({ query: z.string().min(1).max(200) }),
   'jobs:list': z.void(),
   'jobs:add': z.object({ url: z.string().min(1).max(8192), info: z.unknown(), options: downloadOptionsSchema }),
@@ -249,7 +251,9 @@ export const inputSchemas = {
     playing: z.boolean(),
     title: z.string().max(500).nullable(),
     artist: z.string().max(300).nullable(),
-    volume: z.number().min(0).max(1),
+    // Up to the boost ceiling, not 1: the player goes to 200%, and a limit of 1 rejected every state update made while boosted
+    // (90 "Too big: expected number to be <=1" warnings in the log), leaving the tray showing a stale volume.
+    volume: z.number().min(0).max(MAX_VOLUME),
     muted: z.boolean(),
     shuffle: z.boolean(),
     repeat: z.enum(['off', 'all', 'one']),
@@ -312,6 +316,7 @@ export interface InvokeOutputs {
   'settings:update': Settings;
   'presets:list': Preset[];
   'media:inspect': MediaInfo;
+  'media:play': PlayableItem;
   'search:query': SearchResults;
   'jobs:list': Job[];
   'jobs:add': Job;

@@ -23,6 +23,7 @@ import { queueConversion, queueSubtitleGeneration } from './jobs/cpu';
 import { library } from './library';
 import { getLyrics } from './lyrics';
 import { MEDIA_SCHEME } from './media/protocol';
+import { playableFromLink } from './media/streams';
 import { currentMode, mainWindow, setMode } from './window';
 import { setAudioOutputs, updateTrayPlayback } from './tray';
 import type { TrayPlayback } from '../core/trayMenu';
@@ -81,6 +82,10 @@ function toPlayable(id: string): PlayableItem | null {
     src: `${MEDIA_SCHEME}://media/${item.id}`, artworkUrl: `${MEDIA_SCHEME}://art/${item.id}`, path: item.path,
     resumeAtSec: resumePoint(item.id, item.path, item.durationSec),
     liked: item.liked,
+    tech: {
+      codec: item.codec, bitrateKbps: item.bitrateKbps, sampleRate: item.sampleRate, bitDepth: item.bitDepth,
+      lossless: item.lossless, width: item.width, height: item.height,
+    },
   };
 }
 
@@ -198,6 +203,11 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'presets:list': () => BUILT_IN_PRESETS,
 
   'media:inspect': ({ url, request }: { url: string; request?: RequestInfo }) => inspect(url, request),
+  'media:play': ({ url, info, request }: { url: string; info?: unknown; request?: RequestInfo }) => {
+    // `info` comes from the page; it is only trusted for what the link bar already read, and is read again when it isn't a MediaInfo.
+    const known = info && typeof info === 'object' && typeof (info as MediaInfo).sourceKind === 'string' ? (info as MediaInfo) : undefined;
+    return playableFromLink(url, request, known);
+  },
   'search:query': ({ query }: { query: string }) => searchMulti(query),
 
   'jobs:list': () => queue.list(),

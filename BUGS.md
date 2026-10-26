@@ -56,6 +56,61 @@ Status: `Open` · `In progress` · `Fixed` · `Won't fix` · `Unexplained`
 
 ## Open — reported from live use
 
+### B14 · A stream manifest with no listed resolution was read as music — `Fixed in the working tree (2026-10-27)`
+
+Found by pressing Play on Apple's public HLS test stream (`bipbop_4x3_variant.m3u8`): the player opened as the music view and nothing moved.
+`parseStreams` counted a format as video only when it reported a height; this manifest lists none, so its four video variants were dropped,
+the single audio variant (41 kbps) was all that remained, and `isMusic` came out true. The same misreading would have made **Download** pick the
+Music type and save audio only. A format with a video codec and no height is now a video stream with height 0 (`core/streams.ts`; test
+"keeps a stream manifest's video variants even when no height is listed"). Verified in the real app: the same link now plays 960×720.
+**Still open, related:** a DASH manifest takes about 9 s to open and 13–21 s to seek into (ffmpeg's DASH demuxer, measured by hand;
+progressive files and HLS do not pay it). Not fixed.
+
+### B13 · "It can't download links from other sites" — measured on 14 kinds of link (2026-10-27) — `Two real bugs fixed; a reported link is blocked on this network, not a Lumina bug`
+
+Every link below is material that may be downloaded freely (Blender open movies, Apple/Mux/Akamai test streams, Creative Commons items),
+driven through the **real app** by `scripts/dl-lab/link-matrix.mjs`. **Worked:** direct mp4 (1 MB, completed); `download.*` zip (61.7 MB at
+31 MB/s, completed); HLS ×2 (586 MB and 466 MB at 34–44 MB/s, completed); DASH (33 MB/s); archive.org item (22 MB/s) and a small archive.org
+audio item (completed); a `.torrent` URL and a **magnet link, both a real public swarm** (Sintel, 123 MB at 11 MB/s, completed); a Wikimedia
+Commons page (34 MB/s). **Found and fixed:**
+1. A **404 on a plain file link opened the file-host click-through flow** and waited for a person ("Needs you: finish the download page"):
+   `inspectDirect` returned nothing for *any* failure and the caller read that as "a web page". A 404/410 or a network error is now reported as
+   what it is, at once (`main/inspect.ts`).
+2. A **web page whose address ends in a media extension** (Wikimedia's `File:….webm`) was also taken for a file host's download page. yt-dlp's
+   site-specific extractors (generic excluded) are now tried first; only if none claims it does the click-through flow start.
+Also: curl errors, "(caused by TransportError…)" and the curl documentation link are gone from the error card; a site that only works logged
+in (Vimeo) now says "sign in under Settings › Accounts" instead of yt-dlp's flags; a link-read failure that is a network problem shows in the
+calm amber with "Lumina couldn't reach that site"; a job waiting for the network now sits with the active downloads in amber, not under
+"Finished" in red. **Not a bug:** a reported link to one site: this network's DNS answers for it with an address (not one of the site's
+addresses) and no connection to that address opens, while two ordinary sites connect; it also failed with a curl (35) reset earlier the
+same day. It is not downloaded here (AGENTS.md rule 2: no content of unknown licence, even as a test). The error now says it may be blocked on the network
+and points at Settings › Network; Lumina does not try to get around a network's block by itself.
+**Not built, awaiting a yes:** Play from the link bar and a lighter link bar (mockup shown); using several networks at once (this PC has one
+real uplink, so it could not be verified here, and on Windows a socket bound to one adapter's address can still leave by another, so real
+bonding needs `IP_UNICAST_IF` in a small native helper or route changes). YouTube still asks for a sign-in (supported path: sign in).
+
+### B12 · What the installed release's own log showed (read 2026-10-26, 10,254 lines, 16 Sep – 26 Oct) — `Fixed in the working tree; not yet in a shipped build`
+
+The log of the build the owner and a friend actually run (`C:\Program Files\Lumina`) was read line by line. Most of its noise
+predates the October fixes (915 of the 957 "aria2 status poll failed" lines are from one day in September). What was still true in
+the current code, with the evidence for each:
+
+| What the log showed | Cause | Fixed how | Evidence |
+|---|---|---|---|
+| 90 × `Invalid input for player:state … Too big: expected number to be <=1` | The volume boost goes to 200% (`MAX_VOLUME = 2`) but the IPC schema capped it at 1, so every tray update made while boosted was dropped | schema limit is `MAX_VOLUME` (`shared/ipc.ts`) | `tests/ipcPlayerState.test.ts` |
+| 41 × `Could not list removable drives`, each a full stack trace; 24 in one afternoon | A fresh PowerShell was launched **every 5 s forever** (~0.4 s CPU each, over its 10 s limit under load) | `fsutil` (22 ms) watches the drive letters; PowerShell runs only when a letter changes, every 2 min, or as a retry with 15 s → 5 min back-off; one log line per streak (`core/driveWatch.ts`, `usb.ts`) | `tests/driveWatch.test.ts`; `fsutil` 22 ms vs PowerShell 426 ms measured here |
+| 10 × `Job failed … The operation was aborted due to timeout` in a row on torrents | `aria2.addTorrent` shared the 10 s RPC limit with a status poll; aria2 checks what is on disk before it answers | `aria2.add*` calls get 90 s (`jobs/aria2.ts`) | code; no 20 GB torrent was run |
+| `fetch failed`, `aborted due to timeout`, `aria2c exited with code 22`, `status=503` shown raw as the failure | no plain wording; and `fetch failed` was classed "permanent", so it was never retried or waited out | `plainFailure`, `aria2ExitMessage`, status mapping in `core/progress.ts`; `core/networkRetry.ts` knows the raw network errors; the queue applies it in one place and keeps the original as the detail | `tests/failureWording.test.ts` (messages copied from the log) |
+| `aria2c exited with code 22` ended a download | yt-dlp's accelerator (aria2c inside yt-dlp) was refused; the same file downloads over its own single connection | one automatic retry without the accelerator (`jobs/ytdlp.ts`) | logic only; no server that triggers code 22 was run |
+| `File … exists, but a control file(*.aria2) does not exist` | Lumina **killed aria2 on quit** before it could save its control files; and the code that followed **deleted any file without a control file as an "unresumable partial"**, which in this case was someone else's file | quit is graceful (`queue.shutdown` awaits the runners, `aria2.gracefulStop`), `--auto-save-interval=10`, the refusal retries under a new name, and that deletion no longer runs for this error (`index.ts`, `jobs/aria2.ts`) | measured: after a kill the restart began from 0, after a graceful stop it resumed at 22 MB (`scripts/dl-lab/quit-and-resume.mjs`); the app quit mid-download wrote a 396-byte control file |
+| `No artwork … InvalidCharacterError` 491 × | a corrupt picture tag made `parseFile` throw: no cover even with a `cover.jpg` beside it, and the file was re-parsed on every request | folder cover is used when the tag cannot be read; files with no artwork are remembered (`media/protocol.ts`) | code; no file with that tag was at hand |
+| (not in the log, found while reading) | **no handler at all** for an uncaught exception, an unhandled rejection or a dead renderer: Electron's raw error dialog, or a blank window that never came back | `crashGuard.ts` + `core/crashPolicy.ts` (reload up to 3 times a minute, then say so; downloads are unaffected); the log also rotates while running, not only at start-up | `tests/crashPolicy.test.ts`, `tests/logRotation.test.ts`; **a real renderer crash was forced and the window came back** (`LUMINA_PROBE_CRASH_AT`) |
+| Sidebar speed read "—" under 5 KB/s; taskbar percent was an unweighted average; ETA swung with every burst | fixed 10 KB/s rounding; mean of percentages; ETA from the instantaneous speed | `coarseSpeed`, `overallPercent`, `smoothSpeed` | `tests/liveNumbers.test.ts` |
+
+Still open from the log: YouTube's "sign in to confirm you're not a bot" (a sign-in is the supported fix, by design), file-host
+"download page needed a quick check" (a person has to solve it, by design), unsupported sites, `Her … Could not copy Chrome cookie
+database` (already retried without cookies in the current code; seen only in the old build).
+
 ### B11 · Cancelling a magnet link could leave its real download running — `Fixed (2026-10-23)`
 
 aria2 runs a magnet as two downloads (metadata, then the files). `stop()` removed only the first, so a cancel just after
@@ -72,9 +127,19 @@ Fix: `core/resumeCheck.ts` remembers ETag/Last-Modified/size and compares before
 Also: network failures now wait for the connection instead of a 3-try timer (`core/networkRetry.ts`).
 Not proven: yt-dlp's `.part` resume, file-host links, proxies (check skipped), a real sleep/wake.
 
-### B9 · The Queue row shows untrue or missing numbers — `Open (formatters fixed 2026-10-23; layout needs approval)`
+### B9 · The Queue row shows untrue or missing numbers — `Fixed for D1–D3, D5, D7, D8, D11 (2026-10-26, from the approved mockup); D4, D6, D9, D10 still open`
 
-A no-length download shows "0%", an empty bar and no bytes while data flows (photographed); paused rows show no
+**Built 2026-10-26, exactly as the approved mockup**, rules in `core/jobDisplay.ts` (`tests/jobDisplay.test.ts`, 22 tests), photographed
+in the real app (`LUMINA_PROBE_ROWS`, `scripts/dl-lab/file-server.mjs`): an unknown-size download shows the bytes in the number slot,
+"size not announced", a looping bar and a "1 connection" chip; a paused row says "48.0 MB of 256 MB" with a muted 18%; a finished row says
+"Done · 41.0 MB · 11 s · 3.6 MB/s average"; an amber "Waiting for network" chip appeared on a real dropped connection. Not
+photographed from a real run: the "Writing to disk" and "Reconnecting" chips (unit-tested, same code path). Differences from the drawing:
+figures use the app's own formatter ("2.0 MB/s", "41.0 MB"), the status line keeps the app's existing 8 px gap before each "·", and
+"took" is left out under 1 s and the average under 2 s. Not done: failed row "stopped at N%" (D9, asked, no answer yet), group rows
+(D10), `formatBytes(0)` (D4), per-worker playlist view (D6). **Seen, not changed:** a job waiting for the network sits under "Finished"
+with its message in red, as an error; it is not one.
+
+Before this: a no-length download shows "0%", an empty bar and no bytes while data flows (photographed); paused rows show no
 number; finished rows show no size/time/speed; a true 0 B prints "—"; the taskbar bar is an unweighted mean of
 percents; sidebar speed hides anything under ~5 KB/s. Full list D1–D11 with evidence in
 `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md` §2. Fixed already: `formatEta`/`formatBytes` carry bugs ("2m 60s", "1024 KB",

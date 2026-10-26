@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowRight, ClipboardPaste, FileDown, FileUp, Link2, Puzzle, TriangleAlert, X } from 'lucide-react';
+import { ArrowDownToLine, ClipboardPaste, FileDown, FileUp, Link2, Play, TriangleAlert, X } from 'lucide-react';
 import type { MediaInfo, RequestInfo, SearchHit, SearchResults as SearchResultsData } from '@shared/types';
 import { extractLinks, toInspectTarget } from '@core/url';
 import { planBatch, type BatchPlan } from '@core/batch';
+import { classifyFailure } from '@core/networkRetry';
 import { call, errorMessage, pathForFile } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp, type PendingLink } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
-import { Button } from '@/components/ui';
+import { playLink } from '@/lib/playLink';
+import { Button, IconButton } from '@/components/ui';
 import { TitleBar } from '@/components/Shell';
 import { InspectResult } from './InspectResult';
 import { RecentStrip } from './RecentStrip';
@@ -48,6 +50,21 @@ export function DownloadView() {
   const [focused, setFocused] = useState(false);
   const [recent, setRecent] = useState<string[]>(() => getRecentSearches());
   const hasJobs = useJobs((s) => s.order.length > 0);
+  const [opening, setOpening] = useState(false);
+
+  /** The one link in the box that Play can start from. A magnet or .torrent has nothing to stream until it is downloaded, and a search has no link. */
+  const playTarget = (() => {
+    const links = extractLinks(input);
+    const target = links.length === 1 ? links[0]! : (() => { const t = toInspectTarget(input); return t.target && !t.isSearch ? t.target : null; })();
+    return target && !/^magnet:|\.torrent(\?|$)/i.test(target) ? target : null;
+  })();
+
+  const playFromBar = async () => {
+    if (!playTarget || opening) return;
+    setOpening(true);
+    await playLink(playTarget);
+    setOpening(false);
+  };
 
   const inspect = async (url: string, opts: { request?: RequestInfo; source?: PendingLink['source'] } = {}) => {
     setInput(url);
@@ -214,15 +231,11 @@ export function DownloadView() {
       )}
       <TitleBar />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className={cn('mx-auto w-full max-w-[860px] px-[var(--page-x)] pb-16 transition-[padding] duration-500 ease-out-soft', compact ? 'pt-2' : 'pt-[12vh]')}>
+        <div className={cn('mx-auto w-full max-w-[860px] px-[var(--page-x)] pb-16 transition-[padding] duration-500 ease-out-soft', compact ? 'pt-2' : 'pt-[14vh]')}>
           {!compact && (
-            <div className="mb-8 animate-rise">
-              <h1 className="font-serif text-[56px] leading-[0.95] tracking-[-0.015em]">
-                Paste a link.<br /><span className="text-ink-3 italic">Keep it forever.</span>
-              </h1>
-              <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-ink-2">
-                Videos and music from 1,300+ sites, Spotify playlists, direct files and torrents. Lumina picks the best quality and tells you exactly what you’re getting.
-              </p>
+            <div className="mb-6 animate-rise">
+              <h1 className="font-serif text-[40px] leading-none tracking-[-0.015em]">Paste a link</h1>
+              <p className="mt-2.5 text-[15px] text-ink-3">Videos and music from 1,300+ sites, direct files and torrents.</p>
             </div>
           )}
 
@@ -236,9 +249,8 @@ export function DownloadView() {
           )}
 
           <div className="relative">
-            {!compact && <div className="search-glow" aria-hidden="true" />}
             <form onSubmit={submit} className="group relative z-[1]">
-            <Link2 className={cn('pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-ink-3 transition-colors group-focus-within:text-accent', compact ? 'size-5' : 'size-[22px]')} />
+            <Link2 className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-ink-3 transition-colors group-focus-within:text-accent" />
             <input
               ref={inputRef}
               autoFocus
@@ -253,20 +265,32 @@ export function DownloadView() {
                   handleText(text);
                 }
               }}
-              placeholder="Paste a link or magnet — or type to search"
-              aria-label="Link to download or search"
+              placeholder="Paste a link or magnet, or type to search"
+              aria-label="Link to play, download or search"
               spellCheck={false}
               className={cn(
-                'w-full rounded-2xl border border-line-strong bg-raised pr-[322px] shadow-md outline-none transition-[border-color,box-shadow,height] duration-200 placeholder:text-ink-3 focus:border-accent focus:shadow-[0_0_0_4px_var(--accent-soft)]',
-                compact ? 'h-14 pl-12 text-[15px]' : 'h-[68px] pl-14 text-base',
+                'h-[52px] w-full rounded-2xl border border-line-strong bg-raised pl-12 text-[15px] shadow-sm outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-ink-3 focus:border-accent focus:shadow-[0_0_0_4px_var(--accent-soft)]',
+                phase.kind === 'ready' ? 'pr-12' : 'pr-[300px]',
               )}
             />
-            <div className="absolute top-1/2 right-2 flex -translate-y-1/2 gap-1.5">
-              <Button type="button" variant="ghost" icon={<FileUp className="size-4" />} onClick={() => void pickTorrents()} title="Open .torrent files">Torrent</Button>
-              <Button type="button" variant="ghost" icon={<ClipboardPaste className="size-4" />} onClick={pasteFromClipboard}>Paste</Button>
-              <Button type="submit" variant="primary" loading={phase.kind === 'inspecting'} disabled={!input.trim()} icon={phase.kind === 'inspecting' ? undefined : <ArrowRight className="size-4" />}>
-                {phase.kind === 'inspecting' ? 'Reading' : 'Go'}
-              </Button>
+            <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1">
+              {phase.kind === 'ready' ? (
+                <IconButton type="button" label="Clear" onClick={reset}><X /></IconButton>
+              ) : (
+                <>
+                  <IconButton type="button" label="Open .torrent files" onClick={() => void pickTorrents()}><FileUp /></IconButton>
+                  <IconButton type="button" label="Paste from clipboard" onClick={pasteFromClipboard}><ClipboardPaste /></IconButton>
+                  <Button
+                    type="button" className="ml-1" loading={opening} disabled={!playTarget} icon={<Play className="size-4 fill-current" />}
+                    onClick={() => void playFromBar()} title={playTarget ? 'Play it now, without downloading' : 'Paste a web link to play it'}
+                  >
+                    Play
+                  </Button>
+                  <Button type="submit" variant="primary" loading={phase.kind === 'inspecting'} disabled={!input.trim()} icon={phase.kind === 'inspecting' ? undefined : <ArrowDownToLine className="size-4" />}>
+                    {phase.kind === 'inspecting' ? 'Reading' : 'Download'}
+                  </Button>
+                </>
+              )}
             </div>
             {phase.kind === 'idle' && focused && !input.trim() && (
               <SearchSuggestions
@@ -278,25 +302,8 @@ export function DownloadView() {
             </form>
           </div>
           {!compact && (
-            <button
-              type="button"
-              onClick={() => void pickTorrents()}
-              className="group/drop mt-3 flex w-full items-center gap-3 rounded-xl border border-dashed border-line-strong bg-sunken/40 px-4 py-3 text-left transition-[background-color,border-color] duration-150 hover:border-accent hover:bg-accent-soft/50 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-ground outline-none"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-raised text-ink-3 shadow-sm transition-colors group-hover/drop:text-accent"><FileUp className="size-[18px]" /></span>
-              <span className="min-w-0">
-                <span className="block text-[13px] font-semibold text-ink">Have a .torrent file? Drop it here</span>
-                <span className="block text-xs text-ink-3">Drag it anywhere onto this window, or click to browse. Magnet links go in the box above.</span>
-              </span>
-            </button>
-          )}
-          {!compact && (
-            <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
-              <span>Press <kbd className="rounded border border-line bg-sunken px-1 font-sans">Ctrl</kbd> <kbd className="rounded border border-line bg-sunken px-1 font-sans">L</kbd> to jump here</span>
-              <span aria-hidden="true">·</span>
-              <span>Press <kbd className="rounded border border-line bg-sunken px-1 font-sans">?</kbd> for shortcuts</span>
-              <span aria-hidden="true">·</span>
-              <button onClick={() => setView('settings', 'extension')} className="inline-flex items-center gap-1 transition-colors hover:text-accent"><Puzzle className="size-3.5" /> Catch videos from any page with the browser extension</button>
+            <p className="mt-3 text-xs text-ink-3">
+              Drop a .torrent file anywhere on the window · <kbd className="rounded border border-line bg-sunken px-1 font-sans">Ctrl</kbd> <kbd className="rounded border border-line bg-sunken px-1 font-sans">L</kbd> jumps here
             </p>
           )}
 
@@ -309,16 +316,7 @@ export function DownloadView() {
               <div className="rounded-xl border border-line bg-panel p-5 text-sm text-ink-3 animate-rise" aria-busy="true">Searching songs and videos for “{phase.query}”…</div>
             )}
             {phase.kind === 'results' && <SearchResults results={phase.results} onPick={(hit) => inspect(hit.url)} />}
-            {phase.kind === 'error' && (
-              <div className="flex items-start gap-3 rounded-xl border border-danger/25 bg-danger/8 p-4 animate-rise">
-                <TriangleAlert className="mt-0.5 size-5 shrink-0 text-danger" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">Lumina couldn’t read that link</p>
-                  <p className="mt-1 text-sm leading-relaxed text-ink-2" data-selectable>{phase.message}</p>
-                </div>
-                <Button size="sm" onClick={() => void inspect(phase.url, { request: phase.request })}>Try again</Button>
-              </div>
-            )}
+            {phase.kind === 'error' && <InspectError message={phase.message} onRetry={() => void inspect(phase.url, { request: phase.request })} />}
             {phase.kind === 'ready' && <InspectResult key={phase.url} url={phase.url} info={phase.info} onDone={reset} />}
             {phase.kind === 'batch' && <BatchPicker plan={phase.plan} onDone={reset} onCancel={reset} />}
           </div>
@@ -326,6 +324,25 @@ export function DownloadView() {
           {!compact && hasJobs && <RecentStrip />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Why a link could not be read. A site that did not answer, or a connection that was reset, is a problem on the way there, not a
+ * wrong link and not a danger: it is shown in the calm warning colour and says it could not reach the site. A link that is
+ * genuinely unreadable (unsupported, private, removed) keeps the red.
+ */
+function InspectError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const calm = classifyFailure(message) === 'network';
+  return (
+    <div className={cn('flex items-start gap-3 rounded-xl border p-4 animate-rise', calm ? 'border-warning/30 bg-warning/8' : 'border-danger/25 bg-danger/8')}>
+      <TriangleAlert className={cn('mt-0.5 size-5 shrink-0', calm ? 'text-warning' : 'text-danger')} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{calm ? 'Lumina couldn’t reach that site' : 'Lumina couldn’t read that link'}</p>
+        <p className="mt-1 text-sm leading-relaxed text-ink-2" data-selectable>{message}</p>
+      </div>
+      <Button size="sm" onClick={onRetry}>Try again</Button>
     </div>
   );
 }

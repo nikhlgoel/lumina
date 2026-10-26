@@ -193,6 +193,14 @@ export interface JobProgress {
   totalBytes: number | null;
   stage: string;
   item?: { index: number; count: number; title: string };
+  /** Parallel connections open right now (direct downloads), for the row's "16 connections" chip. */
+  connections?: number | null;
+  /**
+   * What the engine is doing when it is not simply moving data, for the row's status chip: it has gone quiet saving a
+   * block ('writing'), it is re-announcing or restarting ('reconnecting'), or the connection dropped and the job is
+   * waiting for it ('waiting'). null or absent while it is moving data normally.
+   */
+  activity?: 'writing' | 'reconnecting' | 'waiting' | null;
 }
 
 export interface CompatReport {
@@ -200,6 +208,12 @@ export interface CompatReport {
   summary: string;
   video?: { codec: string; width: number; height: number; fps: number };
   audio?: { codec: string; bitrateKbps: number | null; sampleRate: number | null };
+}
+
+/** What a finished download ended up as: the size on disk, and how long it was actually active (null when not known). */
+export interface JobSummary {
+  bytes: number | null;
+  tookMs: number | null;
 }
 
 export interface Job {
@@ -223,7 +237,11 @@ export interface Job {
     finishedItems: number; autoRetries?: number; cookieFallback?: boolean;
     /** What the server said about the file when the download began; compared again before a resume. */
     validators?: { etag: string | null; lastModified: string | null; size: number | null };
+    /** Time spent actually downloading or processing so far, across pauses and retries (not time spent queued or paused). */
+    activeMs?: number;
   };
+  /** Set when the job finishes: what the finished row shows beyond "Done". */
+  summary?: JobSummary | null;
   /** Where the job came from; browser downloads are quieter (no notification for small files). */
   origin?: 'app' | 'browser';
   /** Source info used to (re)start: playlist entries, direct file name, captured request, etc. */
@@ -448,10 +466,22 @@ export interface PlayableItem {
   src: string;
   artworkUrl: string | null;
   path: string | null;
+  /** A link being played without a download that ffmpeg converts as it goes, so the player starts in that mode. */
+  pipe?: boolean;
   /** Where to continue from (saved position), in seconds. */
   resumeAtSec?: number;
   /** Carried so the player can show the right heart without a second round trip. */
   liked?: boolean;
+  /** What the library measured about the file, for the "Stats for nerds" panel. Absent for streams. */
+  tech?: {
+    codec: string | null;
+    bitrateKbps: number | null;
+    sampleRate: number | null;
+    bitDepth: number | null;
+    lossless: boolean;
+    width: number | null;
+    height: number | null;
+  };
 }
 
 export interface AppInfo {

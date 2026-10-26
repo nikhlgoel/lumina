@@ -54,10 +54,11 @@
 .p-record { position: absolute; inset: 0; border-radius: 50%;
   background: radial-gradient(circle, transparent 0 33%, rgb(255 255 255 / .035) 33.3% 34%, transparent 34.2%), repeating-radial-gradient(circle, #101014 0 2px, #17171c 2px 3px);
   box-shadow: 0 30px 70px -25px rgb(0 0 0 / .9), inset 0 0 0 1px rgb(255 255 255 / .05);
-  animation: p-spin 1.8s linear infinite; animation-play-state: paused; }
-.p-record::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 20deg, transparent 0 10%, rgb(255 255 255 / .09) 14%, transparent 20% 60%, rgb(255 255 255 / .06) 64%, transparent 70%); }
-.player[data-playing] .p-record { animation-play-state: running; }
-.p-label { position: absolute; inset: 32%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px rgb(0 0 0 / .4); }
+  /* Rotation is a Web Animation started in Stage.tsx (useRecordSpin) so it can spin up and coast down. */
+  will-change: transform; }
+.p-sheen { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; background: conic-gradient(from 20deg, transparent 0 10%, rgb(255 255 255 / .09) 14%, transparent 20% 60%, rgb(255 255 255 / .06) 64%, transparent 70%); }
+.p-label { position: absolute; inset: 29%; border-radius: 50%; overflow: hidden; background: var(--p-c1); box-shadow: 0 0 0 2px rgb(0 0 0 / .4); }
+.p-label-art { position: absolute; inset: 14.7%; }
 .p-label::after { content: ""; position: absolute; inset: 46%; border-radius: 50%; background: #0b0a10; }
 .p-tonearm { position: absolute; right: -4%; top: -2%; width: 44%; height: 70%; transform-origin: 82% 10%; transform: rotate(-24deg); transition: transform 1s var(--ease); pointer-events: none; }
 .player[data-playing] .p-tonearm { transform: rotate(4deg); }
@@ -99,5 +100,14 @@
 .player[data-video] .p-dock { transition: opacity .4s var(--ease), transform .4s var(--ease); }
 .player[data-video][data-idle] .p-dock, .player[data-video][data-idle] .p-top { opacity: 0; transform: translateY(8px); pointer-events: none; }
 .player[data-video][data-idle] { cursor: none; }
+
+/* The brief message in the middle of the picture after a key press (see PlayerView `flash`). */
+.p-osd { position: absolute; top: 46%; left: 50%; z-index: 15; padding: 12px 22px; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; font-size: 19px; font-weight: 600; letter-spacing: .01em; pointer-events: none; backdrop-filter: blur(8px); animation: p-osd .95s var(--ease) forwards; }
+@keyframes p-osd {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.92); }
+  14% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  70% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
 
 .p-menu { background: rgb(20 18 28 / .82); backdrop-filter: blur(24px) saturate(1.4); border: 1px solid var(--p-line); box-shadow: 0 20px 50px -20px rgb(0 0 0 / .7); transform-origin: top right; }

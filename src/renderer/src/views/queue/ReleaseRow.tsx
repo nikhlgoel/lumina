@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { Job, JobStatus } from '@shared/types';
 import { formatBytes, formatEta, formatSpeed } from '@core/format';
 import { groupActionTargets, summarizeGroup } from '@core/jobGroups';
+import { isWaitingForNetwork } from '@core/jobDisplay';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -52,7 +53,11 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
   if (s.etaSec != null) meta.push(`${formatEta(s.etaSec)} left`);
   if (s.totalBytes) meta.push(`${formatBytes(s.downloadedBytes)} of ${formatBytes(s.totalBytes)}`);
 
-  const status = s.status === 'failed'
+  // A part waiting for the connection to come back is not a failed part.
+  const waiting = members.some(isWaitingForNetwork);
+  const status = waiting
+    ? 'Waiting for the network'
+    : s.status === 'failed'
     ? `${s.counts.failed} of ${s.counts.total} files failed`
     : s.status === 'completed'
       ? `Complete · ${parts}`
@@ -82,7 +87,7 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
               </span>
             </div>
             <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
-              <span className={cn('font-medium', s.status === 'failed' && 'text-danger', active && 'text-ink-2')}>{status}</span>
+              <span className={cn('font-medium', s.status === 'failed' && !waiting && 'text-danger', waiting && 'text-warning', active && 'text-ink-2')}>{status}</span>
               {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
             </div>
             {(active || s.status === 'queued' || s.status === 'paused') && (

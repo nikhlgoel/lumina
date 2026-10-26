@@ -1,0 +1,152 @@
+{
+  "_about": "Generated from src/core/portable.ts. The Android TV app (tv/) must reproduce every expected value exactly, so a file named by one app is named identically by the other. Regenerate only when the naming rules change on purpose.",
+  "safeSegment": [
+    {
+      "input": "Hello World",
+      "expected": "Hello World"
+    },
+    {
+      "input": "AC/DC: Back In Black?",
+      "expected": "AC DC Back In Black"
+    },
+    {
+      "input": "con",
+      "expected": "_con"
+    },
+    {
+      "input": "CON",
+      "expected": "_CON"
+    },
+    {
+      "input": "nul",
+      "expected": "_nul"
+    },
+    {
+      "input": "COM1",
+      "expected": "_COM1"
+    },
+    {
+      "input": "lpt9",
+      "expected": "_lpt9"
+    },
+    {
+      "input": "Console",
+      "expected": "Console"
+    },
+    {
+      "input": "Song...",
+      "expected": "Song"
+    },
+    {
+      "input": "trail. ",
+      "expected": "trail"
+    },
+    {
+      "input": "  spaced   out  ",
+      "expected": "spaced out"
+    },
+    {
+      "input": "",
+      "expected": "Untitled"
+    },
+    {
+      "input": "   ",
+      "expected": "Untitled"
+    },
+    {
+      "input": "<>:\"/\\|?*",
+      "expected": "Untitled"
+    },
+    {
+      "input": "Track\u0001Name\u001f!",
+      "expected": "Track Name !"
+    },
+    {
+      "input": "Café ☕ Ünï",
+      "expected": "Café ☕ Ünï"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max": 60,
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. .",
+      "expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "input": "日本語のタイトル",
+      "expected": "日本語のタイトル"
+    },
+    {
+      "input": "Artist - Title (feat. Someone) [Remix]",
+      "expected": "Artist - Title (feat. Someone) [Remix]"
+    },
+    {
+      "input": "Q: \"Why?\" A: <because>",
+      "expected": "Q Why A because"
+    }
+  ],
+  "target": [
+    {
+      "kind": "audio",
+      "path": "C:\\m\\a.opus",
+      "title": "Stuck",
+      "artist": "ENHYPEN",
+      "album": null,
+      "expected": "LuminaMedia/Music/ENHYPEN - Stuck.opus"
+    },
+    {
+      "kind": "audio",
+      "path": "/m/a.m4a",
+      "title": "Back In Black",
+      "artist": "AC/DC",
+      "album": null,
+      "expected": "LuminaMedia/Music/AC DC - Back In Black.m4a"
+    },
+    {
+      "kind": "audio",
+      "path": "/m/a.webm",
+      "title": "No Artist Song",
+      "artist": null,
+      "album": null,
+      "expected": "LuminaMedia/Music/No Artist Song.webm"
+    },
+    {
+      "kind": "audio",
+      "path": "/m/noext",
+      "title": "Weird?*Name",
+      "artist": "Some: One",
+      "album": null,
+      "expected": "LuminaMedia/Music/Some One - Weird Name"
+    },
+    {
+      "kind": "video",
+      "path": "/v/clip.mp4",
+      "title": "C++ Full Course for free",
+      "artist": null,
+      "album": null,
+      "expected": "LuminaMedia/Videos/C++ Full Course for free.mp4"
+    },
+    {
+      "kind": "video",
+      "path": "/v/clip.mkv",
+      "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "artist": null,
+      "album": null,
+      "expected": "LuminaMedia/Videos/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mkv"
+    },
+    {
+      "kind": "audio",
+      "path": "/m/a.opus",
+      "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "album": null,
+      "expected": "LuminaMedia/Music/yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.opus"
+    }
+  ]
+}

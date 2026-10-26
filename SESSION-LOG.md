@@ -5,6 +5,132 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-10-27 (48) - Play a link without downloading it, and the lighter link bar
+
+Owner approved the mockup ("Yes, build the lighter link bar with Play beside Download exactly as drawn, including streaming the link into the
+player"). Nothing committed.
+
+* **Design.** A link is resolved in the main process to a *plan* (`src/core/streamPlan.ts`, pure, 19 tests) kept in memory (cap 24; it holds the
+  site's headers and cookies, so the page only ever sees a token). Two shapes: `proxy` (one progressive file the browser can decode, passed through
+  with its Range requests, so seeking is the server's) and `pipe` (HLS/DASH, video and audio as separate files, or a container Chromium can't
+  open: ffmpeg copies it to a fragmented MP4, seek restarts it at an offset like the existing `remux`). New IPC `media:play`
+  (`main/media/streams.ts`), new `lumina-media://stream/<token>` route, and `remux/stream-<token>` for the pipe. The player starts in pipe mode
+  when `PlayableItem.pipe` is set. `ffmpegResponse` (shared with the old file `remux`) now pauses ffmpeg's stdout when the player has all it
+  asked for; before, a fast source would have piled a whole film into memory.
+* **UI as drawn.** Idle: smaller heading, one muted line, one 52 px bar with icon-only Torrent/Paste, then Play and Download; the dashed
+  drop box is gone (a hint line says a .torrent can be dropped anywhere). After a link is read: X in the bar, a card with thumbnail, title, one
+  meta line (`core/linkMeta.ts`, 7 tests), a quality select + folder, Play and Download; everything else is behind "More options" (the playlist
+  picker stays visible). Torrents and file-host pages get no Play (nothing to stream until downloaded).
+* **A real bug found by playing a real link.** Apple's public HLS test stream lists no resolution, and `parseStreams` only counted a format as video
+  if it had a height. Its video variants vanished, the only audio variant was left, and the link was read as **music**: Play asked for audio, and a
+  download would have saved audio only. A format with a video codec and no height is now a video stream with height 0 (`core/streams.ts`, test in
+  `tests/core.test.ts`).
+* **Measured in the real app (offscreen, `LUMINA_PROBE_PLAY`; the probe types the link, presses Play, then reads the player's clock twice, presses
+  →, and pauses at the end).** archive.org mp4 (passthrough): 320×240, clock 7.7→11.9 s, → jumped about 5 s. Wikimedia webm (passthrough), from the
+  bar and from the result card (the card hands main the already-read info; the log says "already read"): 640×360, clock advancing, seek ok. Apple
+  HLS (pipe): 960×720, clock advancing, seek restarts the pipe at the offset. Akamai DASH, video and audio as two sources (pipe): 1024×576, clock
+  advancing. A public mp3 (passthrough, music view): slider advancing. A photograph of the playing video was looked at.
+* **Known limits, measured.** A DASH *manifest* is slow to open: ffmpeg took 9.0 s to the first byte at the start and 12.8 s / 21.1 s when starting 25 s /
+  120 s in (timed by hand; smaller `-probesize`/`-analyzeduration` changed nothing: 9.0 s both ways). Progressive files and HLS are quick. A
+  playlist plays its first item. A live stream is refused in words. YouTube from this clean profile hit its "confirm you're not a bot" check, so
+  **YouTube's own separate-streams case is unverified** (the DASH sample above exercises the same two-source path); Lumina says "YouTube wants a
+  sign-in check" and does not try to get around it.
+* **Harness.** The input's label is now "Link to play, download or search"; the capture steps look for the prefix "Link to" (commit `c49cec6` renamed it
+  once and three steps failed silently). `LUMINA_PROBE_PLAY=<url>` (+ `_PLAY_WAIT`, `_PLAY_FROM=card`) is documented in `capture.ts`.
+* **Verification:** `tsc` clean · `vitest` 1164 passed (64 files) · `vite build` ok. Not done: not heard by an ear (the window is offscreen), the
+  multi-network ask (see 47), a sleep/wake while streaming.
+
+---
+
+## 2026-10-27 (47) - Links of every kind through the real app; calmer waiting and error colours
+
+Owner's ask: make it download from any kind of link; use one supplied link only to understand why it failed ("do not play the
+video"); calmer colour for reconnecting/restored; a lighter link bar with Play; use all networks. Nothing committed. BUGS B13.
+
+* **The supplied link was not downloaded.** AGENTS.md rule 2 forbids content of unknown licence even as a test, and it was not needed: the
+  log already had it failing with curl (35) reset and (28) timeout. A no-content check (DNS + a bare TCP connect, nothing requested): this
+  network's DNS returns an address for the site that never answers, while two ordinary sites connect. A network-level
+  block, not Lumina. No bypass was built; the error now says so and points at Settings › Network.
+* **14 kinds of link measured** with the new `scripts/dl-lab/link-matrix.mjs` (real app, lawful samples). Direct, `download.*` zip, 2×HLS,
+  DASH, archive.org (page and audio), `.torrent` URL, **magnet (a real public swarm, 123 MB at 11 MB/s)**, Wikimedia page: all fine at
+  22–44 MB/s (link-limited). Vimeo needs a sign-in (said plainly now).
+* **Two real bugs found by it:** (1) a 404 on a file link started the file-host click-through flow and waited for a person; (2) a web page
+  whose address ends in `.webm` was taken for a file host. Both in `inspectDirect`'s caller: any failed probe meant "a web page". Now a
+  404/410 or network error is reported at once, and yt-dlp's site-specific extractors are tried before the click-through.
+* **Wording and colour:** curl errors and yt-dlp scaffolding turned into sentences (`plainCurlError`, `tidyYtdlpMessage`); a
+  network-type read failure is an amber "couldn't reach that site" card; a job waiting for the network sits with the active ones, in amber
+  (`isWaitingForNetwork`); Node's nested error codes are read (a refused connection says so). Photographed: amber card, amber waiting row.
+* **Not built (visible or unverifiable):** Play from the link bar + a lighter bar (mockup shown, awaiting a yes); multi-network. This PC has
+  one real uplink (Wi-Fi), so nothing could be measured; and on Windows a socket bound to one adapter's address can still leave through
+  another, so real bonding needs `IP_UNICAST_IF` in a small native helper (or route changes, which need admin).
+* **Flake seen, not mine:** `tests/syncCrypto.test.ts` "single-char typo" failed once in a full run and passed 8 of 8 reruns (a random
+  seed whose flipped character the checksum sometimes accepts). Left alone.
+* **Verification:** `tsc` clean · `vitest` **1136 passed (62 files)** · `vite build` ok.
+
+---
+
+## 2026-10-26 (46) - Queue rows built from the approved mockup (D1–D3, D11)
+
+Owner approved the mockup drawn in this session ("build it exactly as drawn"). Nothing committed. BUGS B9.
+
+* **Rules in `core/jobDisplay.ts`** (22 tests, `tests/jobDisplay.test.ts`): unknown size ⇒ bytes in the number slot, "size not announced", a
+  looping bar; paused ⇒ "1.2 GB of 1.9 GB" and a muted percent; finished ⇒ size, time active, average speed (downloads only; "took" ≥ 1 s,
+  average ≥ 2 s); one chip at most (waiting for network > reconnecting > writing to disk > "N connections").
+* **New data:** `JobProgress.connections`/`activity`, `Job.summary`, `engineState.activeMs` (all optional, so stored jobs load). The queue
+  now times how long a job is *active* (not queued, paused or waiting), stores a summary when it completes (size on disk, bounded walk),
+  and clears a stale "waiting" mark. aria2 reports `connections` and `activity`; its status word is now plain "Downloading".
+* **A flaw in my own design, caught while photographing:** the "Reconnecting" chip would have cleared on the very next poll even while
+  still stalled. It now stays while `stall.steps > 0` (recovery ran, no bytes since).
+* **Photographed in the real app** (harness probe `LUMINA_PROBE_ROWS`, three local servers): unknown-size, paused 18% and finished rows
+  match the drawing; finished read "Done · 41.0 MB · 11 s · 3.6 MB/s average"; the amber "Waiting for network" chip on a real dropped
+  connection. **Not photographed from a real run:** "Writing to disk", "Reconnecting".
+* **Seen, not changed (visible, needs a yes):** a job waiting for the network is listed under "Finished" with its message in red.
+* **Verification:** `tsc` clean · `vitest` **1129 passed (62 files)** · `vite build` ok.
+
+---
+
+## 2026-10-26 (45) - Reading the installed build's log, stability pass on the desktop engine, graceful quit
+
+Owner's ask: stop working on the TV; the friend's copy (the 25 Sep release) had a lot of downloader bugs; read the log, fix
+everything stability-related, verify, report. Nothing committed. Full table with evidence: `BUGS.md` B12.
+
+* **The log** (`%APPDATA%/lumina-media/logs/lumina.log`, 10,254 lines, written by the *installed* build): grouped by message. Most
+  of it is old (915 aria2 poll failures are one day in September). Still true in the current code: the volume schema rejecting
+  boost (90×), a PowerShell started every 5 s forever (41 failures with stack traces), RPC timeouts on `addTorrent`, raw
+  `fetch failed` / `aborted due to timeout` / `aria2c exited with code 22` as failure text (and `fetch failed` never retried),
+  corrupt-tag artwork re-parsed 491×.
+* **Found by reading, not in the log:** no `uncaughtException` / `unhandledRejection` / `render-process-gone` handling at all
+  (`crashGuard.ts`, `core/crashPolicy.ts`); the log only rotated at start-up; and the code that removes an "unresumable partial"
+  would have deleted a **pre-existing file** when aria2 refused with "control file does not exist" (guarded now).
+* **Quit was not graceful:** `queue.shutdown()` fired each runner's async stop and the next line killed aria2, so no control
+  file was written. Measured with real aria2 (`scripts/dl-lab/quit-and-resume.mjs`): killed 3.5 s in, the restart began again
+  from zero; shut down with `aria2.shutdown`, it resumed with `Range: bytes=22036480-`. Quit now waits (≤ 4 s + 3 s), and
+  `--auto-save-interval=10`. My own first test reproduced the log's exact `errorCode=13 … control file` message by killing aria2.
+* **Verified in the real app** (offscreen harness, scratch profile, local servers): a 300 MB direct download byte-exact; quit
+  mid-download wrote a 396-byte control file; **a 120 MB torrent from 3 seeders capped at 1 MB/s each ran at ~3.1 MB/s, "3 seeds
+  · 3 peers", SHA-256 identical to the source**; a 30 s server outage waited, resumed ~5 s after the server returned and never
+  went backwards in percent (157,286,400 bytes); a forced renderer crash was logged and the window reloaded; full 82-step capture
+  ran with 0 script failures (identical screenshots: the IDE steps without a workspace, as documented; `17a/17b` because port
+  8200 was held by the owner's own Lumina, so the toggle correctly failed; `16/17` both light).
+* **Test-rig mistake worth keeping:** my new multi-seeder rig crawled at 80 KB/s and I first suspected Lumina. A plain aria2c
+  leecher crawled too; the seeder's own log said "Checksum error detected". `fs.writeSync(fd, string, 0, 'latin1')` takes the 0 as
+  the file *position*: the data file never grew past one block. The old scratch rig had the same line and only worked because its
+  file pre-existed. Rigs now live in `scripts/dl-lab/` with a README (this was Phase E).
+* **TV:** `LyricsLog` writes one block per lyrics lookup to `<external files>/lyrics-matches.log` (title, channel, length used and
+  where it came from, every variant, every LRCLIB candidate with its own title/artist/length and why it was chosen or refused).
+  Observation only; matching is unchanged. 173 Kotlin tests pass; **not run on a device**.
+* **Verification:** `tsc --noEmit` clean · `vitest` **1107 passed (61 files)**, from 1061 (46 new) · `vite build` ok (16 MB, 96 chunks).
+  A local installer was built into `release/candidate/` (322,926,814 bytes, **unsigned**; the 25 Sep installer in `release/` was
+  left alone). The unpacked packaged build was started hidden with a scratch profile: window, tray and all six bundled tools came up.
+* **NOT proven:** the installer itself (installing it); real sleep/wake; a real swarm or the owner's large game torrent; a real 20 GB
+  torrent for the 90 s add limit; the yt-dlp accelerator fallback (needs a server that makes aria2c exit 22); the corrupt-tag
+  cover fallback; the Fire TV keyboard and the lyrics log on a device; the graceful quit when quitting through the tray menu or the
+  Windows shutdown path (the harness quits through `app.quit()`).
+* **Open from the plan, needing the owner's yes first (visible):** Queue row D1–D3 (unknown total, paused/finished rows), D11
+  (connection/status chips). `formatBytes(0)` still prints "—" (D4): changing it affects every caller.
+
+---
+
 ## 2026-10-23 (44) - Rest of Phase B: torrent ENOSPC, magnet cancel/retry, Cancelling, stray .torrent
 
 Plan: `docs/19_DOWNLOADER_IMPROVEMENT_PLAN.md` S1, S9–S11. Nothing committed.

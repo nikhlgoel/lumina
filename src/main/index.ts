@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import type { RequestInfo } from '../shared/types';
 import { settings } from './settings';
 import { setVerboseLogging, logger } from './log';
+import { installCrashGuard } from './crashGuard';
 import { tools } from './tools';
 import { database, closeDatabase } from './db';
 import { queue } from './jobs/queue';
@@ -47,6 +48,9 @@ function markFromInternet(job: Job) {
 }
 
 const log = logger('app');
+
+// First, before anything can throw: an unhandled error or a dead window must not take the downloader with it.
+installCrashGuard();
 
 // Some shells (VS Code's terminal) leak this; it would turn child Electron instances into Node.
 delete process.env.ELECTRON_RUN_AS_NODE;
@@ -272,6 +276,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('activate', () => showWindow());
 
   let confirmedQuit = false;
+  let shutDownCleanly = false;
   app.on('before-quit', (event) => {
     const active = queue.list().filter((j) => j.status === 'running' || j.status === 'processing').length;
     if (!confirmedQuit && active > 0 && settings.get().general.confirmQuitWithDownloads && !process.env.LUMINA_CAPTURE && !process.env.LUMINA_METRICS) {
@@ -290,7 +295,20 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     setQuitting();
-    queue.shutdown();
+    // Let the downloads and the engine finish saving before anything is killed (a few seconds at most), then quit for real.
+    if (!shutDownCleanly) {
+      shutDownCleanly = true;
+      event.preventDefault();
+      void queue.shutdown()
+        .then(() => aria2.gracefulStop())
+        .catch((err) => log.warn('Clean shutdown failed', err))
+        .finally(() => {
+          aria2.stop();
+          bridge.stop();
+          app.quit();
+        });
+      return;
+    }
     aria2.stop();
     bridge.stop();
   });

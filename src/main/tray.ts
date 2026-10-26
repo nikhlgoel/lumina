@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AudioOutputDevice } from '../shared/ipc';
 import { EQ_PROFILES } from '../core/equalizer';
+import { overallPercent } from '../core/jobGroups';
 import {
   downloadItems, idlePlayback, pauseAllOrder, playbackItems, type TrayItem, type TrayPlayback,
 } from '../core/trayMenu';
@@ -118,7 +119,8 @@ function updateTaskbar(jobs: ReturnType<typeof activeJobs>) {
     win.setProgressBar(-1);
     return;
   }
-  const avg = jobs.reduce((s, j) => s + j.progress.percent, 0) / jobs.length / 100;
+  // Weighted by bytes when sizes are known: the plain average of percentages said ~50% for a 1 KB file at 100% beside a 50 GB one at 1%.
+  const avg = overallPercent(jobs.map((j) => j.progress)) / 100;
   const indeterminate = jobs.every((j) => j.progress.percent <= 0);
   win.setProgressBar(indeterminate ? 2 : Math.max(0.01, avg), { mode: indeterminate ? 'indeterminate' : 'normal' });
 }

@@ -22,6 +22,7 @@ import { ensureArtwork } from './coverArt';
 import { factsOf, probe } from './media/probe';
 import { convertAudio, transcodeTvSafe } from './media/ffmpeg';
 import { TV_PROFILE, isTvSafe } from '../core/tvSafe';
+import { afterScan, backoffMs, describeSpawnFailure, initialDriveScan, parseFsutilDrives, shouldScan } from '../core/driveWatch';
 
 const execFileAsync = promisify(execFile);
 const log = logger('usb');
@@ -103,14 +104,28 @@ function fakeDrives(): PortableDrive[] {
   return drive ? [{ ...drive, label: `${drive.label} (test drive)` }] : [];
 }
 
-export async function listDrives(): Promise<PortableDrive[]> {
+const sorted = (drives: PortableDrive[]) => drives.sort((a, b) => a.root.localeCompare(b.root));
+
+/** A full listing, saying whether it worked: a failed query must not read as "no drives are plugged in". */
+async function scanDrives(): Promise<{ drives: PortableDrive[]; ok: boolean; reason?: string }> {
   try {
     const drives = process.platform === 'win32' ? await windowsDrives() : unixDrives();
-    return [...fakeDrives(), ...drives].sort((a, b) => a.root.localeCompare(b.root));
+    return { drives: sorted([...fakeDrives(), ...drives]), ok: true };
   } catch (err) {
-    log.warn('Could not list removable drives', err);
-    return fakeDrives();
+    return { drives: fakeDrives(), ok: false, reason: describeSpawnFailure(err) };
   }
+}
+
+export async function listDrives(): Promise<PortableDrive[]> {
+  const scan = await scanDrives();
+  if (!scan.ok) log.warn(`Could not list removable drives: ${scan.reason}`);
+  return scan.drives;
+}
+
+/** The drive letters present right now (`fsutil` takes ~20 ms; the PowerShell query behind a full listing ~400 ms and more under load). */
+async function windowsLetters(): Promise<string> {
+  const { stdout } = await execFileAsync('fsutil', ['fsinfo', 'drives'], { timeout: 5_000, windowsHide: true });
+  return parseFsutilDrives(stdout).join(',');
 }
 
 /* ---------- change notification ---------- */
@@ -125,8 +140,25 @@ export function onDrivesChanged(fn: Listener): () => void {
   return () => listeners.delete(fn);
 }
 
+let scanState = initialDriveScan();
+
 async function poll() {
-  const drives = await listDrives();
+  let drives: PortableDrive[];
+  if (process.platform === 'win32') {
+    // Cheap check every time; the full listing only when a letter came or went, now and then for free space, or as a retry.
+    const letters = await windowsLetters().catch(() => '?');
+    if (!shouldScan(scanState, letters, Date.now())) return;
+    const scan = await scanDrives();
+    scanState = afterScan(scanState, letters, scan.ok, Date.now());
+    if (!scan.ok) {
+      // Said once per streak at warn, then quietly: the log had 41 near-identical stack traces from this.
+      (scanState.failures === 1 ? log.warn : log.debug)(`Could not list removable drives: ${scan.reason}; trying again in ${Math.round(backoffMs(scanState.failures) / 1000)} s`);
+      return;
+    }
+    drives = scan.drives;
+  } else {
+    drives = (await scanDrives()).drives;
+  }
   const key = drives.map((d) => `${d.root}:${d.ready}`).join('|');
   if (key === known) return;
   known = key;

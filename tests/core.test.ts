@@ -107,6 +107,19 @@ describe('streams', () => {
     expect(audio.map((a) => a.codec)).toEqual(['opus', 'aac']);
     expect(audio[0]!.sizeBytes).toBeGreaterThan(0);
   });
+
+  // Read from Apple's public HLS test stream: no resolution is listed, so it was read as a song (and would have downloaded as audio only).
+  it('keeps a stream manifest’s video variants even when no height is listed', () => {
+    const hls = [
+      { format_id: '41', vcodec: 'none', acodec: 'mp4a.40.2', tbr: 41.457, protocol: 'm3u8_native', ext: 'mp4' },
+      { format_id: '232', vcodec: 'avc1.4d4015', acodec: 'mp4a.40.2', tbr: 232.37, protocol: 'm3u8_native', ext: 'mp4' },
+      { format_id: '1927', vcodec: 'avc1.4d401f', acodec: 'mp4a.40.2', tbr: 1927.8, protocol: 'm3u8_native', ext: 'mp4' },
+    ];
+    const { video, audio } = parseStreams(hls, 1800);
+    expect(video).toHaveLength(1);
+    expect(video[0]).toMatchObject({ id: '1927', height: 0, codec: 'h264' });
+    expect(audio.map((a) => a.id)).toEqual(['41']);
+  });
 });
 
 describe('yt-dlp arguments', () => {
