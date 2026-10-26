@@ -11,6 +11,7 @@
 //     instructions by Lumina, and a tool is only ever called because the user (or a model acting on
 //     their explicit request) asked for that specific tool.
 //   * Every request is bounded by a timeout, and a server that dies is reported, not retried forever.
+import { app } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   decodeFrames, encodeFrame, parseToolList, parseToolResult, validateServerConfig,
@@ -194,7 +195,7 @@ export async function startServer(id: string): Promise<McpServerState | null> {
     await request(live, 'initialize', {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: 'Lumina', version: '3.0.0-alpha.0' },
+      clientInfo: { name: 'Lumina', version: app.getVersion() },
     });
     if (config.transport === 'stdio' && live.child?.stdin?.writable) {
       live.child.stdin.write(encodeFrame({ jsonrpc: '2.0', method: 'notifications/initialized' }));

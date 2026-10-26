@@ -31,7 +31,7 @@ export const HAS_BROWSER = __LUMINA_BROWSER__;
  */
 export function buildVariant(): string {
   if (HAS_IDE && HAS_BROWSER) return 'full';
-  if (HAS_BROWSER) return 'no-ide';
+  if (HAS_BROWSER) return 'standard';
   if (HAS_IDE) return 'no-browser';
   return 'player';
 }

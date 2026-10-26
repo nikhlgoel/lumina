@@ -81,7 +81,7 @@
     "installerHeader": "build/installerHeader.bmp",
     "runAfterFinish": true,
     "deleteAppDataOnUninstall": false,
-    "artifactName": "Lumina Setup_v${version}.exe"
+    "artifactName": "Lumina-${version}-Full-Setup.exe"
   },
   "mac": {
     "target": ["dmg"],

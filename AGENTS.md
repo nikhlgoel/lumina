@@ -91,17 +91,17 @@ silently broken feature looks like. That technique found three real bugs in a si
 
 ### Building the release variants
 
-Three Windows builds, all from the same source (D21):
+Two Windows installers are published, both from the same source (D21). **Standard** is the downloader, player and browser;
+**Full** adds the code editor, terminal, source control and MCP client.
 
 ```bash
-npx vite build && npx electron-builder --win nsis                      # full
-
-LUMINA_NO_IDE=1 npx vite build && \
-  npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v${version}-no-ide.exe"
-
-LUMINA_NO_IDE=1 LUMINA_NO_BROWSER=1 npx vite build && \
-  npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v${version}-player.exe"
+bash build-variants.sh standard   # Lumina-<version>-Standard-Setup.exe  (LUMINA_NO_IDE=1)
+bash build-variants.sh full       # Lumina-<version>-Full-Setup.exe
+bash build-variants.sh            # both
 ```
+
+The browser is kept in Standard on purpose: downloads sometimes need it. A player-only build is still possible
+(`LUMINA_NO_IDE=1 LUMINA_NO_BROWSER=1`) but is not published.
 
 The flags alias the excluded view's module path to a stub, so its dependencies are never bundled.
 

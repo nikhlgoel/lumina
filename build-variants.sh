@@ -1,14 +1,36 @@
 #!/usr/bin/env bash
-set -e
+# Builds the Windows installers.
+#
+#   bash build-variants.sh standard   downloader, player and in-app browser (no code editor)
+#   bash build-variants.sh full       everything: adds the code editor, terminal, source control and MCP client
+#   bash build-variants.sh            both (standard first, so the last build left in dist/ is the full one)
+#
+# Each is a different Vite build, not a runtime switch: an excluded feature's code is never bundled.
+set -euo pipefail
 cd "$(dirname "$0")"
-echo "=== 1/3 full ==="
-npx vite build
-npx electron-builder --win nsis
-echo "=== 2/3 no-ide ==="
-LUMINA_NO_IDE=1 npx vite build
-npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v\${version}-no-ide.exe"
-echo "=== 3/3 player ==="
-LUMINA_NO_IDE=1 LUMINA_NO_BROWSER=1 npx vite build
-npx electron-builder --win nsis --config.nsis.artifactName="Lumina Setup_v\${version}-player.exe"
+which=${1:-all}
+
+standard() {
+  echo "=== Standard (downloader, player, browser) ==="
+  LUMINA_NO_IDE=1 npx vite build
+  # The renderer of a build without the editor is about 1 MB; if this prints ~16 MB the exclusion did nothing.
+  du -sh dist
+  npx electron-builder --win nsis --config.nsis.artifactName='Lumina-${version}-Standard-Setup.exe'
+}
+
+full() {
+  echo "=== Full (adds editor, terminal, source control) ==="
+  npx vite build
+  du -sh dist
+  npx electron-builder --win nsis --config.nsis.artifactName='Lumina-${version}-Full-Setup.exe'
+}
+
+case "$which" in
+  standard) standard ;;
+  full) full ;;
+  all) standard; full ;;
+  *) echo "usage: bash build-variants.sh [standard|full|all]" >&2; exit 1 ;;
+esac
+
 echo "=== done ==="
-ls -la release/*.exe
+ls -la release/*-Setup.exe

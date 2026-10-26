@@ -8,7 +8,15 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-10-27
+
+The first release published on GitHub. Earlier builds were numbered 3.0.0-alpha.0 and 3.0.0; those numbers were never published and
+are retired, so this is version 1.1.0 and numbering continues from here. If you have one of those builds installed, Lumina will not offer
+this as an update (its number is lower), so run the installer yourself. Your downloads and settings are kept in your user folder.
+
+Lumina comes in two Windows installers. **Standard** is the downloader, the player and the built-in browser. **Full** adds the code
+editor, terminal, source control and MCP client. A feature left out of Standard is not in the program at all, so it costs no memory.
+There is also an Android TV and Fire TV app (0.2.0) with its own version number.
 
 ### Added
 - **Play a link without downloading it.** A Play button sits beside Download in the link bar and on the result card. It plays web pages
@@ -59,7 +67,12 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
-## [3.0.0] — 2026-09-25
+## Earlier builds, never published
+
+These two builds were numbered 3.0.0-alpha.0 and 3.0.0. They were used on one machine and never released on GitHub, and the
+numbering was reset to 1.1.0. Kept here because the changes are real and still part of Lumina.
+
+## [3.0.0] — 2026-09-25 (never published)
 
 ### Added
 - **The volume goes to 200%.** Quiet recordings, laptop speakers and noisy rooms all need more than
@@ -132,7 +145,7 @@ not by the app.
 
 ---
 
-## [3.0.0-alpha.0] — 2026-09-19
+## [3.0.0-alpha.0] — 2026-09-19 (never published)
 
 First packaged build installed and used on a real machine.
 
