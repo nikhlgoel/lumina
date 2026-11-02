@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, FileArchive, FileCheck2, File as FileIcon, FolderOpen, Layers, PackagePlus, ShieldCheck, TriangleAlert } from 'lucide-react';
-import type { MediaInfo } from '@shared/types';
+import type { MediaInfo, RequestInfo } from '@shared/types';
 import { releaseTagFor, type BatchGroup, type BatchPlan } from '@core/batch';
 import { safeFileName } from '@core/format';
 import { call, errorMessage } from '@/lib/bridge';
@@ -38,7 +38,7 @@ const KIND_META: Record<BatchGroup['kind'], { badge: string; tone: 'neutral' | '
   checksum: { badge: 'Checksums', tone: 'success' },
 };
 
-export function BatchPicker({ plan, onDone, onCancel }: { plan: BatchPlan; onDone: () => void; onCancel: () => void }) {
+export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPlan; /** The page the links were picked on, when they came from the browser. */ request?: RequestInfo; onDone: () => void; onCancel: () => void }) {
   const settings = useApp((s) => s.settings)!;
   const toast = useApp((s) => s.toast);
   const setView = useApp((s) => s.setView);
@@ -102,7 +102,7 @@ export function BatchPicker({ plan, onDone, onCancel }: { plan: BatchPlan; onDon
     // and checksum files land before the files they cover.
     await pool(items, PROBE_CONCURRENCY, async ({ item }, i) => {
       try {
-        infos[i] = await call('media:inspect', { url: item.url });
+        infos[i] = await call('media:inspect', { url: item.url, request });
       } catch (err) {
         next.set(item.url, { state: 'failed', message: `${item.filename || item.url}: ${errorMessage(err)}` });
       }

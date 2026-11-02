@@ -66,6 +66,15 @@ function openLink(url: string, source: 'extension' | 'clipboard' | 'system', req
   else send();
 }
 
+/** Bring Lumina forward with several links picked on a page, to be planned together (archive parts, optional extras, checksums). */
+function openLinks(urls: string[], request: RequestInfo) {
+  showWindow('downloader');
+  const send = () => broadcast('app:open-links', { urls, request, source: 'extension' });
+  const wc = mainWindow()?.webContents;
+  if (wc?.isLoading()) wc.once('did-finish-load', send);
+  else send();
+}
+
 // A download started in the in-app browser is caught and handed to the downloader to pick a format and pull it.
 browserEvents.on('download', (dl) => openLink(dl.url, 'system'));
 
@@ -197,6 +206,11 @@ if (!app.requestSingleInstanceLock()) {
         if (c.kind === 'file' && settings.get().extension.browserDownloads === 'auto') return takeOverDownload(c, signal);
         openLink(c.url, 'extension', c.request);
         return { accepted: true };
+      },
+      onCaptureBatch: async (urls, request) => {
+        log.info(`Batch from browser: ${urls.length} links from ${request.pageUrl?.slice(0, 120) ?? 'a page'}`);
+        openLinks(urls, request);
+        return { accepted: true, count: urls.length };
       },
       onPaired: () => broadcast('extension:changed', extensionStatus()),
     });

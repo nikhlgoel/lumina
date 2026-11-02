@@ -24,7 +24,7 @@ type Phase =
   | { kind: 'inspecting'; url: string; source?: PendingLink['source'] }
   | { kind: 'ready'; url: string; info: MediaInfo; source?: PendingLink['source'] }
   | { kind: 'error'; url: string; message: string; request?: RequestInfo }
-  | { kind: 'batch'; plan: BatchPlan }
+  | { kind: 'batch'; plan: BatchPlan; request?: RequestInfo }
   | { kind: 'searching'; query: string }
   | { kind: 'results'; results: SearchResultsData };
 
@@ -41,6 +41,8 @@ export function DownloadView() {
   const request = useRef(0);
   const pending = useApp((s) => s.pending);
   const consumePending = useApp((s) => s.consumePending);
+  const pendingBatch = useApp((s) => s.pendingBatch);
+  const consumePendingBatch = useApp((s) => s.consumePendingBatch);
   const clipboardLink = useApp((s) => s.clipboardLink);
   const dismissClipboardLink = useApp((s) => s.dismissClipboardLink);
   const pasteRequest = useApp((s) => s.pasteRequest);
@@ -116,6 +118,16 @@ export function DownloadView() {
     if (link) void inspect(link.url, { request: link.request, source: link.source });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending]);
+
+  // Links picked on a page in the browser and sent together: straight into the batch plan, with the page they came from.
+  useEffect(() => {
+    const batch = consumePendingBatch();
+    if (!batch) return;
+    request.current++;
+    setInput('');
+    setPhase({ kind: 'batch', plan: planBatch(batch.urls), request: batch.request });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBatch]);
 
   useEffect(() => {
     if (pasteRequest) void pasteFromClipboard();
@@ -318,7 +330,7 @@ export function DownloadView() {
             {phase.kind === 'results' && <SearchResults results={phase.results} onPick={(hit) => inspect(hit.url)} />}
             {phase.kind === 'error' && <InspectError message={phase.message} onRetry={() => void inspect(phase.url, { request: phase.request })} />}
             {phase.kind === 'ready' && <InspectResult key={phase.url} url={phase.url} info={phase.info} onDone={reset} />}
-            {phase.kind === 'batch' && <BatchPicker plan={phase.plan} onDone={reset} onCancel={reset} />}
+            {phase.kind === 'batch' && <BatchPicker plan={phase.plan} request={phase.request} onDone={reset} onCancel={reset} />}
           </div>
 
           {!compact && hasJobs && <RecentStrip />}

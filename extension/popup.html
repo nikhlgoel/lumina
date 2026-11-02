@@ -27,6 +27,17 @@
     <h2>Found on this page</h2>
     <ul id="media"></ul>
     <p id="empty" class="empty" hidden>Nothing yet. Start playing the video or song, and it will show up here.</p>
+
+    <h2>Download links on this page</h2>
+    <div id="links-box" hidden>
+      <div class="links-tools">
+        <label class="check"><input type="checkbox" id="links-all" checked /><span id="links-count"></span></label>
+        <input id="links-filter" type="search" placeholder="Filter" aria-label="Filter links" />
+      </div>
+      <ul id="links"></ul>
+      <button id="send-links" class="primary">Send to Lumina</button>
+    </div>
+    <p id="links-empty" class="empty" hidden>No download links on this page. Highlight links and right-click, or press the button that appears, to send any you pick.</p>
   </section>
 
   <footer>
@@ -34,6 +45,11 @@
       <input type="checkbox" id="capture" />
       <span class="track"><span class="thumb"></span></span>
       <span>Catch browser downloads</span>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="prompt" />
+      <span class="track"><span class="thumb"></span></span>
+      <span>Offer to send highlighted links</span>
     </label>
     <details>
       <summary>Advanced</summary>

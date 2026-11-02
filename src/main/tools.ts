@@ -7,6 +7,7 @@ import { bundledBinDir, bundledModelsDir, downloadedModelsDir, exe, updatedBinDi
 import { runTool } from './process';
 import { settings } from './settings';
 import { logger } from './log';
+import { replaceExecutable } from './replaceExe';
 
 const log = logger('tools');
 const TOOL_NAMES: ToolName[] = ['yt-dlp', 'ffmpeg', 'ffprobe', 'aria2c', 'whisper-cli', '7z'];
@@ -143,8 +144,10 @@ class ToolManager extends EventEmitter<{ changed: [ToolStatus[]] }> {
 
     const dest = path.join(updatedBinDir(), exe('yt-dlp'));
     const tmp = `${dest}.new`;
+    // A half-written file from an update that failed part way is no use to anyone.
+    fs.rmSync(tmp, { force: true });
     fs.writeFileSync(tmp, bytes, { mode: 0o755 });
-    fs.renameSync(tmp, dest);
+    replaceExecutable(tmp, dest);
     const status = await this.probe('yt-dlp');
     settings.update({ updates: { lastYtdlpCheck: Date.now() } });
     this.emit('changed', this.list());

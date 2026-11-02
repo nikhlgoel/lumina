@@ -392,6 +392,20 @@ surface, library, devices, player UI, IDE/sync, shell) were **not audited** — 
 | hosters-1 | `hosters.ts:255` | `sleep()` only listens for abort while sleeping; a cancel landing during `executeJavaScript`/click is missed | medium |
 | queue-13 (partly) | `queue.ts:270` | completion strips cookies but not captured `Authorization` headers; failed/cancelled jobs keep both | medium |
 
+### Closed on 2026-11-03 (see SESSION-LOG 53)
+
+| Id | Fixed how | Evidence |
+|---|---|---|
+| queue-1 | `Queue.start` re-checks that the job is still `queued` | `tests/queueSchedule.test.ts`; run without the fix, every job started twice |
+| queue-2 | an unwritable working folder fails that job instead of throwing out of `schedule()` | same test |
+| queue-24 | `core/jobDedupe.ts`, used by `Queue.add` (unfinished job, same link, folder, kind, playlist selection) | `tests/jobDedupe.test.ts`, `tests/queueSchedule.test.ts` |
+| hosters-3 | `PAGE_DRIVER` reads the response token a solved check fills in | `scripts/dl-lab/host-driver-check.cjs`: old driver 5/8, new 8/8 (hidden pages; no real site) |
+| E5 (extension half) | `core/challengeCookies.ts` + `extension/lib.js`: bot-check cookies are neither sent nor accepted | `tests/extensionLinks.test.ts`, `tests/bridgeBatch.test.ts`, e2e: the browser held the cookie and it did not leave |
+| (new, found today) | extension links to a file host were probed as files because they carried a request: `RequestInfo.fromLink` | `tests/extensionLinks.test.ts`, `tests/bridgeBatch.test.ts` |
+
+Still open from the table above, deliberately: **hosters-8 / E4** and **hosters-9 / E5 (aria2 half)**. Both are about carrying a passed check
+from one place to another, which AGENTS.md rule 1 forbids; changing it is the owner's decision.
+
 ### Raised by one finder pass, **not verified** — treat as leads
 
 **queue** — high: queue-2 exception in `start()` (work-dir `mkdir`) escapes `schedule()` and blocks the queue; queue-7 a failing sqlite write aborts `complete()`/`fail()`. medium: queue-3 stale `RunnerContext` callbacks hit the next run; queue-9 “Retrying in N min” has no timer after restart; queue-10 stale `outputPaths` let a failed retry look completed; queue-11 cancel/remove of paused/failed jobs leaves partials and cookie jar; queue-12 work-dir recomputed from live settings; queue-14 throttle drops the trailing update; queue-16 jobs can start before tools are probed; queue-17 Mark-of-the-Web skipped for torrents/ftp/unpacked files; queue-28 a corrupt `lumina.db` blocks startup. low: queue-18/19/20/21/25/26/27/29/30/31/32.

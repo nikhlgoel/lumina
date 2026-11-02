@@ -5,6 +5,84 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-03 (53) - Several links at once from the browser; Cloudflare cookies; audit items closed
+
+* **Asked for:** another pass for bugs before releasing again, and the extension reviewed: choosing several links on a page (a release's
+  parts) should offer to send them to Lumina, by a pop-up or right-click, bearing in mind the Cloudflare/Turnstile layer.
+* **Read first:** AGENTS.md rule 1 (no `cf_clearance` harvesting or replay, no automated solving; the person solves a check). It settled the
+  design: nothing here passes a cleared check on, and the driver only *notices* that the person solved one.
+* **Found by reading, all fixed:**
+  1. The extension sent every cookie for the page and links, `cf_clearance` included, and the bridge accepted them: harvesting, against rule 1.
+     `core/challengeCookies.ts` (+ `extension/lib.js`, a parity test) strips at both ends. Checked: the browser really held the cookie, it did not leave.
+  2. `inspect()` clicked a file host's page through only when **no request** came with the link (`!request`); everything from the extension
+     carries one, so extension links to hosts were probed as files. `RequestInfo.fromLink`, set by the bridge for link/page captures, and
+     `core/hosts.isLinkFromPage`.
+  3. `hosters-3`: a solved check stays visible, so `captcha` stayed true and the host's Download button was never pressed. `PAGE_DRIVER` now
+     reads the response token solving produces. Hidden-page check (`scripts/dl-lab/host-driver-check.cjs`): old driver 5/8, new 8/8.
+  4. `queue-24`: no de-duplication. `core/jobDedupe.ts`, used by `Queue.add`.
+  5. `queue-1`: `schedule()` re-entered from a runner that fails at once started the next jobs twice. `start()` re-checks the status. The
+     test (`tests/queueSchedule.test.ts`) was run without the fix first: every job started twice.
+  6. `queue-2`: an unwritable working folder threw out of `schedule()`. Now that job fails with a plain message.
+* **Built:** `extension/pagelinks.js` (one definition of "download link", shared by the menu, popup and prompt), `content.js` (the prompt),
+  a "Download links on this page" list in the popup, a "Send selected links" menu item, `/v1/capture-batch` in the bridge, `app:open-links`
+  into the Download view's existing batch plan. Extension 1.1.0 (the packaging script stamps the app's version).
+* **Verified:** `tests/bridgeBatch.test.ts` (the real `server.ts`, 7 tests), `tests/pagelinks.test.ts`, `tests/extensionLinks.test.ts`,
+  `tests/jobDedupe.test.ts`, `tests/queueSchedule.test.ts`; `tests/e2e/extension-links-e2e.mjs` (real headless Chrome, 17 checks incl. the
+  prompt appearing and being pressed, one batch of three, cookies, prompt off, popup list); `05e-batch-from-browser` (the batch plan in the real
+  renderer) and the popup photographed.
+* **Edge-case pass before 1.2.1 (asked for: "there are a lot of different edge cases ... check them all properly"):** each case run for real,
+  and these were wrong until run:
+  1. The prompt was **unstyled on a strict-CSP page** (inline `<style>` blocked) and **off-screen after Select All** on a long page (anchored
+     under the end of the selection). Now a constructable stylesheet and a fixed position clamped to the viewport.
+  2. Names after the `#` (`fuckingfast.co/AbC#Name.part1.rar`): `core/batch.fileNameFromUrl` read only the path, so such links were not
+     grouped, ordered or checked for missing parts, and `inspectHosted` titled them "download". Found by probing `planBatch` with the real link shape.
+  3. The bridge threw out of its read loop on an oversize body, which destroys the connection: the sender saw a dropped connection and the next
+     request stalled. Now it drains (up to 8 MB) and answers 413 "Request too large". Found by a test that hung after the oversize case.
+  4. `takeOverDownload` removes the job it was given on failure; with the new de-duplication that job could be someone else's, e.g. a paused
+     download. `queue.findActive` is asked first; a paused duplicate is handed back to the browser. Test run with the guard off: it failed.
+  5. The duplicate rule was too loose: it ignored engine, format and release id (one file converted two ways, or a part added to a new release,
+     would have been swallowed). All three are part of "the same" now.
+  6. Stall rule: a *drop* in the completed count no longer resets the clock (re-baseline only), so a count that drops and then really stops is
+     still caught on the original schedule.
+  7. The extension trims cookies to fit the bridge (`fitToBridge`; e2e: 152 cookies, 593 KB in, 289 bytes out, batch delivered).
+  Also run: an older Lumina without the batch route (the extension falls back to single links), Lumina not running (the prompt says so), a
+  highlight of links written as plain text, a highlight inside an iframe (right-click path), Select All on 600 links (capped at 500, 316 ms).
+  Cases that were my fixture's fault, not the product's: cookies shared by port between my fixture site and the stub bridge (headers over 16 KB),
+  a content-box measurement that ignored padding. Both corrected in the test.
+* **Not proven:** Firefox; any real file host's page (nothing here contacts one); a Turnstile that is really solved by a person on a real site
+  (the driver was checked against stand-ins that fill the same field); the extension on a page whose links are inside a closed shadow root or
+  built by script after the highlight. A visible-window run of `tests/e2e/extension-e2e.mjs` was **not** run (it opens a real Chrome window).
+* **Left alone on purpose:** `hosters-8`/`E4` (a fresh cookie jar per link, so each file may need its own check) and `hosters-9`/`E5`
+  (the checks Lumina's own pages pass are replayed to aria2). Sharing a cleared session between links would be replaying a clearance, which
+  rule 1 forbids; that is the owner's call, not mine.
+
+## 2026-11-02 (52) - Torrent speed climbs then falls off a cliff: the stall rule dropped a moving swarm
+
+* **Reported (screenshot):** a torrent showed "Reconnecting", speed climbing then collapsing, then 10-18 KB/s for a long time.
+* **Evidence (the real app log, not a guess):** `17:33:12` speed 756 KB/s; `17:33:21` "Download stalled; nudge {stalledForS: 61, peers 26,
+  seeds 3}"; `17:33:24` speed 0; `17:34:00` 44 KB/s; `17:34:44` 965 KB/s. `stalledForS: 61` puts the last "progress" at 17:32:20, the moment
+  the file selection was applied. Lumina's own governor log shows 304 and 756 KB/s inside that minute, so data was arriving while
+  `completedLength` was not beating its old high-water mark. The nudge is pause + resume, which drops every peer: that is the cliff.
+* **Tried and ruled out:** big pieces. A local torrent with 16 MiB pieces behind a 200 KB/s seeder: `completedLength` rose smoothly
+  (1.4 -> 36 MB in 200 s) and no stall fired. A selection change on that torrent did not make the count drop either. So the exact
+  reason the count stood still in the user's run is **not reproduced**.
+* **Fix (defect is real either way):** `core/engineWatch.stallStep` takes `flowing` (engine speed > 0) and stretches the ladder tenfold while
+  it is true (still catches data that arrives but never completes, e.g. every piece failing its check); any change in the count, up or down,
+  restarts the clock, so a drop is re-baselined instead of waited out. `aria2.ts` passes `flowing: speedBps > 0`. Three new tests (18 total).
+* **Checked live:** throttled swarm with the fix: 0 stalls in 100 s; seeder killed at 28 s: "Download stalled; nudge" at 61 s with 0 peers,
+  as before. `LUMINA_PROBE_WATCH_S=<s>` added to the select probe (watch without pausing; samples now carry `done` and `act`).
+* **Second pass for similar defects (asked for):** read the real log's warnings and the aria2 option lines. (1) My own upload governor was
+  reset to unlimited once a minute by `applySettings` (`dynamicOptions` writes 0 when no fixed limit): now `await governUpload()` straight
+  after; seen live, re-applied at 18:04:45 and 18:05:45. (2) `tools:update-ytdlp` failed with EPERM and left `yt-dlp.exe.new`: Windows cannot
+  overwrite a running exe but can rename it; new `main/replaceExe.ts` + `tests/replaceExe.test.ts` (3 tests, the main one against a really
+  running `ping.exe`). Seen in the log and not changed: `select-files "Cannot change option"` x4, all 27 Oct, none after the 1.2.0 fix;
+  "Sign in to confirm you're not a bot" (needs the user's YouTube sign-in under Settings > Accounts); RPC timeouts with the engine alive
+  up to 121 s (the open, unexplained item). A test mistake of mine: I ran a copy of `ffmpeg.exe` without its DLLs for the rename test, which
+  made Windows pop several "avformat-63.dll not found" dialogs on the user's screen; redone with `ping.exe`.
+* **Not proven:** that this alone gives the user steady speed on a leecher-heavy swarm (5 seeds, 67 peers): speed there also depends on how
+  willing peers are to send. Whether the 50 KB/s-and-up upload limit costs speed in such a swarm is still unmeasured; in the same log the
+  speed reached 3.8 MB/s with the limit at 390 KB/s, which shows it does not stop a fast ramp-up, not that it costs nothing.
+
 ## 2026-11-02 (51) - Torrent file choice forgotten on re-add; upload ran as fast as download
 
 * **Reported (with two screenshots) right after 1.2.0 went out:** a torrent whose optional files were unticked and Apply pressed halted for a

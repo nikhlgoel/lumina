@@ -8,6 +8,65 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
+## [1.2.1] — 2026-11-03
+
+A stability release: the downloader's torrent and queue handling, and the browser extension's new way of sending several links at once.
+The browser extension is updated too (it carries the app's version number); the TV app is unchanged (0.3.0).
+
+### Added
+- **Browser extension: send several links at once.** On a page with a release's download links, highlight them and a small button appears
+  beside the highlight ("Send 3 links to Lumina"); or right-click the highlight, or open the extension and tick the links it lists for the
+  page. They arrive in Lumina as one batch plan (archive parts together, optional extras unticked, checksums first, missing parts flagged)
+  and you confirm once, instead of up to 200 separate single links. The button can be switched off in the extension's popup. Checked in a
+  real (headless) Chrome with the real extension against a stand-in for Lumina, and the batch screen was photographed in the real app.
+  Not tried in Firefox, and not yet against a real file host's page.
+
+### Fixed
+- **Links that keep their file name after a `#` are understood.** Several file hosts write a link as `host/AbC123#Release.part01.rar`. Lumina
+  read only the path, so such links looked like unnamed files: a release's parts were not grouped, ordered or checked for a missing part, and
+  the download was titled "download". The name after the `#` is now used (a name in the path still wins). Checked: three such links in any
+  order become one set in order, and a missing part is flagged before anything is downloaded.
+- **The extension's prompt works on strict pages and on long ones.** On a page whose content-security-policy forbids inline styles the button
+  appeared with no styling; and Select All on a long page put it far below the visible screen. It now uses a stylesheet the page cannot
+  block and stays inside what is on screen. Both found by testing in a real browser.
+- **A big batch can no longer fail on a big cookie jar.** The extension trims cookies to fit the bridge's size limit (a site's own cookies
+  last, the links and the page never). The bridge itself now answers an oversized request with a plain "Request too large" instead of
+  dropping the connection, which could also stall the next request.
+- **A link already in Lumina no longer harms the download that is there.** The browser hand-off could, for a link you had paused and then
+  clicked again, remove that paused download and its partial file. It now leaves it alone and hands the file back to the browser. The
+  duplicate rule also tells apart another format, another engine and another release, so converting one file two ways, or adding a part to a
+  new release, is never swallowed.
+- **A file host's link sent from the browser is now opened as a download page.** It arrived with a browser request attached, and Lumina only
+  clicked through a host's page when no request came with it, so the link was probed as if it were the file (pasting the same link worked).
+- **Bot-check cookies no longer leave your browser.** The extension sent every cookie for a page, Cloudflare's clearance cookie included, and
+  Lumina accepted them (against the project's own rule that a check is solved by the person, in Lumina's browser). The extension no longer
+  sends them and Lumina drops them if an older extension does.
+- **After you solve a check, Lumina carries on.** A solved Turnstile, reCAPTCHA or hCaptcha stays on the page (a green tick), and Lumina
+  took that for "still waiting for you" and never pressed the host's own Download button. It now notices the response token that solving
+  produces. It still never solves anything itself: an unsolved check, and an image code, still wait for you. Checked in hidden pages: the old
+  code failed the three solved cases, the new code passes all eight.
+- **The same link no longer starts two downloads.** A double click on Send, or one link arriving from the browser and the clipboard, ran two
+  jobs writing the same file. A download that is already queued, running or paused with the same link, folder and kind is now just that one.
+- **A queue whose first job fails at once no longer starts the next ones twice.** The scheduler re-entered itself and started jobs it had
+  already started (two runners for one file). Shown failing before the fix and passing after.
+- **A full disk or unwritable working folder no longer stops the queue.** It used to throw out of the scheduler, so no job behind it started;
+  that job now fails with a plain message and the rest go on.
+- **A torrent that was downloading is no longer "reconnected" for no reason.** Lumina decided a torrent had stalled when its completed-byte
+  count had not grown for a minute, even while the engine reported hundreds of KB/s, and then paused and resumed it, which drops every peer.
+  The speed fell to zero and took minutes to climb back, and it could happen again and again ("Reconnecting", a climb, a cliff). In the log:
+  a stall declared at 61 s while the speed was 300 to 750 KB/s. Download speed now counts as activity (a download that receives data but
+  completes nothing is still caught, after ten times as long), and a drop in the completed count, as when the choice of files changes, starts
+  the count from the new figure. A download that really stops (the only seed gone) is still nudged after about a minute: checked by killing
+  the seed mid-download. The exact reason the count stood still in that log is not reproduced; a throttled local swarm with big pieces
+  did not do it.
+- **The automatic upload limit no longer lapses once a minute.** The settings re-apply that runs every minute wrote "no limit" over it, and
+  the limit only came back at the next look a few seconds later. It is now put back at once (seen in the log, 60 s apart).
+- **The yt-dlp update works while a download is using yt-dlp.** Windows refuses to overwrite a program that is running, so the update failed
+  (and left a 17 MB `yt-dlp.exe.new` behind). It now moves the running copy aside, puts the new one in, and removes the old copy on the next
+  update. Tested against a really running program.
+
+---
+
 ## [1.2.0] — 2026-11-02
 
 A release about big downloads and about not losing them. Most of it came from testing with very large files and from reading the log of a

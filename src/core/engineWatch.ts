@@ -64,6 +64,8 @@ export interface StallState {
 const LADDER_S = [60, 180, 420];
 /** After the ladder is used up, try the heaviest step again this often rather than sit idle for ever. */
 const REPEAT_S = 600;
+/** How much longer each step waits while the engine reports a download speed. */
+const FLOWING_STRETCH = 10;
 /** Two steps are never closer than this, so each gets time to work. */
 const COOLDOWN_S = 30;
 
@@ -78,15 +80,23 @@ export const initialStall = (now: number, bytes = 0): StallState => ({ bytes, pr
  * engine itself). `waitingForMetadata` and `finished` never count as stalls.
  */
 export function stallStep(
-  s: StallState, now: number, bytes: number, opts: { finished?: boolean; waitingForMetadata?: boolean } = {},
+  s: StallState, now: number, bytes: number, opts: { finished?: boolean; waitingForMetadata?: boolean; flowing?: boolean } = {},
 ): { state: StallState; action: StallAction } {
   if (bytes > s.bytes || opts.finished) return { state: { bytes, progressAt: now, steps: 0, actedAt: 0 }, action: 'none' };
+  // The count went *down* (a different set of files was chosen, the engine re-checked its data). That is not progress, but the lower figure
+  // is the new baseline: holding on to the old, higher one made a download at full speed look frozen until it caught up with it. The clock
+  // is left alone, so a download whose count dropped and then really stops is still caught on the original schedule.
+  if (bytes < s.bytes) s = { ...s, bytes };
   if (opts.waitingForMetadata) return { state: { ...s, progressAt: now }, action: 'none' };
 
+  // Data that is arriving is not a stall, and every step here (pause and resume, re-add, restart) drops all the peer connections, so
+  // starting one while the download is moving costs minutes of ramp-up for nothing. While the engine reports a speed, the ladder is
+  // stretched tenfold: it still catches a download that receives data but never completes a piece (every piece failing its check).
+  const stretch = opts.flowing ? FLOWING_STRETCH : 1;
   const stalledS = (now - s.progressAt) / 1000;
-  const due = s.steps < LADDER_S.length
+  const due = stretch * (s.steps < LADDER_S.length
     ? LADDER_S[s.steps]!
-    : LADDER_S[LADDER_S.length - 1]! + REPEAT_S * (s.steps - LADDER_S.length + 1);
+    : LADDER_S[LADDER_S.length - 1]! + REPEAT_S * (s.steps - LADDER_S.length + 1));
   if (stalledS < due || (s.actedAt && (now - s.actedAt) / 1000 < COOLDOWN_S)) return { state: s, action: 'none' };
 
   const action: StallAction = s.steps === 0 ? 'nudge' : s.steps === 1 ? 'readd' : 'restart';

@@ -77,6 +77,11 @@ export interface CapturedCookie {
 export interface RequestInfo {
   pageUrl?: string;
   pageTitle?: string;
+  /**
+   * The link is one the person picked on a web page (menu, popup or highlighted selection), not a file the browser had already started
+   * fetching. A file host's link then is a download page that Lumina has to click through, even though it arrives with a request attached.
+   */
+  fromLink?: boolean;
   headers: Record<string, string>;
   cookies: CapturedCookie[];
 }

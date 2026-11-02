@@ -202,12 +202,18 @@ export const selectProbe = (url: string, dir: string) => `(async () => {
     const j = (await inv('jobs:list')).find((x) => x.id === id);
     const d = await inv('torrent:detail', { id }).catch(() => null);
     const sel = d ? d.files.filter((f) => f.selected) : [];
-    samples.push({ t: Date.now() - t0, label, status: j && j.status, jobTotal: j && j.progress.totalBytes, pct: j ? +j.progress.percent.toFixed(1) : null,
+    samples.push({ t: Date.now() - t0, label, status: j && j.status, jobTotal: j && j.progress.totalBytes, done: j && j.progress.downloadedBytes, act: j && j.progress.activity, pct: j ? +j.progress.percent.toFixed(1) : null,
       files: d ? d.files.length : null, selected: d ? sel.length : null, selectedBytes: d ? sel.reduce((a, f) => a + f.sizeBytes, 0) : null,
       downKBs: d ? Math.round(d.downloadSpeed / 1024) : null, upKBs: d ? Math.round(d.uploadSpeed / 1024) : null });
   };
   await sleep(9000); await snap('before');
   await inv('torrent:select-files', { id, indices: [1, 2, 3, 4] }); events.push({ t: Date.now() - t0, m: 'selected files 1-4' });
+  // LUMINA_PROBE_WATCH_S: keep watching for that many seconds with no pause, to see what the stall watch does to a slow, steady download.
+  const watchS = ${Number(process.env.LUMINA_PROBE_WATCH_S) || 0};
+  if (watchS) {
+    for (let i = 0; i < Math.ceil(watchS / 2.5); i++) { await sleep(2500); await snap('watch'); }
+    return JSON.stringify({ events, samples });
+  }
   for (let i = 0; i < 6; i++) { await sleep(2000); await snap('after-select'); }
   await inv('jobs:pause', { id }); events.push({ t: Date.now() - t0, m: 'paused' }); await sleep(3000); await snap('paused');
   await inv('jobs:resume', { id }); events.push({ t: Date.now() - t0, m: 'resumed' });
@@ -254,7 +260,7 @@ const probeUrl = process.env.LUMINA_PROBE_URL ?? '';
 
 const probeRows = (process.env.LUMINA_PROBE_ROWS ?? '').split(',').filter(Boolean);
 
-const STEPS: { name: string; script: string; delay?: number }[] = [
+const STEPS: { name: string; script: string; delay?: number; before?: (win: BrowserWindow) => void }[] = [
   ...(probeDir && probeRows.length === 3 ? [{ name: 'probe-rows', script: rowsProbe(probeRows, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_MS) || 7000, Number(process.env.LUMINA_PROBE_SETTLE_MS) || 5000), delay: 300 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
@@ -272,6 +278,31 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '04-queue', script: goto('Queue') },
   { name: '05-library', script: goto('Library'), delay: 2500 },
   { name: '05a-library-tiles', script: `${goto('Library')}; setTimeout(() => document.querySelector('button[aria-label="Tiles"]')?.click(), 900)`, delay: 3000 },
+  // Links picked on a page in the browser and sent together: the batch plan the person sees, with the page they came from. Nothing is downloaded.
+  {
+    name: '05e-batch-from-browser', script: '0', delay: 3000,
+    before: (win: BrowserWindow) => win.webContents.send('app:open-links', {
+      urls: [
+        'https://datanodes.to/aaa111/Sample.Game.part1.rar', 'https://datanodes.to/aaa112/Sample.Game.part2.rar', 'https://datanodes.to/aaa113/Sample.Game.part3.rar',
+        'https://datanodes.to/aaa114/Sample.Game.part4.rar', 'https://datanodes.to/bbb201/Sample.Game.optional.Soundtrack.rar',
+        'https://datanodes.to/ccc301/Sample.Game.md5',
+      ],
+      request: { pageUrl: 'https://example.org/sample-release', pageTitle: 'Sample release', headers: {}, cookies: [], fromLink: true },
+      source: 'extension',
+    }),
+  },
+  // The same, with part 3 left out of the pick: the plan must say so before anything is downloaded.
+  {
+    name: '05f-batch-missing-part', script: '0', delay: 3000,
+    before: (win: BrowserWindow) => win.webContents.send('app:open-links', {
+      urls: [
+        'https://fuckingfast.co/a1#Sample.Game.part01.rar', 'https://fuckingfast.co/a2#Sample.Game.part02.rar', 'https://fuckingfast.co/a4#Sample.Game.part04.rar',
+        'https://fuckingfast.co/a5#Sample.Game.part05.rar',
+      ],
+      request: { pageUrl: 'https://example.org/sample-release', pageTitle: 'Sample release', headers: {}, cookies: [], fromLink: true },
+      source: 'extension',
+    }),
+  },
   { name: '05b-library-videos', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 900)`, delay: 12000 },
   { name: '05c-library-playlists', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Playlists')?.click(), 900)`, delay: 3000 },
   { name: '05d-library-files', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Files')?.click(), 900)`, delay: 3000 },
@@ -440,7 +471,7 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '23-app-after-splash', script: "document.documentElement.dataset.theme='dark'", delay: 2500 },
 ];
 
-export async function runCapture(win: BrowserWindow, dir: string, extra: { name: string; script: string; delay?: number }[] = []) {
+export async function runCapture(win: BrowserWindow, dir: string, extra: { name: string; script: string; delay?: number; before?: (win: BrowserWindow) => void }[] = []) {
   fs.mkdirSync(dir, { recursive: true });
   // A sleep cannot be done to a test machine, but the app's listener sits on powerMonitor's `resume`
   // event, so emitting that event runs the same code path a real wake would.
@@ -456,6 +487,8 @@ export async function runCapture(win: BrowserWindow, dir: string, extra: { name:
   const only = process.env.LUMINA_CAPTURE_ONLY ? new RegExp(process.env.LUMINA_CAPTURE_ONLY) : null;
   for (const step of [...STEPS, ...extra].filter((s) => !only || only.test(s.name))) {
     try {
+      // A step may first send an event from the main process, the way the real app does (links arriving from the browser extension).
+      step.before?.(win);
       const result = await win.webContents.executeJavaScript(step.script, true);
       // A `probe-` step measures rather than photographs: whatever string it returns is kept, because
       // the main process's console.log never reaches the shell on Windows.

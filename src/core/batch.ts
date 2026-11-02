@@ -33,13 +33,26 @@ export interface BatchPlan {
 export const CHECKSUM_FILE = /\.(md5|sfv|sha1|sha256|sha512)$|^(md5|sha1|sha256|sha512)sums(\.txt)?$/i;
 const OPTIONAL = /^(fg-)?(optional|selective)[-_]|[-_.](optional|selective)[-_.]/i;
 
-/** File name as the link shows it: magnet dn=, otherwise the last URL path segment. */
+const LOOKS_LIKE_FILE = /\.[a-z0-9]{1,5}$/i;
+const decoded = (s: string): string => {
+  try { return decodeURIComponent(s); } catch { return s; }
+};
+
+/**
+ * File name as the link shows it: magnet dn=, otherwise the last URL path segment, otherwise the #fragment.
+ *
+ * Several file hosts give a link as `host/AbC123#Release.part01.rar`: the path is an opaque id and the name rides after the `#`. Reading only
+ * the path made every such link look like an unnamed file, so a release's parts were not grouped, ordered or checked for a missing part, and
+ * the job was titled "download". A name in the path wins when it has one.
+ */
 export function fileNameFromUrl(url: string): string {
   try {
     if (/^magnet:/i.test(url)) return new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('dn') ?? '';
-    const last = new URL(url).pathname.split('/').filter(Boolean).pop() ?? '';
-    const name = decodeURIComponent(last);
-    return /\.[a-z0-9]{1,5}$/i.test(name) ? name : '';
+    const u = new URL(url);
+    const last = decoded(u.pathname.split('/').filter(Boolean).pop() ?? '');
+    if (LOOKS_LIKE_FILE.test(last)) return last;
+    const fragment = decoded(u.hash.replace(/^#/, '')).trim();
+    return LOOKS_LIKE_FILE.test(fragment) ? fragment : '';
   } catch {
     return '';
   }

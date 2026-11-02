@@ -21,6 +21,12 @@ export interface PendingLink {
   source?: 'extension' | 'clipboard' | 'system';
 }
 
+/** Several links picked on a page and sent together from the browser extension. */
+export interface PendingBatch {
+  urls: string[];
+  request?: RequestInfo;
+}
+
 interface AppState {
   ready: boolean;
   info: AppInfo | null;
@@ -32,6 +38,7 @@ interface AppState {
   settingsSection: string | null;
   toasts: Toast[];
   pending: PendingLink | null;
+  pendingBatch: PendingBatch | null;
   clipboardLink: string | null;
   pasteRequest: number;
   /** Version already announced by a toast, so a re-check doesn't nag twice. */
@@ -43,6 +50,7 @@ interface AppState {
   toast: (message: string, tone?: Toast['tone'], action?: Toast['action']) => void;
   dismissToast: (id: number) => void;
   consumePending: () => PendingLink | null;
+  consumePendingBatch: () => PendingBatch | null;
   dismissClipboardLink: () => void;
 }
 
@@ -59,6 +67,7 @@ export const useApp = create<AppState>((set, get) => ({
   settingsSection: null,
   toasts: [],
   pending: null,
+  pendingBatch: null,
   clipboardLink: null,
   pasteRequest: 0,
   announcedUpdate: null,
@@ -79,6 +88,11 @@ export const useApp = create<AppState>((set, get) => ({
     on('app:mode', ({ mode }) => set({ mode }));
     on('app:open-url', (link) => {
       set({ pending: link, clipboardLink: null });
+      get().setMode('downloader');
+      get().setView('download');
+    });
+    on('app:open-links', ({ urls, request }) => {
+      set({ pendingBatch: { urls, request }, clipboardLink: null });
       get().setMode('downloader');
       get().setView('download');
     });
@@ -137,6 +151,12 @@ export const useApp = create<AppState>((set, get) => ({
     const link = get().pending;
     if (link) set({ pending: null });
     return link;
+  },
+
+  consumePendingBatch: () => {
+    const batch = get().pendingBatch;
+    if (batch) set({ pendingBatch: null });
+    return batch;
   },
 
   dismissClipboardLink: () => set({ clipboardLink: null }),

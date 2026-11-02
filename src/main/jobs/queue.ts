@@ -10,6 +10,7 @@ import { logger } from '../log';
 import { classifyFailure, nextProbeDelayMs, retryLabel, waitedTooLong } from '../../core/networkRetry';
 import { plainFailure } from '../../core/progress';
 import { finishedSummary } from '../../core/jobDisplay';
+import { findActiveDuplicate } from '../../core/jobDedupe';
 import { fetchValidators } from '../resumeProbe';
 import { moveTorrentEntries } from './moveTorrent';
 
@@ -101,10 +102,18 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     return this.jobs.get(id);
   }
 
+  /** The unfinished job that is already this download, if any (see core/jobDedupe). */
+  findActive(url: string, outputDir: string | null, engine: Job['engine'], options: DownloadOptions): Job | null {
+    return findActiveDuplicate(this.jobs.values(), { url, outputDir, engine, options });
+  }
+
   add(
     input: { url: string; title: string; thumbnail: string | null; uploader: string; engine: Job['engine']; options: DownloadOptions; source: Job['source']; outputDir: string | null },
     opts: { startNow?: boolean; origin?: Job['origin'] } = {},
   ): Job {
+    // The same link sent twice (a double click, the browser and the clipboard both offering it) is one download, not two writing the same file.
+    const already = this.findActive(input.url, input.outputDir, input.engine, input.options);
+    if (already) return already;
     const now = Date.now();
     const job: Job = {
       id: randomUUID(), createdAt: now, updatedAt: now, engine: input.engine, url: input.url, title: input.title,
@@ -392,13 +401,31 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   }
 
   private start(job: Job) {
+    // `schedule()` walks a list of jobs taken a moment ago. A runner that fails at once calls `schedule()` again from inside it, which starts
+    // the jobs behind it; when control returns, the outer loop still holds those jobs as "queued" and would start each one a second time
+    // (two runners writing one file). Only a job that is queued *now* is started.
+    const now = this.jobs.get(job.id);
+    if (!now || now.status !== 'queued') return;
+    job = now;
     const runner = this.runners.get(job.engine);
     if (!runner) {
       this.set(job, { status: 'failed', error: { message: `No runner for ${job.engine} jobs.` } });
       return;
     }
     const workDir = this.workDirFor(job.id);
-    fs.mkdirSync(workDir, { recursive: true });
+    try {
+      fs.mkdirSync(workDir, { recursive: true });
+    } catch (err) {
+      // A full disk or a folder that cannot be written to used to throw out of `schedule()`, so no job behind this one ever started.
+      const reason = err instanceof Error ? err.message : String(err);
+      log.warn(`Could not create the working folder for ${job.title}`, err);
+      this.set(job, {
+        status: 'failed', error: { message: 'Lumina can’t write to its working folder. Check that the disk has room, then press Retry.', detail: reason },
+        progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Failed' },
+      });
+      this.emit('failed', this.jobs.get(job.id)!);
+      return;
+    }
     this.set(job, { status: 'running', error: null, progress: { ...job.progress, stage: 'Starting' } });
 
     // A job being cancelled still has its old status for a moment; nothing the old run says may count.

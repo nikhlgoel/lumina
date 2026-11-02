@@ -192,7 +192,10 @@ class Aria2Daemon {
   async applySettings() {
     if (!this.running()) return;
     await this.call('aria2.changeGlobalOption', dynamicOptions(settings.get())).catch((err) => log.debug('changeGlobalOption failed', err));
-    this.lastUploadCap = -1; // the line above resets the upload limit; let the governor set its own again at its next look
+    // The line above writes the upload limit too, and "no fixed limit" is written as 0 (unlimited): once a minute, this would have let a
+    // torrent upload at full speed until the governor's next look. Put the automatic limit straight back.
+    this.lastUploadCap = -1;
+    await this.governUpload();
   }
 
   private uploadTimer: NodeJS.Timeout | null = null;
@@ -641,7 +644,8 @@ export const aria2Runner: Runner = (ctx) => {
       }
       // While a magnet link's metadata is fetched aria2 reports that tiny download as 100% (core/progress).
       const metadata = isTorrent && (!p.totalBytes || isMetadataPhase(status));
-      const step = stallStep(stall, Date.now(), p.downloadedBytes, { waitingForMetadata: metadata });
+      // A download that reports a speed is receiving data even when the completed count has not moved (see core/engineWatch).
+      const step = stallStep(stall, Date.now(), p.downloadedBytes, { waitingForMetadata: metadata, flowing: (p.speedBps ?? 0) > 0 });
       stall = step.state;
       if (step.action !== 'none') {
         log.warn(`Download stalled; ${step.action}`, { job: job.title, stalledForS: Math.round((Date.now() - stall.progressAt) / 1000), peers: status.connections, seeds: status.numSeeders });

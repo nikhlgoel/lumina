@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { MediaInfo, PlaylistEntry, RequestInfo } from '../shared/types';
 import { classifyUrl, cleanUrl, isMusicSite, siteName } from '../core/url';
-import { directApiUrl, isPageHost } from '../core/hosts';
+import { directApiUrl, isLinkFromPage, isPageHost } from '../core/hosts';
 import { fileNameFromUrl } from '../core/batch';
 import { parseStreams, parseSubtitles, type RawFormat } from '../core/streams';
 import { friendlyYtdlpError, httpStatusMessage, isCookieReadError, plainFailure } from '../core/progress';
@@ -48,7 +48,7 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
     if (direct) return { ...direct, url: api };
   }
   // File hosts: the link is a download page; the real file is fetched when the download starts.
-  if (isPageHost(url) && !request) return inspectHosted(url);
+  if (isPageHost(url) && isLinkFromPage(request)) return inspectHosted(url);
   if (kind === 'direct') {
     let unreachable: LinkUnreachable | null = null;
     const direct = await inspectDirect(url, request).catch((err) => {
@@ -63,7 +63,7 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
     // Named like a file but answered with a web page. It may be a page of a site yt-dlp knows (a Wikimedia Commons file page ends in
     // ".webm" and is a web page), so ask yt-dlp's site-specific extractors first; the generic one is left out, because it would
     // happily read an unknown file host's download page as media. Only if no extractor claims it is it a file host's download page.
-    if (fileNameFromUrl(url) && !request) {
+    if (fileNameFromUrl(url) && isLinkFromPage(request)) {
       const known = await inspectWithYtdlp(url, request, !browserCookiesUnreadable(), true).catch(() => null);
       return known ?? inspectHosted(url);
     }

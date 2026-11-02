@@ -58,6 +58,7 @@ const cookieSchema = z.object({
 export const requestInfoSchema = z.object({
   pageUrl: z.string().max(8192).optional(),
   pageTitle: z.string().max(512).optional(),
+  fromLink: z.boolean().optional(),
   headers: z.record(z.string().max(64), z.string().max(4096)).catch({}),
   cookies: z.array(cookieSchema).max(400).catch([]),
 });
@@ -507,6 +508,8 @@ export interface EventPayloads {
   'tools:changed': ToolStatus[];
   'app:mode': { mode: 'downloader' | 'player' };
   'app:open-url': { url: string; request?: RequestInfo; source?: 'extension' | 'clipboard' | 'system' };
+  /** Several links the person picked on a page, to be planned together (archive parts, optional extras, checksums). */
+  'app:open-links': { urls: string[]; request?: RequestInfo; source?: 'extension' };
   'app:clipboard-link': { url: string };
   'app:navigate': { view: 'download' | 'queue' | 'library' | 'settings'; section?: string };
   'player:command': PlayerCommand;

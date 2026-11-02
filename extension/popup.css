@@ -40,6 +40,12 @@ li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items
 .send:hover { background: var(--accent); color: var(--accent-ink); }
 .send[data-done] { background: transparent; color: var(--ok); }
 .empty { color: var(--ink-3); padding: 8px 2px; }
+.links-tools { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.links-tools .check { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.links-tools input[type="search"] { flex: 1; min-width: 0; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0 8px; }
+li.link-row { grid-template-columns: auto 1fr; cursor: pointer; padding: 6px 10px; }
+li.link-row[hidden] { display: none; }
+#send-links { margin-top: 8px; }
 footer { padding: 10px 14px 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle input { position: absolute; opacity: 0; }

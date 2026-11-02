@@ -2,7 +2,7 @@
 // Lumina opens those pages in a hidden browser, clicks through, and catches the real download.
 
 /** Hosts known to put a download page in front of every file (XFileSharing-style and similar). */
-const PAGE_HOSTS = [
+export const PAGE_HOSTS = [
   'datanodes.to', 'ddownload.com', 'ddl.to', 'rapidgator.net', 'rg.to', 'nitroflare.com', 'katfile.com', 'uploadrar.com',
   'mega4upload.net', 'hexload.com', 'usersdrive.com', 'dropapk.to', 'drop.download', 'filespayouts.com', 'clicknupload.click',
   'clicknupload.org', 'clickndownload.org', 'userupload.net', 'uptobox.com', 'send.cm', 'krakenfiles.com', 'mediafire.com',
@@ -24,6 +24,14 @@ export function isPageHost(url: string): boolean {
   const host = hostOf(url);
   return Boolean(host && PAGE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`)));
 }
+
+/**
+ * Was this link typed, pasted or picked on a page, as opposed to being the address of a file the browser was already fetching?
+ *
+ * A request is attached to anything the extension sends, so "has a request" cannot tell the two apart: a file host's page link picked in
+ * the browser arrived with one, skipped the click-through, and was probed as if it were the file (pasting the same link worked).
+ */
+export const isLinkFromPage = (request?: { fromLink?: boolean } | null): boolean => !request || request.fromLink === true;
 
 /** Hosts with a public direct-file API: rewrite the share link to the file itself, no page needed. */
 export function directApiUrl(url: string): string | null {
@@ -78,7 +86,11 @@ export const PAGE_DRIVER = String.raw`(() => {
   const body = (document.body && document.body.innerText || '').slice(0, 20000);
 
   const captchaEl = [...document.querySelectorAll('.g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/api2/bframe"], iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"], img[src*="captcha" i]')].find(visible);
-  const captcha = Boolean(captchaEl) || /verify you are human|checking (?:if the site connection is secure|your browser)|i'm not a robot/i.test(body);
+  // A solved check stays on the page (a green tick where the box was); what changes is that the widget fills in a response token. That token
+  // is what the person's solving produces, so seeing it means the check has been passed by them and the page can carry on. Without this a
+  // solved check was read as still waiting for a person, and the host's own Download button was never pressed.
+  const solved = [...document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"], input[name="h-captcha-response"]')].some((e) => (e.value || '').length > 20);
+  const captcha = !solved && (Boolean(captchaEl) || /verify you are human|checking (?:if the site connection is secure|your browser)|i'm not a robot/i.test(body));
   let captchaKind = null;
   if (captcha) {
     const html = document.documentElement.innerHTML;

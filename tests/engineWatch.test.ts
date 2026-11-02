@@ -50,7 +50,7 @@ describe('an engine that stops answering', () => {
 });
 
 describe('a download that stops moving', () => {
-  const run = (samples: Array<[number, number]>, opts?: { waitingForMetadata?: boolean }) => {
+  const run = (samples: Array<[number, number]>, opts?: { waitingForMetadata?: boolean; flowing?: boolean }) => {
     let s: StallState = initialStall(0, 0);
     const actions: string[] = [];
     for (const [t, bytes] of samples) {
@@ -84,6 +84,25 @@ describe('a download that stops moving', () => {
   it('starts the ladder over as soon as one byte arrives', () => {
     const actions = run([[0, 500], ...every(5, 100, 500), [105, 501], ...every(110, 160, 501)]);
     expect(actions).toEqual(['60s:nudge']);
+  });
+
+  it('does not drop the swarm of a download that is receiving data, even if the completed count is stuck', () => {
+    // The owner's log: 61 s "stalled" while the engine reported 300 to 750 KB/s, then a pause and resume threw every peer away.
+    expect(run([[0, 500], ...every(5, 300, 500)], { flowing: true })).toEqual([]);
+  });
+
+  it('still catches data that arrives but never completes, just much later', () => {
+    expect(run([[0, 500], ...every(5, 5000, 500, 5)], { flowing: true }).slice(0, 2)).toEqual(['600s:nudge', '1800s:readd']);
+  });
+
+  it('counts growth from the new figure when the completed count drops (a different file choice), instead of waiting to catch up', () => {
+    // 5 MB done, then the choice changes and the engine reports 1 MB. Growth from 1 MB is progress, though it is still below the old 5 MB.
+    const growing: Array<[number, number]> = Array.from({ length: 30 }, (_, i) => [30 + i * 5, 1_000_000 + (i + 1) * 100_000]);
+    expect(run([[0, 5_000_000], ...every(5, 20, 5_000_000), [25, 1_000_000], ...growing])).toEqual([]);
+  });
+
+  it('still catches a download whose count dropped and then really stopped, on the original schedule', () => {
+    expect(run([[0, 5_000_000], [25, 1_000_000], ...every(30, 100, 1_000_000)])).toEqual(['60s:nudge']);
   });
 
   it('never calls the wait for a magnet link’s metadata a stall', () => {

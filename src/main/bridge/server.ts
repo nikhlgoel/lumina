@@ -4,6 +4,7 @@ import http from 'node:http';
 import { z } from 'zod';
 import type { RequestInfo } from '../../shared/types';
 import { requestInfoSchema } from '../../shared/ipc';
+import { withoutChallengeCookies } from '../../core/challengeCookies';
 import { settings } from '../settings';
 import { loadSecret, saveSecret } from '../secrets';
 import { logger } from '../log';
@@ -45,7 +46,23 @@ const captureSchema = z.object({
   mime: z.string().max(200).optional(),
   request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
 });
+const linkText = z.string().min(1).max(16_384).refine((u) => /^(https?:\/\/|magnet:\?)/i.test(u), 'Only http(s) and magnet links');
+/** Links picked together on one page (a repack's parts, say): one request, so Lumina can plan them as a set. */
+const MAX_BATCH = 500;
+const batchSchema = z.object({
+  urls: z.array(linkText).min(1).max(MAX_BATCH),
+  request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
+});
 const pairSchema = z.object({ browser: z.string().min(1).max(60) });
+
+/**
+ * What leaves the bridge for the rest of the app. Cookies that prove a bot check was passed are dropped here whatever the extension sent
+ * (AGENTS.md rule 1: the person solves a check themselves, in Lumina's browser), and a link picked on a page is marked as one, so a file
+ * host's download page is clicked through instead of probed as a file.
+ */
+function sanitizeRequest(request: RequestInfo, pickedOnPage: boolean): RequestInfo {
+  return { ...request, cookies: withoutChallengeCookies(request.cookies), ...(pickedOnPage ? { fromLink: true } : {}) };
+}
 
 const sha = (s: string) => createHash('sha256').update(s).digest();
 
@@ -83,14 +100,20 @@ function authenticate(req: http.IncomingMessage): PairedBrowser | null {
   return match ?? null;
 }
 
+/** Past this much, stop reading and let the connection go: nothing legitimate is this big. */
+const MAX_DRAIN = 8 * 1024 * 1024;
+
 async function readJson(req: http.IncomingMessage): Promise<unknown> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw Object.assign(new Error('Request too large'), { status: 413 });
-    chunks.push(chunk as Buffer);
+    // Leaving this loop early destroys the connection, so the sender never sees the refusal, only a dropped connection (and the next
+    // request on it can stall). A body that is merely too big is read and thrown away, then refused properly below.
+    if (size > MAX_DRAIN) throw Object.assign(new Error('Request too large'), { status: 413 });
+    if (size <= MAX_BODY) chunks.push(chunk as Buffer);
   }
+  if (size > MAX_BODY) throw Object.assign(new Error('Request too large'), { status: 413 });
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
   } catch {
@@ -102,6 +125,8 @@ export interface BridgeHandlers {
   window: () => BrowserWindow | null;
   /** Resolve once Lumina has really taken over (or refused). The signal aborts if the extension gives up waiting. */
   onCapture: (capture: CaptureRequest, signal: AbortSignal) => Promise<CaptureResult>;
+  /** Several links picked together on a page. Resolves once Lumina has them in front of the person. */
+  onCaptureBatch: (urls: string[], request: RequestInfo, signal: AbortSignal) => Promise<CaptureResult & { count: number }>;
   onPaired: () => void;
 }
 
@@ -204,7 +229,7 @@ class BridgeServer {
     if (req.method === 'GET' && url.pathname === '/v1/hello') {
       const s = settings.get().extension;
       return this.json(res, 200, {
-        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired),
+        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired), batch: true,
         captureDownloads: s.captureDownloads, minCaptureSizeMb: s.minCaptureSizeMb,
         skipExtensions: s.skipExtensions, skipSites: s.skipSites,
       }, origin);
@@ -252,7 +277,22 @@ class BridgeServer {
       res.on('close', () => {
         if (!res.writableFinished) abort.abort();
       });
-      const result = await h.onCapture(body.data as CaptureRequest, abort.signal);
+      const capture = body.data as CaptureRequest;
+      capture.request = sanitizeRequest(capture.request, capture.kind === 'link' || capture.kind === 'page');
+      const result = await h.onCapture(capture, abort.signal);
+      if (abort.signal.aborted) return;
+      return this.json(res, result.accepted ? 202 : 200, result, origin);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/capture-batch') {
+      const body = batchSchema.safeParse(await readJson(req));
+      if (!body.success) return this.json(res, 400, { error: body.error.issues[0]?.message ?? 'Invalid request' }, origin);
+      const abort = new AbortController();
+      res.on('close', () => {
+        if (!res.writableFinished) abort.abort();
+      });
+      const urls = [...new Set(body.data.urls.map((u) => u.trim()))];
+      const result = await h.onCaptureBatch(urls, sanitizeRequest(body.data.request as RequestInfo, true), abort.signal);
       if (abort.signal.aborted) return;
       return this.json(res, result.accepted ? 202 : 200, result, origin);
     }

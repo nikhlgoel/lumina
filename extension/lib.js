@@ -4,7 +4,7 @@ export const DEFAULT_PORT = 17865;
 const isFirefox = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
 
 export async function getConfig() {
-  const cfg = await chrome.storage.local.get({ port: DEFAULT_PORT, token: null, captureDownloads: true });
+  const cfg = await chrome.storage.local.get({ port: DEFAULT_PORT, token: null, captureDownloads: true, selectionPrompt: true });
   return cfg;
 }
 
@@ -20,6 +20,24 @@ export function browserName() {
   if (brands.some((b) => /Opera/i.test(b))) return 'Opera';
   if (brands.some((b) => /Vivaldi/i.test(b))) return 'Vivaldi';
   return 'Chrome';
+}
+
+/** Lumina's bridge refuses a body over 512 KB; stay well under it. */
+export const MAX_BODY_BYTES = 400_000;
+
+/**
+ * Make a capture body fit the bridge. A site with large cookies could make a perfectly good batch fail with "Request too large", and the
+ * cookies matter least (a file host's page is opened in Lumina's own browser with a fresh jar). So cookies go first: those of other sites,
+ * then all of them. The links themselves are never cut.
+ */
+export function fitToBridge(body, max = MAX_BODY_BYTES) {
+  const size = (b) => new TextEncoder().encode(JSON.stringify(b)).length;
+  if (size(body) <= max) return body;
+  const host = (() => { try { return new URL(body.request.pageUrl).hostname; } catch { return ''; } })();
+  const ofPage = (c) => { const d = String(c.domain ?? '').replace(/^\./, ''); return Boolean(host) && Boolean(d) && (host === d || host.endsWith(`.${d}`)); };
+  const pageOnly = { ...body, request: { ...body.request, cookies: body.request.cookies.filter(ofPage) } };
+  if (size(pageOnly) <= max) return pageOnly;
+  return { ...body, request: { ...body.request, cookies: [] } };
 }
 
 async function request(path, { method = 'GET', body, timeoutMs = 4000 } = {}) {
@@ -51,12 +69,17 @@ export async function pair() {
   await setConfig({ token: r.data.token });
 }
 
+// Cookies that prove a bot check was passed (Cloudflare clearance, DataDome). They stay in the browser: when a site puts up a check, the
+// person solves it themselves, in Lumina's own browser. Same list as src/core/challengeCookies.ts; a test keeps the two together.
+export const CHALLENGE_COOKIE = /^(?:cf_clearance|__cf_bm|__cf_chl_[\w-]*|cf_chl_[\w-]*|datadome)$/i;
+
 export async function cookiesFor(...urls) {
   const seen = new Map();
   for (const url of urls) {
     if (!url || !/^https?:/.test(url)) continue;
     try {
       for (const c of await chrome.cookies.getAll({ url })) {
+        if (CHALLENGE_COOKIE.test(c.name)) continue;
         seen.set(`${c.domain}|${c.path}|${c.name}`, {
           name: c.name, value: c.value, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly,
           ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
@@ -84,10 +107,29 @@ export async function capture({ url, kind, pageUrl, pageTitle, headers = {}, fil
     const r = await request('/v1/capture', {
       method: 'POST',
       timeoutMs,
-      body: { url, kind, filename, sizeBytes, mime, request: { pageUrl, pageTitle, headers: cleanHeaders, cookies } },
+      body: fitToBridge({ url, kind, filename, sizeBytes, mime, request: { pageUrl, pageTitle, headers: cleanHeaders, cookies } }),
     });
     if (r.status === 401) await setConfig({ token: null });
     return { accepted: Boolean(r.ok && r.data?.accepted !== false), reason: r.data?.reason ?? r.data?.error };
+  } catch (err) {
+    return { accepted: false, reason: err?.name === 'TimeoutError' ? 'Lumina took too long to answer' : 'Lumina isn’t reachable' };
+  }
+}
+
+/**
+ * Send several links picked on one page as one request, so Lumina can plan them together (archive parts in order, optional extras and
+ * checksums separated) and the person confirms once. Resolves { accepted, count, reason, unsupported }; `unsupported` means this Lumina is
+ * older than the batch request, and the caller should send the links one at a time instead.
+ */
+export async function captureBatch({ urls, pageUrl, pageTitle }, timeoutMs = 15_000) {
+  const origins = [...new Set(urls.map((u) => { try { return new URL(u).origin; } catch { return ''; } }).filter(Boolean))].slice(0, 6);
+  const cookies = await cookiesFor(pageUrl, ...origins);
+  const headers = pageUrl && /^https?:/.test(pageUrl) ? { Referer: pageUrl } : {};
+  try {
+    const r = await request('/v1/capture-batch', { method: 'POST', timeoutMs, body: fitToBridge({ urls, request: { pageUrl, pageTitle, headers, cookies } }) });
+    if (r.status === 401) await setConfig({ token: null });
+    if (r.status === 404) return { accepted: false, unsupported: true };
+    return { accepted: Boolean(r.ok && r.data?.accepted !== false), count: r.data?.count ?? urls.length, reason: r.data?.reason ?? r.data?.error };
   } catch (err) {
     return { accepted: false, reason: err?.name === 'TimeoutError' ? 'Lumina took too long to answer' : 'Lumina isn’t reachable' };
   }

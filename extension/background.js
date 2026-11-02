@@ -1,4 +1,4 @@
-import { capture, cookiesFor, getConfig, hello, pair, setConfig } from './lib.js';
+import { capture, captureBatch, cookiesFor, fitToBridge, getConfig, hello, pair, setConfig } from './lib.js';
 
 // Recent hand-off decisions, for troubleshooting in the extension's DevTools and for automated tests.
 const events = [];
@@ -8,7 +8,7 @@ function trace(id, url, step, detail = '') {
 }
 
 // Handles for automated tests (reachable only from the extension's own DevTools context).
-globalThis.lumina = { hello, pair, getConfig, setConfig, cookiesFor, events };
+globalThis.lumina = { hello, pair, getConfig, setConfig, cookiesFor, events, linksIn, sendLinks, fitToBridge };
 
 const isFirefox = /firefox/i.test(navigator.userAgent);
 const MIN_MEDIA_BYTES = 512 * 1024;
@@ -115,49 +115,71 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: 'lumina-media', title: 'Download with Lumina', contexts: ['video', 'audio', 'image'] });
     chrome.contextMenus.create({ id: 'lumina-page', title: 'Send page to Lumina', contexts: ['page'] });
     chrome.contextMenus.create({ id: 'lumina-all-links', title: 'Send all download links on this page to Lumina', contexts: ['page'] });
+    chrome.contextMenus.create({ id: 'lumina-selection', title: SELECTION_TITLE, contexts: ['selection'] });
   });
 });
 
-// Runs in the page: collect the download-worthy links (file hosts, direct files, magnets), deduped.
-// Self-contained — chrome.scripting serialises this function, so it can't reference anything outside it.
-function collectDownloadLinks() {
-  const HOSTS = /(?:datanodes|ddownload|rapidgator|nitroflare|katfile|uploadrar|mega4upload|hexload|usersdrive|drop\.download|clicknupload|userupload|uptobox|send\.cm|krakenfiles|mediafire|1fichier|turbobit|hitfile|buzzheavier|qiwi\.gg|fuckingfast|pixeldrain|gofile|1drv|dropbox)\./i;
-  const EXT = /\.(rar|zip|7z|iso|bin|exe|apk|dmg|mkv|mp4|avi|mov|mp3|flac|wav|pdf|epub|part\d+\.rar|\d{3})(?:\?|#|$)/i;
-  const out = [];
+const SELECTION_TITLE = 'Send selected links to Lumina';
+
+/**
+ * The download links on a tab, or only those in what the person has highlighted. The rules live in pagelinks.js, the same file the page
+ * prompt uses; it is injected here (it does nothing if already there) and then asked.
+ */
+async function linksIn(tabId, selectionOnly) {
+  const target = { tabId, allFrames: selectionOnly }; // a highlight can be inside a frame
+  await chrome.scripting.executeScript({ target, files: ['pagelinks.js'] });
+  const results = await chrome.scripting.executeScript({ target, func: (o) => globalThis.__luminaLinks?.read(o) ?? [], args: [{ selectionOnly }] });
   const seen = new Set();
-  for (const a of document.querySelectorAll('a[href]')) {
-    const href = a.href;
-    if (!href || seen.has(href)) continue;
-    const ok = /^magnet:/i.test(href) || (/^https?:/i.test(href) && (HOSTS.test(href) || EXT.test(href)));
-    if (ok) {
-      seen.add(href);
-      out.push(href);
+  const out = [];
+  for (const r of results) {
+    for (const l of r.result ?? []) {
+      if (seen.has(l.url)) continue;
+      seen.add(l.url);
+      out.push(l);
     }
   }
-  return out.slice(0, 200);
+  return out.slice(0, 500);
+}
+
+/**
+ * Send links the person picked. One goes through the ordinary path; several go as one batch so Lumina plans them together and the person
+ * confirms once. A Lumina older than the batch request gets them one at a time, as before.
+ * Resolves { accepted, count, reason }.
+ */
+async function sendLinks(urls, tab) {
+  const pageUrl = tab?.url;
+  const pageTitle = tab?.title;
+  if (urls.length === 1) {
+    const r = await capture({ url: urls[0], kind: 'link', pageUrl, pageTitle, headers: recent.get(urls[0])?.headers });
+    return { accepted: r.accepted, count: r.accepted ? 1 : 0, reason: r.reason };
+  }
+  const batch = await captureBatch({ urls, pageUrl, pageTitle });
+  if (!batch.unsupported) return batch;
+  let sent = 0;
+  for (const url of urls) {
+    const r = await capture({ url, kind: 'link', pageUrl, pageTitle, headers: recent.get(url)?.headers });
+    if (r.accepted) sent++;
+  }
+  return { accepted: sent > 0, count: sent, reason: sent ? undefined : 'Lumina isn’t connected. Open Lumina, then try again.' };
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === 'lumina-all-links') {
+  if (info.menuItemId === 'lumina-all-links' || info.menuItemId === 'lumina-selection') {
     if (!tab?.id) return;
+    const selectionOnly = info.menuItemId === 'lumina-selection';
     let links = [];
     try {
-      const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectDownloadLinks });
-      links = res?.result ?? [];
+      links = await linksIn(tab.id, selectionOnly);
     } catch {
       flag('Couldn’t read the links on this page.');
       return;
     }
     if (!links.length) {
-      flag('No download links found on this page.');
+      flag(selectionOnly ? 'No download links in the selection.' : 'No download links found on this page.');
       return;
     }
-    let sent = 0;
-    for (const link of links) {
-      const { accepted } = await capture({ url: link, kind: 'link', pageUrl: tab.url, pageTitle: tab.title, headers: recent.get(link)?.headers });
-      if (accepted) sent++;
-    }
-    flag(sent ? `Sent ${sent} link${sent === 1 ? '' : 's'} to Lumina.` : 'Lumina isn’t connected. Open Lumina, then try again.');
+    const r = await sendLinks(links.map((l) => l.url), tab);
+    flag(r.accepted ? `Sent ${r.count} link${r.count === 1 ? '' : 's'} to Lumina.` : (r.reason || 'Lumina isn’t connected. Open Lumina, then try again.'));
     return;
   }
   const url = info.menuItemId === 'lumina-link' ? info.linkUrl : info.menuItemId === 'lumina-media' ? info.srcUrl : info.pageUrl;
@@ -282,7 +304,29 @@ function flag(message) {
 
 /* ---------- Messages from the popup ---------- */
 
-chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  // Every link on a tab that Lumina can use: the popup lists them for the person to choose from.
+  if (msg?.type === 'page-links') {
+    linksIn(msg.tabId, false).then(reply, () => reply([]));
+    return true;
+  }
+  // Links the person chose, from the popup or from the prompt beside a highlighted selection.
+  if (msg?.type === 'send-links') {
+    const urls = Array.isArray(msg.urls) ? msg.urls.filter((u) => typeof u === 'string').slice(0, 500) : [];
+    if (!urls.length) {
+      reply({ accepted: false, count: 0, reason: 'No links to send' });
+      return false;
+    }
+    const tab = msg.tabId ? chrome.tabs.get(msg.tabId) : Promise.resolve(sender.tab);
+    tab.then((t) => sendLinks(urls, t)).then(reply, () => reply({ accepted: false, count: 0, reason: 'Couldn’t send the links' }));
+    return true;
+  }
+  // How many links are highlighted now: the right-click item says so.
+  if (msg?.type === 'selection') {
+    const count = Number(msg.count) || 0;
+    void chrome.contextMenus.update('lumina-selection', { title: count >= 2 ? `Send ${count} selected links to Lumina` : SELECTION_TITLE }).catch(() => undefined);
+    return false;
+  }
   if (msg?.type === 'detected') {
     void listFor(msg.tabId).then(reply);
     return true;
