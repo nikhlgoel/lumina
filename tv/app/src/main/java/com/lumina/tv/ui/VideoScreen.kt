@@ -256,8 +256,10 @@ fun VideoScreen(graph: Graph, now: PlaybackController.Now, onExit: () -> Unit, o
 
             Column(
                 Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000))))
-                    .padding(start = 64.dp, end = 64.dp, top = 56.dp, bottom = 40.dp),
+                    // Reaches about 60% dark by the time bar and 95% at the bottom (it used to start clear right where the times sit,
+                    // so on a bright scene the controls had nothing behind them).
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color(0x99000000), 1f to Color(0xF2000000)))
+                    .padding(start = 64.dp, end = 64.dp, top = 88.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SeekControl(ui, focus = seekFocus, onSeek = { seek(it) }, onToggle = { controller.togglePlay() }, step = ::seekStep)

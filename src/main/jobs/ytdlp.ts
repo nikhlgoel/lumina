@@ -15,6 +15,8 @@ import { archiveFile } from '../paths';
 import { requestContext } from '../request';
 import { matchTracks } from '../services/ytmusic';
 import { logger } from '../log';
+import { cleanBindList, weightedBindList } from '../../core/networkBind';
+import { measureLines } from '../lineSpeed';
 import { postprocess } from './postprocess';
 import type { Runner } from './queue';
 
@@ -89,6 +91,8 @@ export const ytdlpRunner: Runner = (ctx) => {
 
   /** Set when the accelerator failed and the job is being retried over yt-dlp's own downloader. */
   let nativeOnly = false;
+  /** The network connections this download may use, repeated to weight the faster one (filled in once measured, see below). */
+  let lineSlots: string[] = cleanBindList(s.network.bindAddresses);
 
   const buildArgs = (opts: { batchFile?: string; browserCookies: boolean; playlistItemsArg?: string; archiveFile?: string | null }) => buildDownloadArgs({
     url: job.url, batchFile: opts.batchFile, options: job.options, outputDir, tempDir: downloadTemp, outputTemplate: template,
@@ -103,6 +107,7 @@ export const ytdlpRunner: Runner = (ctx) => {
     aria2cPath,
     connectionsPerServer: s.network.connectionsPerServer,
     diskCacheMb: diskCacheMb(os.totalmem()),
+    bindAddresses: lineSlots,
     accelerate: s.downloads.accelerate && !nativeOnly,
     sponsorBlock: s.downloads.sponsorBlock,
     sponsorCategories: s.downloads.sponsorCategories,
@@ -360,6 +365,9 @@ export const ytdlpRunner: Runner = (ctx) => {
   };
 
   (async () => {
+    // Two or more connections: share the work by measured speed (the same weights the download engine uses; the measurement is cached
+    // for ten minutes). Equal shares came out slower than the fast line alone when the other was much slower.
+    if (lineSlots.length >= 2) lineSlots = weightedBindList(lineSlots, await measureLines(lineSlots));
     let batchFiles: string[] | undefined;
     if (needsMatching) {
       ctx.progress({ stage: `Finding songs on YouTube Music (0/${chosenEntries.length})`, percent: 0 }, 'running');

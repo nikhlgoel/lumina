@@ -443,6 +443,13 @@ private fun ShuffleShape(country: String, busy: Boolean, onClick: () -> Unit, mo
 @Composable
 internal fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    // Resting the remote on a chip chooses it (All, Music, Videos... switch as you move along), as on YouTube: no extra
+    // Select. After a short pause, so sweeping across several chips does not reload the rows under each one; pressing
+    // Select still chooses at once.
+    val latestClick by androidx.compose.runtime.rememberUpdatedState(onClick)
+    LaunchedEffect(focused, selected) {
+        if (focused && !selected) { delay(220); latestClick() }
+    }
     Box(
         Modifier
             .onFocusChanged { focused = it.isFocused }

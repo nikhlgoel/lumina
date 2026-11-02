@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -204,6 +205,7 @@ fun AppShell(graph: Graph, externalQuery: String?, onExternalQueryHandled: () ->
     val ambientArt = now?.thumbnail ?: library.firstOrNull()?.thumbPath?.let { "file://$it" }
     // While a song plays, the pages leave room for the little player at the bottom instead of sliding under it.
     val miniVisible = overlay == null && now?.kind == MediaKind.AUDIO
+    val miniFocus = remember { FocusRequester() }
     val bottomInset by animateDpAsState(27.dp + if (miniVisible) 84.dp else 0.dp, tween(260), label = "mini-inset")
     // One accent colour for the whole app, taken from the same artwork as the page tint, eased over a second so a
     // new song recolours the focus glow and buttons gently rather than flicking them.
@@ -254,7 +256,13 @@ fun AppShell(graph: Graph, externalQuery: String?, onExternalQueryHandled: () ->
         // 27dp top and bottom, 48dp at the right, and on the left the shut sidebar plus a gap: the safe area TVs need,
         // because many crop the edge of the picture. The sidebar itself is drawn over this, further down.
         Column(Modifier.fillMaxSize().padding(start = RailCollapsedWidth + 12.dp, end = 48.dp, top = 27.dp, bottom = bottomInset)) {
-            Box(Modifier.weight(1f).fillMaxWidth().focusRequester(contentFocus).focusRestorer()) {
+            // Down past the last row reaches the mini player (it sits to the right of the pages and the focus search
+            // never found it from the left-hand cards, which is why it could not be selected at all).
+            Box(
+                Modifier.weight(1f).fillMaxWidth().focusRequester(contentFocus)
+                    .focusProperties { exit = { if (it == androidx.compose.ui.focus.FocusDirection.Down && miniVisible) miniFocus else FocusRequester.Default } }
+                    .focusRestorer(),
+            ) {
                 val openPlaylist: (PlaylistRef) -> Unit = { playlistRef = it }
                 val openArtist: (ArtistRef) -> Unit = { artistRef = it }
                 val shownPlaylist = playlistRef
@@ -296,7 +304,10 @@ fun AppShell(graph: Graph, externalQuery: String?, onExternalQueryHandled: () ->
         )
         val current = now
         if (miniVisible && current != null) {
-            MiniPlayer(graph, current, onOpen = { overlay = Overlay.NowPlaying }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 27.dp).zIndex(1f))
+            MiniPlayer(
+                graph, current, onOpen = { overlay = Overlay.NowPlaying }, focus = miniFocus, backTo = contentFocus,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 27.dp).zIndex(1f),
+            )
         }
 
         ErrorBanner(error, onDismiss = graph.player::clearError, modifier = Modifier.align(Alignment.TopCenter))
@@ -378,11 +389,16 @@ private val GlassEdge = Color(0x0FFFFFFF)
  * play/pause button. Select anywhere else on it opens the full music page. It is a corner of the page, not a bar across it.
  */
 @Composable
-private fun MiniPlayer(graph: Graph, now: com.lumina.tv.player.PlaybackController.Now, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+private fun MiniPlayer(
+    graph: Graph, now: com.lumina.tv.player.PlaybackController.Now, onOpen: () -> Unit,
+    focus: FocusRequester, backTo: FocusRequester, modifier: Modifier = Modifier,
+) {
     val ui = rememberPlayerUi(graph.player.player)
     val shape = RoundedCornerShape(40.dp)
     Row(
         modifier
+            // Up leaves it for the page, back to where the remote was.
+            .focusProperties { exit = { if (it == androidx.compose.ui.focus.FocusDirection.Up) backTo else FocusRequester.Default } }
             .width(540.dp)
             .clip(shape)
             .background(GlassFill)
@@ -391,7 +407,7 @@ private fun MiniPlayer(graph: Graph, now: com.lumina.tv.player.PlaybackControlle
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        FocusSurface(onClick = onOpen, modifier = Modifier.weight(1f), shape = RoundedCornerShape(30.dp), scaleOnFocus = 1.0f) {
+        FocusSurface(onClick = onOpen, modifier = Modifier.weight(1f).focusRequester(focus), shape = RoundedCornerShape(30.dp), scaleOnFocus = 1.0f) {
             Row(Modifier.padding(4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Thumb(now.thumbnail, now.kind, Modifier.size(58.dp), shape = RoundedCornerShape(16.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {

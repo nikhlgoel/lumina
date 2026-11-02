@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { BUSY_GRACE_MS, initialStall, needsSparse, rpcAction, stallStep, type StallState } from '@core/engineWatch';
+import { BUSY_GRACE_MS, initialStall, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '@core/engineWatch';
+
+describe('telling a sleeping computer from a silent engine', () => {
+  it('does not call a normal poll gap sleep, even when a poll waited out its 10 s timeout', () => {
+    expect(sleptBetween(1_000, 2_000)).toBe(false);
+    expect(sleptBetween(1_000, 12_000)).toBe(false);
+  });
+
+  it('calls a gap of minutes sleep (the log showed 1524 s)', () => {
+    expect(sleptBetween(1_000, 1_000 + 1_524_000)).toBe(true);
+  });
+
+  it('has no opinion before the first poll', () => {
+    expect(sleptBetween(0, 5_000_000)).toBe(false);
+  });
+});
 
 describe('which files are made sparse', () => {
   it('flags big files on Windows, where a far write blocks for as long as it takes to zero the gap', () => {

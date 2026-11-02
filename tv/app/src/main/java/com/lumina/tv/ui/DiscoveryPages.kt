@@ -88,7 +88,7 @@ fun rememberVideoPicks(graph: Graph, enabled: Boolean = true): List<Track>? {
         if (!enabled) return@LaunchedEffect
         val seeds = history.filter { it.kind == MediaKind.VIDEO } +
             library.filter { it.kind == MediaKind.VIDEO }.sortedByDescending { it.addedAt }.map { Track(it.sourceUrl, it.title, it.artist, it.durationSec, null, it.kind) }
-        graph.recommendations.refreshVideos(seeds)
+        graph.recommendations.refreshVideos(seeds, watched = history.filter { it.kind == MediaKind.VIDEO })
         if (graph.recommendations.videos.value.isNullOrEmpty()) {
             fallback = runCatching { graph.repo.videos("popular videos") }.getOrDefault(emptyList()).filterNot(graph.taste::blocks)
         }

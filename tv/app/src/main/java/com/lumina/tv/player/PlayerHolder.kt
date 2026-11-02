@@ -102,7 +102,9 @@ object PlayerHolder {
      */
     private fun loadControl(plan: com.lumina.tv.core.MemoryPlan) = DefaultLoadControl.Builder()
         // How far ahead is capped by memory on a small stick (see MemoryPlan): the same picture and sound, less held in RAM.
-        .setBufferDurationsMs(minOf(30_000, plan.bufferMaxMs), plan.bufferMaxMs, 1_000, 3_000)
+        // After a stall wait for five seconds of data, not three: resuming at three ran dry again at once on a connection that
+        // was only just fast enough, which is the "plays, loads, plays, loads" cycle. Starting from nothing stays at one second.
+        .setBufferDurationsMs(minOf(30_000, plan.bufferMaxMs), plan.bufferMaxMs, 1_000, 5_000)
         .setTargetBufferBytes(plan.bufferBytes)
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()

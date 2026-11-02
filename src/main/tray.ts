@@ -173,7 +173,9 @@ export function createTray() {
   settings.on('changed', scheduleRebuild);
   rebuild();
 
-  if (process.platform === 'win32') {
+  // Not from a development run: process.execPath is then the bare Electron binary, and the jump list belongs to the app ID
+  // an installed Lumina shares, so "Open player" would start a plain Electron window.
+  if (process.platform === 'win32' && app.isPackaged) {
     // Taskbar jump list (right-click the taskbar button).
     app.setUserTasks([
       { program: process.execPath, arguments: app.isPackaged ? '--player' : `${process.argv[1] ?? '.'} --player`, iconPath: process.execPath, iconIndex: 0, title: 'Open player', description: 'Open Lumina straight into the player' },

@@ -1,4 +1,5 @@
 import type { PlayerCommand } from '../core/trayMenu';
+import type { LocalAddress } from '../core/networkBind';
 import { MAX_VOLUME } from '../core/volume';
 import { z } from 'zod';
 import type {
@@ -192,6 +193,7 @@ export const inputSchemas = {
     id: z.string().min(1).max(200),
     indices: z.array(z.number().int().min(1).max(100000)).min(1).max(20000),
   }),
+  'torrent:move': z.object({ id: z.string().min(1).max(200), dir: z.string().min(2).max(1024) }),
   'usb:drives': z.void(),
   'usb:prepare': z.object({ root: z.string().min(2).max(1024) }),
   'usb:export': z.object({
@@ -278,6 +280,7 @@ export const inputSchemas = {
   'app:open-logs': z.void(),
   'app:shortcut-status': z.void(),
   'storage:usage': z.void(),
+  'network:interfaces': z.void(),
   'cache:sizes': z.void(),
   'cache:clear': z.object({ what: z.enum(['artwork', 'lyrics']) }),
 
@@ -395,6 +398,7 @@ export interface InvokeOutputs {
   'ide:search': CodeSearchHit[];
   'torrent:detail': TorrentDetail | null;
   'torrent:select-files': boolean;
+  'torrent:move': boolean;
   'usb:drives': PortableDrive[];
   'usb:prepare': PortableDrive | null;
   'usb:export': PortableTransfer;
@@ -457,6 +461,7 @@ export interface InvokeOutputs {
   'app:open-logs': void;
   'app:shortcut-status': { ok: boolean; accelerator: string; error: string | null };
   'storage:usage': DiskUsage[];
+  'network:interfaces': LocalAddress[];
   'cache:sizes': { artworkBytes: number; lyricsEntries: number };
   'cache:clear': void;
   'sync:status': SyncStatus;

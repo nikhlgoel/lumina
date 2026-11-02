@@ -11,6 +11,7 @@ import { classifyFailure, nextProbeDelayMs, retryLabel, waitedTooLong } from '..
 import { plainFailure } from '../../core/progress';
 import { finishedSummary } from '../../core/jobDisplay';
 import { fetchValidators } from '../resumeProbe';
+import { moveTorrentEntries } from './moveTorrent';
 
 const log = logger('queue');
 
@@ -239,6 +240,47 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     this.schedule();
   }
 
+  /**
+   * Move a torrent's files to another folder (usually another drive) and carry on from there. A torrent that does not fit its
+   * drive is stuck with a "not enough space" message; this is the way out that keeps what was already downloaded.
+   * The files stay where they were if anything fails.
+   */
+  async moveTorrent(id: string, toDir: string): Promise<void> {
+    const job = this.jobs.get(id);
+    if (!job || job.engine !== 'aria2' || job.source.sourceKind !== 'torrent') throw new Error('Only a torrent can be moved.');
+    if (FINISHED.includes(job.status) || this.cancelling.has(id)) throw new Error('This download has finished or is being cancelled.');
+    const from = job.options.targetDir || job.outputDir;
+    if (!from) throw new Error('This torrent has no folder yet.');
+    // Across drives the copy is the whole logical size (sparse gaps become real zeros), so the new place needs room for all of it.
+    const total = job.progress.totalBytes ?? 0;
+    let probe = toDir;
+    while (probe && !fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+    try {
+      const st = fs.statfsSync(probe);
+      const free = Number(st.bavail) * Number(st.bsize);
+      if (total && free < total * 1.02) throw new Error(`There is not enough room in that folder: it needs about ${(total / 2 ** 30).toFixed(1)} GB and has ${(free / 2 ** 30).toFixed(1)} GB free.`);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('There is not enough room')) throw err;
+      // statfs unavailable: go on without the check
+    }
+    const wasWaiting = job.status !== 'paused';
+    // set() builds the next state from the job it is handed, so a job held across pause() would put its old status back
+    // (it turned a paused job into "running" with no runner, and resume() then did nothing). Always take the current one.
+    const current = () => this.jobs.get(id) ?? job;
+    this.pause(id);
+    this.set(current(), { progress: { ...current().progress, stage: 'Moving files…' } });
+    // Let aria2 finish removing the download and flush its cache before the files are touched.
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    try {
+      await moveTorrentEntries(from, toDir, current().title);
+    } catch (err) {
+      this.set(current(), { progress: { ...current().progress, stage: 'Paused' } });
+      throw err;
+    }
+    this.set(current(), { options: { ...current().options, targetDir: toDir }, outputDir: toDir, progress: { ...current().progress, stage: 'Paused' } });
+    if (wasWaiting) this.resume(id);
+  }
+
   cancel(id: string) {
     const job = this.jobs.get(id);
     if (!job || FINISHED.includes(job.status) || this.cancelling.has(id)) return;
@@ -422,6 +464,10 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   private runSince = new Map<string, number>();
 
   private set(job: Job, patch: Partial<Job>, opts: { throttle?: boolean } = {}) {
+    // Build from the job as stored now, not from the copy the caller is holding. A copy fetched before an await (or before
+    // pause()) still carries the old status, and building from it put that status back: the Move… feature turned a paused
+    // torrent into "running" with no runner behind it. The patch says what changes; everything else is current.
+    job = this.jobs.get(job.id) ?? job;
     const next: Job = { ...job, ...patch, updatedAt: Date.now() };
     // How long the job was really active (not queued, not paused, not waiting), for the finished row's "took 2 min 05 s".
     const timing = next.status === 'running' || next.status === 'processing';

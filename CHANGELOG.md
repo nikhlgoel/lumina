@@ -8,6 +8,53 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
+## [1.2.0] — 2026-11-02
+
+A release about big downloads and about not losing them. Most of it came from testing with very large files and from reading the log of a
+download that kept getting stuck.
+
+### Added
+- **Download over more than one network connection at once.** Settings › Downloads › "Network connections to use" lists your connections
+  (Wi-Fi, Ethernet, a phone shared over USB). Tick two or more and a download is shared between them. Lumina measures each connection for
+  a few seconds when it starts and gives the faster one more of the work, so a slow connection no longer holds a fast one back. It only helps
+  when the connections are separate internet lines (two adapters on the same router share one line). It applies to file downloads, not to
+  torrents, and the measurement is taken once, at start-up. Measured with a 34 MB/s phone connection and a 2 MB/s Wi-Fi: 40 MB/s together,
+  against 34 MB/s for the phone alone.
+- **Move a torrent to another drive.** In a torrent's details, **Move…** carries what is already downloaded to another folder or drive and
+  carries on from there. When a torrent does not fit on its drive, the message now names a drive that has room.
+
+- **Lumina TV 0.3.0** (the Android app, version 0.3.0): it now steps the picture down a quality by itself when a video keeps running
+  dry, instead of cycling "playing, loading, playing, loading", and it waits for a little more data after a stall before resuming. The
+  video controls are readable over a bright picture (white times, a darker band behind the controls). The recommended videos now favour
+  tech, programming, AI, study and money-skills videos, follow the tech and learning videos you have watched on that device, and leave
+  out Shorts and entertainment clips; with nothing watched yet they start from a few evergreen topics that change daily. If your TV is on
+  a 2.4 GHz Wi-Fi network, connecting it to a 5 GHz one is the biggest improvement to streaming of all.
+
+### Fixed
+- **Searching for "Lumina" in the Windows Start menu finds the app.** A copy of Lumina run from source registered a shortcut named
+  "Electron" under Lumina's own app identity, so Windows offered an app called Electron instead of Lumina. A run from source now uses its own
+  identity.
+- **A download no longer fails when you wake the computer from sleep.** The time spent asleep was counted as the download engine not answering,
+  and a healthy engine was stopped.
+- **Changing a network or torrent setting no longer drops your torrent connections** while something is downloading or seeding.
+- **A big download that is already partly on disk is no longer refused for lack of space.** Only what is still missing has to fit.
+- **A new download starts straight away.** It used to wait up to 15 seconds for a check that only matters when resuming.
+- **A full disk is said plainly** ("The disk is almost full…") instead of the download restarting over and over, and a torrent that was paused for
+  lack of space no longer flips between paused and running as free space changes.
+- **A finished download shows its exact size**, not a figure a fraction of a percent short.
+- **Choosing which files of a torrent to download works after the connection was re-made.** It used to fail with "Cannot change option".
+- **Torrents with thousands of files update more smoothly.** The progress check no longer reads every file once a second.
+- **A settings file saved with a byte-order mark** (Notepad does this) is read, instead of being replaced by the defaults without a word.
+- **The optional speed limit can be set above 1 GB/s** (the new maximum is 100 GB/s), for connections and disks faster than that. Lumina itself
+  sets no speed ceiling: the default is unlimited, and the write buffer only smooths writes. Measured on a fast SSD with an unthrottled local
+  source, the download ran at 287 to 399 MB/s and the disk-write rate followed it almost one for one.
+- **"Connections per file" starts at 8, not 16** for new installs. On the test line 8 was fastest and 16 was slower. Your own choice is kept.
+
+### Tested
+- Direct downloads of 4 GiB and 100 GiB were checked byte for byte against their source, including a pause and resume part-way. A 200 GiB
+  download completed at the same speed (about 340 MB/s on a fast disk); it was not checksummed. A 50 GiB torrent and a torrent of 3,000
+  files were checked the same way, and the download engine was killed twice during the 50 GiB one and recovered each time.
+
 ## [1.1.0] — 2026-10-27
 
 The first release published on GitHub. Earlier builds were numbered 3.0.0-alpha.0 and 3.0.0; those numbers were never published and

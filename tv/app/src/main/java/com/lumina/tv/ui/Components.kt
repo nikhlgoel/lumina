@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -300,13 +301,18 @@ fun rememberPlayerUi(player: Player): PlayerUi {
 /** Position and length as a read-only bar with times either side. Seeking is done with the remote's left and right keys. */
 @Composable
 fun TimeBar(ui: PlayerUi, modifier: Modifier = Modifier) {
+    // Over the picture, not a dark page: the grey "Small" style vanished against a bright scene, so these are white with a soft shadow.
+    val label = LuminaText.Small.copy(
+        color = Color.White.copy(alpha = 0.95f), fontSize = 18.sp,
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.85f), androidx.compose.ui.geometry.Offset(0f, 2f), 6f),
+    )
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(Formatting.duration(ui.positionMs / 1000), style = LuminaText.Small)
+        Text(Formatting.duration(ui.positionMs / 1000), style = label)
         Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(LuminaColors.SurfaceHigh)) {
             Box(Modifier.fillMaxWidth(if (ui.durationMs > 0) (ui.bufferedMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) else 0f).height(8.dp).background(LuminaColors.Ink3.copy(alpha = 0.35f)))
             Box(Modifier.fillMaxWidth(ui.fraction).height(8.dp).background(LuminaColors.Amber))
         }
-        Text(Formatting.duration(ui.durationMs / 1000), style = LuminaText.Small)
+        Text(Formatting.duration(ui.durationMs / 1000), style = label)
     }
 }
 

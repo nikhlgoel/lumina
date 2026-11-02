@@ -3,6 +3,7 @@ import { SPONSOR_CATEGORIES } from '@shared/settings';
 import { previewTemplate, outputTemplate } from '@core/ytdlpArgs';
 import type { AiModelStatus, DownloadOptions } from '@shared/types';
 import { formatBytes } from '@core/format';
+import { cleanBindList, type LocalAddress } from '@core/networkBind';
 import { call, errorMessage } from '@/lib/bridge';
 import { useApp } from '@/stores/app';
 import { Button, Segmented, Select, Switch } from '@/components/ui';
@@ -16,6 +17,9 @@ const SAMPLE = {
 
 export function DownloadsSection({ s, set }: SectionProps) {
   const d = s.downloads;
+  const [addrs, setAddrs] = useState<LocalAddress[]>([]);
+  useEffect(() => { void call('network:interfaces').then(setAddrs).catch(() => setAddrs([])); }, []);
+  const bound = cleanBindList(s.network.bindAddresses);
   const presets = useApp((x) => x.presets);
   const opts = (type: 'music' | 'video') => presets.filter((p) => p.appliesTo.includes(type)).map((p) => ({ value: p.id, label: p.name }));
   const layout = { music: d.musicLayout, video: d.videoLayout };
@@ -39,6 +43,19 @@ export function DownloadsSection({ s, set }: SectionProps) {
         </Row>
         <Row id="connections" label="Connections per file" description="For direct file downloads. Most servers allow up to 16.">
           <Segmented label="Connections per server" value={String(s.network.connectionsPerServer)} onChange={(v) => set({ network: { connectionsPerServer: Number(v) } })} options={['1', '4', '8', '16'].map((v) => ({ value: v, label: v }))} />
+        </Row>
+        <Row id="networks" label="Network connections to use" description={bound.length > 1 ? `Downloads are shared between ${bound.length} connections, so each carries part of the file. Only helps when they are separate internet lines.` : bound.length === 1 ? 'Every download uses only this connection.' : 'Automatic: Windows picks one. Tick two or more (say Wi-Fi and Ethernet, each with its own internet) to download over all of them at once. Applies once nothing is downloading.'}>
+          <div className="flex flex-col gap-1.5">
+            {addrs.length === 0 && <span className="text-xs text-ink-3">No network connections found.</span>}
+            {addrs.map((a) => (
+              <label key={a.address} className="flex items-center gap-2 text-[13px]">
+                <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={bound.includes(a.address)}
+                  onChange={(e) => set({ network: { bindAddresses: e.target.checked ? [...bound, a.address] : bound.filter((x) => x !== a.address) } })} />
+                <span>{a.name}</span>
+                <span className="tabular text-ink-3">{a.address}{a.linkLocal ? ' · not connected to a network' : a.virtual ? ' · virtual, usually no internet' : ''}</span>
+              </label>
+            ))}
+          </div>
         </Row>
         <Row id="accelerate" label="Faster downloads (multi-connection)" description="Downloads plain video/audio links with many connections at once (via aria2) instead of one, using the “Connections per file” count. Big speed-up on fast links; leave on unless a site misbehaves.">
           <Switch label="Faster downloads" checked={d.accelerate} onChange={(v) => set({ downloads: { accelerate: v } })} />

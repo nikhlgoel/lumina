@@ -148,6 +148,45 @@ export const lifecycleProbe = (url: string, dir: string, fastRetry = false, sele
 })()`;
 
 /** Add a download, let it run, open the Queue and stop there so the harness photographs the live row. */
+/**
+ * One very large download from start to finish (LUMINA_PROBE_MODE=big, LUMINA_PROBE_URL=<.torrent path or link>): pause and
+ * resume once at `pauseAtPct`, then wait for it to end, sampling the job every 2 s. Unlike the lifecycle probe it never
+ * cancels, because a cancel deletes the partial file and at 50 GB+ that is a quarter of an hour thrown away.
+ */
+export const bigProbe = (url: string, dir: string, pauseAtPct: number, maxSecs: number, moveTo = '') => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const info = await inv('media:inspect', { url: ${JSON.stringify(url)} });
+  const options = { contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const { id } = await inv('jobs:add', { url: ${JSON.stringify(url)}, info, options });
+  const t0 = Date.now(), samples = [], events = [];
+  let paused = false;
+  for (;;) {
+    await sleep(2000);
+    const j = (await inv('jobs:list')).find((x) => x.id === id);
+    if (!j) { events.push({ t: Date.now() - t0, m: 'job vanished' }); break; }
+    const p = j.progress;
+    samples.push({ t: Date.now() - t0, status: j.status, pct: +p.percent.toFixed(2), bytes: p.downloadedBytes, total: p.totalBytes, bps: p.speedBps, stage: p.stage, activity: p.activity ?? null, err: j.error && j.error.message });
+    if (!paused && p.percent >= ${pauseAtPct}) {
+      paused = true;
+      if (${JSON.stringify(moveTo)}) {
+        // LUMINA_PROBE_MOVE_TO: move the half-done torrent to another folder instead (the real torrent:move path).
+        events.push({ t: Date.now() - t0, m: 'moving', pct: p.percent });
+        try { await inv('torrent:move', { id, dir: ${JSON.stringify(moveTo)} }); events.push({ t: Date.now() - t0, m: 'moved' }); }
+        catch (e) { events.push({ t: Date.now() - t0, m: 'move failed: ' + (e && e.message) }); }
+      } else {
+        await inv('jobs:pause', { id });
+        events.push({ t: Date.now() - t0, m: 'paused', pct: p.percent });
+        await sleep(5000);
+        await inv('jobs:resume', { id });
+        events.push({ t: Date.now() - t0, m: 'resumed' });
+      }
+    }
+    if (['completed', 'failed', 'cancelled'].includes(j.status) || Date.now() - t0 > ${maxSecs * 1000}) break;
+  }
+  return JSON.stringify({ events, samples });
+})()`;
+
 export const shotProbe = (url: string, dir: string, waitMs: number) => `(async () => {
   const inv = (c, a) => window.lumina.invoke(c, a);
   const info = await inv('media:inspect', { url: ${JSON.stringify(url)} });
@@ -191,7 +230,8 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   ...(probeDir && probeRows.length === 3 ? [{ name: 'probe-rows', script: rowsProbe(probeRows, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_MS) || 7000, Number(process.env.LUMINA_PROBE_SETTLE_MS) || 5000), delay: 300 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
-  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE !== 'lifecycle' ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
+  ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'big' ? [{ name: 'probe-big', script: bigProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_PCT) || 25, Number(process.env.LUMINA_PROBE_SECS) || 7200, process.env.LUMINA_PROBE_MOVE_TO ?? ''), delay: 500 }] : []),
+  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && !['lifecycle', 'big'].includes(process.env.LUMINA_PROBE_MODE ?? '') ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
   ...(probeDir && !probeUrl && probeRows.length !== 3 ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
   { name: '01-download-light', script: "document.documentElement.dataset.theme='light'" },
   { name: '02-download-dark', script: "document.documentElement.dataset.theme='dark'" },

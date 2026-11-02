@@ -47,7 +47,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -107,6 +110,7 @@ fun NowPlayingScreen(graph: Graph, now: PlaybackController.Now, onClose: () -> U
     var repeat by remember { mutableIntStateOf(player.repeatMode) }
     var panel by remember { mutableStateOf(Panel.None) }
     val playFocus = remember { FocusRequester() }
+    val toggleFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 
     // Back closes the lyrics, queue or More panel first; only then the screen (the shell's own handler).
@@ -142,6 +146,7 @@ fun NowPlayingScreen(graph: Graph, now: PlaybackController.Now, onClose: () -> U
     val saved = track != null && library.any { Track.idFromUrl(it.sourceUrl) == track.id && it.kind == now.kind }
     val job = track?.let { t -> jobs.firstOrNull { it.key == "${t.id}:${now.kind.name}" } }
     val isLiked = track != null && liked.any { it.id == track.id }
+    val showToggle = now.streaming && track != null && now.kind == MediaKind.AUDIO
     val rawTint = rememberArtworkColor(now.thumbnail)
     // Colours cross-fade when the song changes, never snap: the screen should feel like it is breathing with the music.
     val tint by androidx.compose.animation.animateColorAsState(rawTint ?: LuminaColors.SurfaceHigh, androidx.compose.animation.core.tween(1600), label = "np-tint")
@@ -202,7 +207,7 @@ fun NowPlayingScreen(graph: Graph, now: PlaybackController.Now, onClose: () -> U
         // It fades with the rest of the controls.
         if (now.streaming && track != null && now.kind == MediaKind.AUDIO) {
             SongVideoToggle(
-                video = false, onSong = {}, onVideo = { onWatch(track, ui.positionMs) },
+                video = false, onSong = {}, onVideo = { onWatch(track, ui.positionMs) }, focus = toggleFocus, down = playFocus,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 30.dp).graphicsLayer { alpha = controlsAlpha },
             )
         }
@@ -219,12 +224,22 @@ fun NowPlayingScreen(graph: Graph, now: PlaybackController.Now, onClose: () -> U
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().graphicsLayer { alpha = controlsAlpha }
                 .background(Brush.verticalGradient(listOf(Color.Transparent, LuminaColors.Bg.copy(alpha = 0.92f))))
+                // Up from the progress bar goes on up to the Song | Video switch (when there is one).
+                .focusProperties { exit = { if (it == FocusDirection.Up && showToggle) toggleFocus else FocusRequester.Default } }
+                .focusGroup()
                 .padding(start = 56.dp, end = 56.dp, top = 72.dp, bottom = 34.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SeekBar(ui, accent, onSeek = controller::seekBy, onToggle = controller::togglePlay)
 
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth()
+                    // Left past Previous or Right past More goes nowhere, instead of escaping to some other control. Moving
+                    // along the row is the only thing Left and Right do here.
+                    .focusProperties { exit = { if (it == FocusDirection.Left || it == FocusDirection.Right) FocusRequester.Cancel else FocusRequester.Default } }
+                    .focusGroup(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column(Modifier.weight(1f).padding(end = 24.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(now.title, style = LuminaText.Title.copy(fontSize = 24.sp), maxLines = 1)
                     if (now.artist.isNotBlank()) Text(now.artist, style = LuminaText.Body.copy(color = LuminaColors.Ink2), maxLines = 1)
@@ -328,30 +343,49 @@ private fun TextTab(label: String, selected: Boolean, onClick: () -> Unit) {
  * other, when chosen, hands the same track and the same moment to the other player. [video] says which side is current.
  */
 @Composable
-internal fun SongVideoToggle(video: Boolean, onSong: () -> Unit, onVideo: () -> Unit, modifier: Modifier = Modifier) {
+internal fun SongVideoToggle(
+    video: Boolean, onSong: () -> Unit, onVideo: () -> Unit, modifier: Modifier = Modifier,
+    /** Where the remote goes when it is sent to the switch (it lands on the side that is current). */
+    focus: FocusRequester? = null,
+    /** Where Down leaves to. Left and Right never leave the switch: they used to slip onto whatever lay beside it. */
+    down: FocusRequester? = null,
+) {
+    val outline = BorderStroke(2.dp, Color.White.copy(alpha = 0.55f))
     Row(
-        modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.12f), CircleShape).padding(4.dp),
+        modifier
+            .focusProperties {
+                exit = {
+                    when (it) {
+                        FocusDirection.Left, FocusDirection.Right -> FocusRequester.Cancel
+                        FocusDirection.Down -> down ?: FocusRequester.Default
+                        else -> FocusRequester.Default
+                    }
+                }
+            }
+            .focusGroup()
+            .clip(CircleShape).background(Color(0xCC15141A), CircleShape).border(outline, CircleShape).padding(5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToggleSide("Song", selected = !video, onClick = onSong)
-        ToggleSide("Video", selected = video, onClick = onVideo)
+        ToggleSide("Song", selected = !video, onClick = onSong, focus = if (!video) focus else null)
+        ToggleSide("Video", selected = video, onClick = onVideo, focus = if (video) focus else null)
     }
 }
 
 @Composable
-private fun ToggleSide(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun ToggleSide(label: String, selected: Boolean, onClick: () -> Unit, focus: FocusRequester?) {
     var focused by remember { mutableStateOf(false) }
     Box(
         Modifier
+            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clip(CircleShape)
-            .background(if (selected) Color(0xFFF1F1F1) else if (focused) Color.White.copy(alpha = 0.22f) else Color.Transparent, CircleShape)
-            .border(BorderStroke(if (focused) 2.dp else 0.dp, if (focused) Color.White else Color.Transparent), CircleShape)
+            .background(if (selected) Color(0xFFF1F1F1) else if (focused) Color.White.copy(alpha = 0.30f) else Color.Transparent, CircleShape)
+            .border(BorderStroke(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent), CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 30.dp, vertical = 9.dp),
+            .padding(horizontal = 38.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = LuminaText.Button.copy(fontSize = 18.sp, color = if (selected) LuminaColors.Bg else LuminaColors.Ink), maxLines = 1)
+        Text(label, style = LuminaText.Button.copy(fontSize = 21.sp, color = if (selected) LuminaColors.Bg else LuminaColors.Ink), maxLines = 1)
     }
 }
 

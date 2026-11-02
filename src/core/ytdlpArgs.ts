@@ -1,4 +1,5 @@
 import type { AudioFormatChoice, DownloadOptions, VideoFormatChoice } from '../shared/types';
+import { bindArgFromSlots } from './networkBind';
 
 export const PROGRESS_PREFIX = 'LUMINA_DL|';
 export const POSTPROCESS_PREFIX = 'LUMINA_PP|';
@@ -110,6 +111,8 @@ export interface BuildArgsInput {
   diskCacheMb?: number;
   /** Turn the aria2 accelerator on for progressive http/https/ftp downloads (fragmented HLS/DASH always stay native). */
   accelerate?: boolean;
+  /** Network connections (IPv4 addresses) accelerated downloads may use; several share the work (see core/networkBind). */
+  bindAddresses?: string[];
 }
 
 /**
@@ -119,12 +122,15 @@ export interface BuildArgsInput {
  */
 function accelerationArgs(i: BuildArgsInput): string[] {
   if (!i.accelerate || !i.aria2cPath) return [];
-  const conns = Math.max(1, Math.min(16, i.connectionsPerServer ?? 16));
+  const conns = Math.max(1, Math.min(16, i.connectionsPerServer ?? 8));
   const a2 = [
     `-x${conns}`, `-s${conns}`, '-k1M', '--min-split-size=1M', `--max-connection-per-server=${conns}`,
     '--file-allocation=none', `--disk-cache=${i.diskCacheMb ?? 64}M`, '--console-log-level=warn', '--summary-interval=1',
   ];
   if (i.speedLimitKbps > 0) a2.push(`--max-overall-download-limit=${i.speedLimitKbps}K`);
+  // The list may repeat an address to give that connection more of the work (see core/networkBind weightedBindList).
+  const bind = bindArgFromSlots(i.bindAddresses ?? []);
+  if (bind) a2.push(bind);
   return [
     '--downloader', `http:${i.aria2cPath}`, '--downloader', `https:${i.aria2cPath}`, '--downloader', `ftp:${i.aria2cPath}`,
     '--downloader-args', `aria2c:${a2.join(' ')}`,

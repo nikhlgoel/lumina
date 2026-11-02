@@ -10,7 +10,7 @@ import { tools } from './tools';
 import { database, closeDatabase } from './db';
 import { queue } from './jobs/queue';
 import { ytdlpRunner } from './jobs/ytdlp';
-import { aria2, aria2Runner } from './jobs/aria2';
+import { aria2, aria2Runner, restartOnlyKey } from './jobs/aria2';
 import { convertRunner, subtitlesRunner } from './jobs/cpu';
 import { extractRunner, watchReleases } from './jobs/release';
 import { library } from './library';
@@ -79,10 +79,18 @@ function notify(title: string, body: string, onClick?: () => void) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.setAppUserModelId('com.lumina.media');
-  for (const scheme of ['magnet', 'lumina']) {
-    if (process.defaultApp && process.argv[1]) app.setAsDefaultProtocolClient(scheme, process.execPath, [process.argv[1]]);
-    else app.setAsDefaultProtocolClient(scheme);
+  // A run from source gets its own id. Electron writes a Start Menu shortcut named "Electron" for the id it runs under (so its
+  // notifications have a source), and under the installed app's id that shortcut took over Lumina's entry: Windows search then offered
+  // an app called "Electron" and no "Lumina" at all.
+  app.setAppUserModelId(app.isPackaged ? 'com.lumina.media' : 'com.lumina.media.dev');
+  // Only an installed Lumina may claim magnet: and lumina: links. A development run (`electron .`, the screenshot harness, a
+  // test) used to register the bare Electron binary from node_modules, so every magnet link on the machine then opened a
+  // plain Electron window with Electron's icon. Opt in with LUMINA_REGISTER_PROTOCOLS=1 to test the handler from source.
+  if (app.isPackaged || process.env.LUMINA_REGISTER_PROTOCOLS === '1') {
+    for (const scheme of ['magnet', 'lumina']) {
+      if (process.defaultApp && process.argv[1]) app.setAsDefaultProtocolClient(scheme, process.execPath, [process.argv[1]]);
+      else app.setAsDefaultProtocolClient(scheme);
+    }
   }
 
   const linkFromArgv = (argv: string[]) => {
@@ -253,12 +261,11 @@ if (!app.requestSingleInstanceLock()) {
       if (next.library.watchFolders !== previous.library.watchFolders || next.storage.libraryRoots.join() !== previous.storage.libraryRoots.join()) {
         void library.scan().then(() => library.watch());
       }
-      if (next.torrents !== previous.torrents || next.network !== previous.network) {
-        // Most aria2 options only apply at start; restart it when idle, otherwise update what can change live.
-        if (!queue.list().some((j) => j.engine === 'aria2' && (j.status === 'running' || j.status === 'processing'))) aria2.stop();
-        else void aria2.applySettings();
-      }
-      if (next.downloads !== previous.downloads) void aria2.applySettings();
+      // Settings are rebuilt (new objects) on every save, so comparing `next.torrents !== previous.torrents` was true after ANY
+      // change, even a colour theme, and it hard-killed aria2 whenever no job was "running": torrents that were seeding or
+      // paused lost every peer. Compare values; apply what aria2 can take live; restart only for what it cannot, and only if idle.
+      if (restartOnlyKey(next) !== restartOnlyKey(previous)) void aria2.restartIfIdle();
+      if (JSON.stringify([next.torrents, next.network, next.downloads]) !== JSON.stringify([previous.torrents, previous.network, previous.downloads])) void aria2.applySettings();
       setVerboseLogging(next.advanced.verboseLogs);
       queue.schedule();
       previous = next;

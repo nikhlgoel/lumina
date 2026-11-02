@@ -16,7 +16,9 @@ import { tools } from '../tools';
 import { settings } from '../settings';
 import { dataDir } from '../paths';
 import { cookieHeaderFor } from '../../core/cookies';
-import { initialStall, needsSparse, rpcAction, stallStep, type StallState } from '../../core/engineWatch';
+import { initialStall, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '../../core/engineWatch';
+import { bindArg, bindArgFromSlots, cleanBindList, weightedBindList } from '../../core/networkBind';
+import { measureLines } from '../lineSpeed';
 import { isSparse, markSparse } from '../sparse';
 import { allocatedBytes, spaceShortfall } from '../../core/diskSpace';
 import { compareValidators } from '../../core/resumeCheck';
@@ -71,7 +73,20 @@ function dynamicOptions(s: Settings): Record<string, string> {
     // Room for the app queue plus a burst of browser hand-offs.
     'max-concurrent-downloads': String(Math.max(32, s.downloads.concurrency + 16)),
     'bt-max-peers': String(s.torrents.maxPeers),
+    // These used to be start-up only, so changing any of them meant killing aria2 (and every peer connection with it).
+    // aria2 accepts all of them through changeGlobalOption, so they now change under a running download.
+    'seed-ratio': String(s.torrents.seedRatio),
+    'seed-time': String(s.torrents.seedMinutes),
+    'max-connection-per-server': String(s.network.connectionsPerServer),
+    split: String(s.network.connectionsPerServer),
+    'user-agent': s.network.userAgent || 'aria2/1.37.0',
+    'all-proxy': s.network.proxy || '',
   };
+}
+
+/** The settings aria2 can only read when it starts. A change to one of these needs a restart; nothing else does. */
+export function restartOnlyKey(s: Settings): string {
+  return JSON.stringify([s.torrents.listenPort, s.torrents.dht, s.torrents.requireEncryption, s.network.forceIpv4, cleanBindList(s.network.bindAddresses)]);
 }
 
 class Aria2Daemon {
@@ -102,6 +117,10 @@ class Aria2Daemon {
       const s = settings.get();
       this.port = await this.freePort();
       const t = s.torrents;
+      // Two or more connections: measure each for a few seconds and share the download in proportion to speed. Equal shares came
+      // out 5% slower than the fast line alone when the other was a 2 MB/s Wi-Fi (measured); weighted, the slow one costs nothing.
+      const bound = cleanBindList(s.network.bindAddresses);
+      const bindFlag = bound.length >= 2 ? bindArgFromSlots(weightedBindList(bound, await measureLines(bound))) : bindArg(bound);
       const args = [
         '--enable-rpc', `--rpc-listen-port=${this.port}`, '--rpc-listen-all=false', `--rpc-secret=${this.secret}`,
         `--stop-with-process=${process.pid}`, '--continue=true', '--auto-file-renaming=true', '--allow-overwrite=false',
@@ -111,6 +130,14 @@ class Aria2Daemon {
         `--file-allocation=${process.platform === 'win32' ? 'none' : 'falloc'}`, '--summary-interval=0', '--console-log-level=warn', `--disk-cache=${diskCacheMb(os.totalmem())}M`,
         `--max-connection-per-server=${s.network.connectionsPerServer}`, `--split=${s.network.connectionsPerServer}`, '--min-split-size=1M',
         '--retry-wait=3', `--max-tries=${Math.max(5, s.downloads.retries * 2)}`, '--connect-timeout=20', '--timeout=60',
+        // Harmless extras. NOT measured to be faster: on a healthy 750 MB torrent (Debian's) the line, about 35-40 MB/s, was
+        // saturated with and without them (2026-11-02), so their only possible value is on slow or small swarms, which was not
+        // testable. Kept because aria2 documents them as safe, not because they were shown to help.
+        //  - bt-request-peer-speed-limit: look for more peers while below this speed (default 50 KB/s).
+        //  - optimize-concurrent-downloads: share the line by what each download can use.
+        //  - bt-max-open-files: no reopening files in a torrent of many files (default 100).
+        // A "drop connections under 1 KB/s" option was tried and removed: it can kill a slow-but-valid server at the start.
+        '--bt-request-peer-speed-limit=10M', '--optimize-concurrent-downloads=true', '--bt-max-open-files=200',
         // The control file that lets a download continue is saved every 60 s by default and when aria2 stops cleanly; a crash
         // or a power cut in the first minute left a file with no control file, which aria2 refuses to touch. Every 10 s.
         '--auto-save-interval=10',
@@ -127,6 +154,8 @@ class Aria2Daemon {
         ...(t.requireEncryption ? ['--bt-require-crypto=true', '--bt-min-crypto-level=arc4'] : []),
         ...(s.network.proxy ? [`--all-proxy=${s.network.proxy}`] : []),
         ...(s.network.forceIpv4 ? ['--disable-ipv6=true'] : []),
+        // Download over the chosen network connections: several = link aggregation (Wi-Fi + Ethernet at once); see core/networkBind.
+        ...(bindFlag ? [bindFlag] : []),
         ...(s.network.userAgent ? [`--user-agent=${s.network.userAgent}`] : []),
         ...Object.entries(dynamicOptions(s)).map(([k, v]) => `--${k}=${v}`),
       ];
@@ -161,6 +190,27 @@ class Aria2Daemon {
   async applySettings() {
     if (!this.running()) return;
     await this.call('aria2.changeGlobalOption', dynamicOptions(settings.get())).catch((err) => log.debug('changeGlobalOption failed', err));
+  }
+
+  /**
+   * Restart aria2 so a start-up-only setting takes effect, but only when nothing is using it. "Nothing" is decided by aria2
+   * itself, not by Lumina's job list: a torrent that has finished and is seeding is a completed job to Lumina but is still
+   * an active download to aria2, with live peers. The old check looked at the job list, saw nothing "running", and killed the
+   * daemon, which is how a settings change dropped every peer. If it is busy, the new value is picked up at its next start.
+   */
+  async restartIfIdle(): Promise<boolean> {
+    if (!this.running()) return true;
+    try {
+      const [active, waiting] = await Promise.all([this.call<unknown[]>('aria2.tellActive', ['gid']), this.call<unknown[]>('aria2.tellWaiting', 0, 1, ['gid'])]);
+      if (active.length > 0 || waiting.length > 0) {
+        log.info('A network or torrent setting changed that needs aria2 to restart; it is busy, so it will apply the next time aria2 starts.');
+        return false;
+      }
+    } catch {
+      return false;
+    }
+    await this.gracefulStop();
+    return true;
   }
 
   async call<T = unknown>(method: string, ...params: unknown[]): Promise<T> {
@@ -326,6 +376,10 @@ export const aria2Runner: Runner = (ctx) => {
     if (isTorrent) removeMetaCopy(status.infoHash);
     const files = (status.files ?? []).map((f) => f.path).filter((p) => p && !p.startsWith('[METADATA]'));
     log.info(`aria2 download finished: ${job.title}`, { files: files.length, totalBytes: Number(status.totalLength) || null });
+    // Nothing above stores the final count, so a finished job kept whatever the last in-flight poll saw: 740.6 of 777.4 MB, 53.657 of
+    // 53.687 GB, both with every byte present and hash-verified. Say what is true now that the engine reports it done.
+    const finalTotal = Number(status.totalLength) || null;
+    if (finalTotal) ctx.progress({ percent: 100, downloadedBytes: finalTotal, totalBytes: finalTotal }, 'running');
     const top = files.length > 1 ? commonRoot(files, dir) : files[0];
     ctx.patch({ outputPaths: files, outputDir: top && files.length > 1 ? top : dir });
     // Torrents are already verified piece by piece; plain downloads get checked before they count as done.
@@ -361,6 +415,10 @@ export const aria2Runner: Runner = (ctx) => {
   let avgSpeed: number | null = null;
   let stall: StallState = initialStall(Date.now());
   let spaceBlocked = false;
+  let spaceCheckedAt = 0;
+  let lastMissing: number | null = null;
+  let lastNeed = 0;
+  let roomHint: string | null = null;
 
   /**
    * Keep large output files sparse. On Windows a write far past a file's end blocks the whole
@@ -399,10 +457,23 @@ export const aria2Runner: Runner = (ctx) => {
     gid = addSpec.torrentPath
       ? await aria2.call<string>('aria2.addTorrent', fs.readFileSync(addSpec.torrentPath).toString('base64'), [], addSpec.opts)
       : await aria2.call<string>('aria2.addUri', [addSpec.url], addSpec.opts);
+    // The detail panel changes a torrent's file selection through this id. After a re-add or restart it is a new one, and the
+    // panel kept the old one until the next successful poll: four selections in a row failed "Cannot change option for GID…" (log).
+    const t = live.get(job.id);
+    if (t) t.gid = gid;
   };
 
+  let lastPollAt = 0;
   const poll = async () => {
     if (stopped || !gid) return;
+    // After the computer sleeps, the engine's silence and the download's "no progress" both include the hours it was asleep.
+    // Counting them killed a healthy aria2 on waking (log: 1524 s of silence right after "Resumed from sleep"). Start both over.
+    if (sleptBetween(lastPollAt, Date.now())) {
+      log.info('The computer was asleep; restarting the silence and stall clocks', { job: job.title });
+      silentSince = 0;
+      stall = initialStall(Date.now(), stall.bytes);
+    }
+    lastPollAt = Date.now();
     try {
       let status = await aria2.call<Aria2Status & { seeder?: string }>('aria2.tellStatus', gid, FIELDS);
       // Healthy again: forget earlier transient failures.
@@ -425,25 +496,37 @@ export const aria2Runner: Runner = (ctx) => {
       // A torrent's size is only known once its metadata is in, and the user may still pick fewer
       // files, so a torrent that does not fit waits (paused, with the reason) rather than failing.
       if (isTorrent && status.status !== 'complete') {
-        const chosen = (status.files ?? []).filter((f) => f.selected === 'true' && !f.path.startsWith('[METADATA]'));
-        const selected = chosen.reduce((n, f) => n + (Number(f.length) || 0), 0);
-        // What is already on disk, not what has been received: see core/diskSpace allocatedBytes.
-        const onDisk = chosen.reduce((n, f) => {
-          let sizeOnDisk: number | null = null;
-          try { sizeOnDisk = fs.statSync(f.path).size; } catch { /* not created yet */ }
-          return n + allocatedBytes({ length: Number(f.length) || 0, completed: Number(f.completedLength) || 0, sizeOnDisk, sparse: isSparse(f.path) });
-        }, 0);
-        let missing: number | null = null;
-        try {
-          const st = fs.statfsSync(dir);
-          missing = spaceShortfall(Number(st.bavail) * Number(st.bsize), selected, onDisk);
-        } catch {
-          // statfs unavailable: no check, as for direct downloads.
+        // A stat per file, synchronously on the main thread, every second is nothing for one big file and a stall for a torrent of
+        // thousands. The disk does not fill in a few seconds, so look every 10 s; while blocked, look every poll to notice the room.
+        let missing: number | null = lastMissing;
+        if (spaceBlocked || Date.now() - spaceCheckedAt >= 10_000) {
+          spaceCheckedAt = Date.now();
+          const chosen = (status.files ?? []).filter((f) => f.selected === 'true' && !f.path.startsWith('[METADATA]'));
+          const selected = chosen.reduce((n, f) => n + (Number(f.length) || 0), 0);
+          // What is already on disk, not what has been received: see core/diskSpace allocatedBytes.
+          const onDisk = chosen.reduce((n, f) => {
+            let sizeOnDisk: number | null = null;
+            try { sizeOnDisk = fs.statSync(f.path).size; } catch { /* not created yet */ }
+            return n + allocatedBytes({ length: Number(f.length) || 0, completed: Number(f.completedLength) || 0, sizeOnDisk, sparse: isSparse(f.path) });
+          }, 0);
+          missing = null;
+          lastNeed = Math.ceil(Math.max(0, selected - onDisk) * 1.01);
+          try {
+            const st = fs.statfsSync(dir);
+            // Once blocked, ask for 512 MB more before going on: the log shows a torrent paused for lack of room and resumed three
+            // seconds later, over and over, as the free space wobbled around its own size.
+            missing = spaceShortfall(Number(st.bavail) * Number(st.bsize) - (spaceBlocked ? 512 * 2 ** 20 : 0), selected, onDisk);
+          } catch {
+            // statfs unavailable: no check, as for direct downloads.
+          }
+          lastMissing = missing;
         }
         if (missing && !spaceBlocked) {
           spaceBlocked = true;
           log.warn('Torrent does not fit on the disk; pausing', { job: job.title, missingBytes: missing });
           await aria2.call('aria2.forcePause', gid).catch(() => undefined);
+          // Looked up once, in the background; the message below picks it up on the next poll.
+          void driveWithRoom(lastNeed, dir).then((hint) => { roomHint = hint; });
         } else if (!missing && spaceBlocked) {
           spaceBlocked = false;
           log.info('Space is available again; resuming', { job: job.title });
@@ -451,7 +534,7 @@ export const aria2Runner: Runner = (ctx) => {
         }
         if (spaceBlocked) {
           stall = initialStall(Date.now(), p.downloadedBytes);
-          ctx.progress({ percent: p.percent, speedBps: null, etaSec: null, downloadedBytes: p.downloadedBytes, totalBytes: p.totalBytes, stage: `Not enough disk space: needs ${formatBytes(missing ?? 0)} more. Free some space or choose fewer files.` }, 'running');
+          ctx.progress({ percent: p.percent, speedBps: null, etaSec: null, downloadedBytes: p.downloadedBytes, totalBytes: p.totalBytes, stage: `Not enough disk space: needs ${formatBytes(missing ?? 0)} more. ${roomHint ? `Free some space, choose fewer files, or use Move… in the torrent's details to carry on from another drive (${roomHint}).` : 'Free some space or choose fewer files.'}` }, 'running');
           timer = setTimeout(poll, 3000);
           return;
         }
@@ -553,12 +636,28 @@ export const aria2Runner: Runner = (ctx) => {
       if (stopped) return;
       if (!silentSince) silentSince = Date.now();
       const silentForMs = Date.now() - silentSince;
-      log.warn('Status poll failed', { silentForS: Math.round(silentForMs / 1000), engineAlive: aria2.running(), err: String(err) });
+      // Free space is in the line because "the engine stopped answering" has been unexplained in the owner's log for days;
+      // the next occurrence should say whether the disk was nearly full when it happened.
+      let freeGb: number | null = null;
+      try { const st = fs.statfsSync(dir); freeGb = Math.round((Number(st.bavail) * Number(st.bsize)) / 2 ** 30 * 10) / 10; } catch { /* unknown */ }
+      log.warn('Status poll failed', { silentForS: Math.round(silentForMs / 1000), engineAlive: aria2.running(), freeGb, err: String(err) });
       // A live engine that stops answering is usually mid-way through a slow disk write, not dead
       // (see core/engineWatch); restarting it throws that work away. Only a dead or long-silent one is restarted.
       if (rpcAction(silentForMs, aria2.running()) === 'wait') {
         ctx.progress({ stage: 'Downloading', activity: 'writing', speedBps: null, etaSec: null }, 'running');
       } else {
+        // Restarting the engine cannot help one that cannot write because the disk is full; it only throws the swarm away and
+        // tries again. Say what is wrong instead of looping (the owner's drive had 3.7 GB free with 35 GB of the torrent to go).
+        try {
+          const st = fs.statfsSync(dir);
+          const free = Number(st.bavail) * Number(st.bsize);
+          if (free < 512 * 2 ** 20) {
+            ctx.fail(`The disk is almost full (${formatBytes(free)} free), so the download engine cannot write. Free up space or choose another folder in Settings, then press Retry. Your progress is saved.`);
+            return;
+          }
+        } catch {
+          // no statfs: go on to the restart below
+        }
         if (recoveries >= 5) {
           ctx.fail('The download engine kept stopping. Your progress is saved on disk — press Retry to resume.');
           return;
@@ -633,12 +732,24 @@ export const aria2Runner: Runner = (ctx) => {
       }
       if (typeof opts['user-agent'] === 'string') sent['User-Agent'] = opts['user-agent'];
       if (typeof opts.referer === 'string') sent.Referer = opts.referer;
-      const check = await fetchValidators(url, sent, verifyAbort.signal);
-      if (stopped) return;
-      const saved = ctx.job().engineState.validators ?? null;
       const partial = typeof opts.out === 'string' ? path.join(dir, opts.out) : null;
       const resuming = Boolean(partial && fs.existsSync(`${partial}.aria2`));
-      if (check.ok) {
+      const probe = fetchValidators(url, sent, verifyAbort.signal);
+      if (!resuming) {
+        // Nothing is on disk to protect, so the probe only has to be remembered for a later resume. Waiting for it held every
+        // new download back by up to its 15 s timeout on a server that is slow to answer a one-byte range request.
+        void probe.then((c) => {
+          if (stopped || !c.ok) return;
+          const kept = ctx.job().engineState.validators ?? null;
+          ctx.patch({ engineState: { ...ctx.job().engineState, validators: compareValidators(kept, c.validators) === 'unknown' && kept ? kept : c.validators } });
+        });
+      }
+      const check = resuming ? await probe : null;
+      if (stopped) return;
+      const saved = ctx.job().engineState.validators ?? null;
+      if (!check) {
+        // fresh download: handled above
+      } else if (check.ok) {
         const verdict = compareValidators(saved, check.validators);
         if (resuming && verdict === 'changed' && partial) {
           log.warn('The file changed on the server since this download began; starting over', { job: job.title, saved, now: check.validators });
@@ -662,8 +773,13 @@ export const aria2Runner: Runner = (ctx) => {
       try {
         const st = fs.statfsSync(dir);
         const free = st.bavail * st.bsize;
-        if (free < expectedBytes * 1.02) {
-          ctx.fail(`Not enough free space for this download (needs ~${formatBytes(expectedBytes)}, ${formatBytes(free)} free). Free up space or choose another folder in Settings.`);
+        // A resumed download already holds part of the file, so only the rest needs room. Checking the whole size refused to
+        // finish a 100 GB download that was 60 GB in with 45 GB free, which is exactly the case where the user needs it to go on.
+        const partial = typeof opts.out === 'string' ? path.join(dir, opts.out) : null;
+        const have = partial && fs.existsSync(`${partial}.aria2`) ? Math.min(expectedBytes, ctx.job().progress.downloadedBytes ?? 0) : 0;
+        const needed = expectedBytes - have;
+        if (free < needed * 1.02) {
+          ctx.fail(`Not enough free space for this download (needs ~${formatBytes(needed)}${have ? ' more' : ''}, ${formatBytes(free)} free). Free up space or choose another folder in Settings.`);
           return;
         }
       } catch {
@@ -753,6 +869,29 @@ export const aria2Runner: Runner = (ctx) => {
     },
   };
 };
+
+/**
+ * Another local drive with room for `needBytes`, worded for the "not enough space" message ("D:\ has 122 GB free"), or null.
+ * Windows only. Each probe gets 1.5 s so a disconnected network drive cannot hold the poll up; this runs once per block, not per poll.
+ */
+async function driveWithRoom(needBytes: number, currentDir: string): Promise<string | null> {
+  if (process.platform !== 'win32') return null;
+  const here = path.parse(path.resolve(currentDir)).root.toUpperCase();
+  const found: { root: string; free: number }[] = [];
+  await Promise.all([...'CDEFGHIJKLMNOPQRSTUVWXYZ'].map(async (letter) => {
+    const root = `${letter}:\\`;
+    if (root === here) return;
+    try {
+      const st = await Promise.race([fs.promises.statfs(root), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('slow')), 1500))]);
+      const free = Number(st.bavail) * Number(st.bsize);
+      if (free >= needBytes) found.push({ root, free });
+    } catch {
+      // no such drive, not ready, or too slow to ask
+    }
+  }));
+  found.sort((a, b) => b.free - a.free);
+  return found[0] ? `${found[0].root} has ${formatBytes(found[0].free)} free` : null;
+}
 
 /** Delete a file that may still be held open by a process that is shutting down; gives up after ~20 s. */
 async function removeWhenFree(file: string, tries = 40): Promise<void> {

@@ -70,7 +70,8 @@ export const settingsSchema = z.object({
      * per file were measured to do nothing at all. See D19.
      */
     playlistWorkers: clampInt(1, MAX_PLAYLIST_WORKERS, DEFAULT_PLAYLIST_WORKERS),
-    speedLimitKbps: clampInt(0, 1_000_000, 0),
+    // 0 = unlimited (the default). The maximum a person may ask for is 100 GB/s: it used to be 1 GB/s, which a 10-25 Gbps line outruns.
+    speedLimitKbps: clampInt(0, 100_000_000, 0),
     speedLimitSchedule: section({
       enabled: z.boolean().catch(false),
       from: time('09:00'),
@@ -197,7 +198,13 @@ export const settingsSchema = z.object({
     cookiesFile: z.string().catch(''),
     userAgent: z.string().max(400).catch(''),
     forceIpv4: z.boolean().catch(false),
-    connectionsPerServer: clampInt(1, 16, 16),
+    // 8, not 16 (measured 2026-11-02, Debian mirror, same line, two rounds each): 1 connection 24-25 MB/s, 4 -> 28-31, 8 -> 32-33,
+    // 16 -> 27-29. More is not better: past about 8 the extra connections cost more (server limits, 16 competing writes to one file)
+    // than they add. Existing installs keep whatever they saved; this is the starting value for new ones.
+    connectionsPerServer: clampInt(1, 16, 8),
+    // IPv4 addresses of the network connections downloads may use. Empty = let Windows choose (the default). One pins every
+    // download to that connection; two or more share them out, so Wi-Fi and Ethernet each carry part (core/networkBind).
+    bindAddresses: z.array(z.string().max(45)).max(8).catch([]),
   }),
 
   torrents: section({
@@ -206,7 +213,7 @@ export const settingsSchema = z.object({
     listenPort: clampInt(1024, 65535, 6881),
     requireEncryption: z.boolean().catch(false),
     maxPeers: clampInt(10, 500, 120),
-    uploadLimitKbps: clampInt(0, 1_000_000, 0),
+    uploadLimitKbps: clampInt(0, 100_000_000, 0),
     dht: z.boolean().catch(true),
     autoTrackers: z.boolean().catch(true),
   }),

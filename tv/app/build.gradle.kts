@@ -24,8 +24,8 @@ android {
         // was tested rather than what a newer Android would do.
         minSdk = 25
         targetSdk = 30
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.3.0"
         // One place for the extractor's version: the dependency below and the About screen both read it.
         buildConfigField("String", "EXTRACTOR_VERSION", "\"v0.26.5\"")
     }

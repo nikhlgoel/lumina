@@ -5,6 +5,86 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-02 (50) - 50 GiB torrent proved end to end; two download fixes
+
+* **Asked for:** prove a 50+ GB download completes correctly, with a pirated game repack's `.torrent` as the fixture. **Declined:** the
+  fixture rule (AGENTS.md rule 2) stands and is not edited; the repack is the infringement itself, not just a rule. The same claim was
+  tested with a torrent generated here instead, which is a stricter test because every byte is known.
+* **Method (repeatable):** a throwaway script writes a deterministic AES-CTR file (50 GiB, 16 MiB pieces), its private `.torrent`, and the
+  SHA-256 of the file. A one-peer HTTP tracker plus a second aria2 (seed, `--bt-seed-unverified`) serve it on 127.0.0.1. Lumina's real runner
+  downloads it through the queue in the offscreen harness: `LUMINA_PROBE_MODE=big LUMINA_PROBE_URL=<.torrent> LUMINA_PROBE_DIR=<dir>`
+  (new `bigProbe` in `src/main/capture.ts`; pauses and resumes once at `LUMINA_PROBE_PAUSE_PCT`, never cancels). Keep the scratch profile
+  on another `listenPort` and DHT off. Needs ~100 GiB free: the seed and the copy are both real files.
+* **Result (measured):** 53,687,091,200 bytes, SHA-256 identical to the source, both runs.
+  Run 1, pause at 25% and resume: 499 s, mean ~108 MB/s, 206 MB/s peak, 31 MB/s low, no warnings in the log.
+  Run 2, Lumina's aria2 force-killed at ~100 s and ~300 s: the runner restarted the engine, re-added the torrent and resumed in ~2 s each time, the job
+  never failed, 329 s total; progress fell back ~3% (work since the last 10 s control-file save).
+* **Not proven:** 100 GB / 200 GB (the user will test), a real public swarm of that size, a spinning disk, FAT/exFAT targets, the sparse-file path on a
+  non-NTFS volume. Both runs used one local seeder, so the numbers are disk-bound (seed and copy share one drive), not network-bound.
+* **Fixed (code, `src/main/jobs/aria2.ts`):** (1) a resumed direct download compared the *whole* size to free space, so a 100 GB download 60 GB in with 45 GB
+  free was refused; it now needs only what is left. (2) every new direct download waited up to 15 s for a one-byte range probe before aria2 started;
+  it now waits only when there is a partial to protect and otherwise records the probe in the background. Neither has a live test yet; `tsc` and 1164 tests pass.
+* **Seen, not changed:** the torrent poll does a synchronous `statSync` per file every second and asks aria2 for the full file list each time, which will
+  cost on a torrent with thousands of files (the 50 GiB test had one file, so it did not show it).
+* **Multi-file torrent (measured):** 3,000 files / 777,438,000 bytes through the real runner with a pause at 50%: 23 s, all files present, combined
+  SHA-256 identical, no warnings. Shows a finished job's "downloaded" figure a hair under its total (740.6 of 777.4 MB; 53.657 of 53.687 GB in the
+  50 GiB run) although the data is complete; the display, not the data, is off. Not fixed.
+* **The owner's stuck Battlefield torrent (their log, read only; nothing was fetched):** the drive (C:, 388 GB) has 3.69 GB free and the selected
+  files total 55.5 GB with 19.8 GB already on disk, so it cannot finish there at all. Separately, aria2 stopped answering RPC about 9:00 into two runs
+  (13:34:46 -> 13:43:46 and 09:05:46 -> 09:14:39), was killed after 120 s of silence, and the swarm went from ~50 peers to 0 seeds and then sat at 1 peer
+  for hours. The files were already sparse, so the 10-23 NTFS zero-fill theory (core/engineWatch.ts) does not explain these. **Cause of the hang is
+  unproven.** Also in the log: sleep counted as silence (1524 s right after "Resumed from sleep", aria2 killed), file selection failing with
+  "Cannot change option for GID" after a re-add, and the space guard pausing and resuming 3 s apart.
+* **Fixed for that:** sleep gaps restart the silence and stall clocks (`sleptBetween`, tested); the live gid is refreshed on every add; the space guard
+  needs 512 MB extra to resume; a silent engine on a disk with under 512 MB free fails with a "disk almost full" message instead of restart loops;
+  failed-poll warnings now carry `freeGb` so the next hang says whether the disk was full. `tsc` clean, 1167 tests pass.
+* **"Default Electron app" cause found (registry read):** `magnet:` and `lumina:` in `HKCU\Software\Classes` pointed at
+  `node_modules\...\electron.exe . "%1"`. `index.ts` registered the protocol handlers on every launch, including development runs (`electron .`,
+  the screenshot harness), so each such run, mine included, pointed every magnet link at bare Electron. Now only a packaged build registers
+  (`LUMINA_REGISTER_PROTOCOLS=1` opts in from source), and the Windows jump list (`tray.ts`) is likewise packaged-only. Not re-verified against
+  the registry: the stale values are still there until a packaged Lumina is launched once, which re-registers itself. A machine-wide
+  "Lumina 1.1.0" install also exists (HKLM), so the new installer was NOT run here: it shares the app id and would replace that registration.
+* **Out-of-space message now names a drive with room** (`driveWithRoom`, Windows, 1.5 s per probe, once per block). Checked live: a 5 GiB torrent aimed at C: (3.7 GB free) paused and said "save to another drive (D:\ has 114 GB free)". Not added: moving a half-done torrent to another drive from the UI.
+* **Move a half-done torrent (built, live-tested):** torrent details panel has Move…, backed by `torrent:move` -> `queue.moveTorrent` -> `main/jobs/moveTorrent.ts` (data + `.aria2` move together; rename, or copy then delete across drives; never overwrites; 8 tests). Live: a 1 GiB torrent started on C:, moved to D: at 30%, resumed there, finished, SHA-256 identical, C: left empty. The live run found a real bug the unit tests could not: `set()` builds from the job it is handed, so a job held across `pause()` put its old status back and `resume()` did nothing; it now re-reads the job each time. Cross-drive copy writes the logical size (sparse gaps become zeros), so the target needs room for the whole selection.
+* **Finished figure fixed:** `finish()` now stores the engine's final total, so a done job reads 1,073,741,824 of 1,073,741,824 bytes (checked on a
+  1 GiB torrent with matching SHA-256) instead of ~0.06% short.
+* **Large direct downloads, done here (real runner, local HTTP server that generates a seekable AES-CTR stream, so no source file is needed):** 4 GiB in 20.4 s (peak 255 MB/s, SHA-256 identical, no delayed "writing" phase); 100 GiB (107,374,182,400 B) in 310 s, mean 338 MB/s, peak 558, low 103, pause+resume at 50.8%, SHA-256 identical to the generated stream, no warnings; a 200 GiB file on a disk with 121 GB free is refused at once ("Not enough free space ... needs ~200 GB, 121 GB free"), nothing written. A real 200 GB download needs a drive with that much room and was not run. The friend's "downloaded, then hours to write" is not reproduced on a current build; the 10-23 sparse-file fix targeted exactly a 4 GB direct file stalling, so an older build is the likely cause, not proven.
+* **Use two network connections at once (built):** aria2 1.37 already has `--multiple-interface` ("requests will be split among the interfaces to achieve link aggregation"); Lumina never passed it. New setting `network.bindAddresses` (IPv4 list, core/networkBind.ts, 9 tests), checkboxes under Settings > Downloads, `network:interfaces` channel; one address pins everything to it, two or more share the work; passed to both the aria2 engine (restart when idle, like the other start-up options) and yt-dlp's aria2 downloader. Checked live with two loopback addresses: the server saw 260 MB from 127.0.0.1 and 256 MB from 127.0.0.2 for one 512 MiB file. NOT checked with a real Wi-Fi + Ethernet pair (this PC has one live uplink); gains need two separate internet lines, and torrents/yt-dlp native fragment downloads are not split this way. Windows is in strong-host mode on every adapter here, which is what makes binding to an IP use that adapter.
+* **settings.json with a byte-order mark** (Notepad/PowerShell "UTF-8") made Lumina silently discard the whole file for defaults; the BOM is now skipped.
+* **Disk cleanup done at the owner's instruction (2026-11-02), nothing tracked deleted (git status checked in 7 repos):** C: free 24.7 -> 137.3 GB, D: 132.3 -> 255.7 GB
+  (final 137.4 / 257.2). Removed generated output only. For THIS repo: `release/` is gone (installer/APK kept in D:/main/projects/temp/lumina-share/, hash-checked;
+  `bash build-variants.sh full` recreates the rest); `resources/bin` tools were not touched. Not removed: Windows (WinSxS), pagefile/hiberfil, WSA disk, Steam
+  "Where Winds Meet", `.rustup` (it is the Rust toolchain, not a cache). Docker data disk compacted by diskpart: only 59.64 -> 58.09 GB because it is full of live
+  data (images 20.6, volumes 12.1, build cache 30.2 GB).
+* **Release 1.2.0 + TV 0.3.0 prepared (tag `1.2.0`, no "v": `v*` tags trigger the never-run CI workflow).** Findings worth keeping:
+  - **Two real lines (Wi-Fi 2-3 MB/s, USB tether 34 MB/s), Lumina's downloader, 75 s each:** Wi-Fi alone 1.9, tether alone 34.4, both with aria2's
+    equal split 32.5 (5% SLOWER: 5 of 8 connections went to the slow line). Fix = `weightedBindList` (core/networkBind) + `measureLines` (main/lineSpeed.ts,
+    4 connections per line, 1.5 s warm-up, cached 10 min); weighted 6:2 gave 40.0 MB/s. aria2 honours a repeated address in `--multiple-interface`
+    (7:1 listing gave 7 and 1 connections). Gotchas found on the way: Node `https` with `localAddress` needs `family: 4` or it fails "bind EINVAL"
+    (DNS64 hands out IPv6 first); a reused test profile resumes old jobs and doubles the connections (use a fresh profile per run); Java/Gradle
+    hung on this tether until `-Djava.net.preferIPv4Stack=true`.
+  - **IDM-style parallel connections:** against a server capping each connection at 2 MB/s, 1 / 8 / 16 connections gave 1.3 / 10.6 / 21.0 MB/s, so
+    aria2's split behaves like IDM's. aria2 caps at 16 per server (IDM 32). Possible improvement not done: raise the count automatically when the
+    per-connection speed is the limit.
+  - **"Search for Lumina shows files, not the app":** Windows had an app called "Electron" under Lumina's app id (`com.lumina.media`):
+    `Start Menu/Programs/Electron.lnk` pointing at the dev electron.exe, rewritten by Electron on every run from source. Removed (backup in
+    lumina-bigtest/install-backup); source runs now use `com.lumina.media.dev`. Build folders marked NotContentIndexed (`attrib +I /S /D`).
+  - **Fire TV (karat, Fire OS 8, 1.7 GB RAM) is on a 2.4 GHz "Goel 4G" link at 39 Mbit/s, -67 dBm.** That, not the player, is the main cause of
+    streaming stalls (1080p: one stall in 190 s). Added `RebufferGuard` (3 stalls in 90 s -> one quality lower), rebuffer resume 3 s -> 5 s,
+    readable control times + darker scrim, and `UsefulVideos` (tech/learning-first recommendations seeded from history and daily evergreen topics;
+    `adb logcat -s Recs` shows the picks). ADB over Wi-Fi drops when the stick sleeps; reconnect before each command. NOT verified on the stick: the
+    quality step-down firing (unit-tested only), and recommendations learning from a tech watch history (only evergreen topics were exercised).
+* **"Is there a 129 MB/s write ceiling?" No (audited + measured).** The 129 was one 2-second disk-write sample while the 251 MB write cache flushed. The
+  code sets no speed cap: speed limit 0 unless the user sets one (its maximum was 1 GB/s, now 100 GB/s for both limits), `--disk-cache` is a smoothing
+  buffer (16 MB per GB RAM, 64-512 MB; when the disk is slower than the line the buffer fills and the engine slows its reads, so speed settles at the
+  slower of the two). Epic-style measurement (real internet file, D: write counter beside Lumina's speed): writes alongside the download, ~0 reads. Unthrottled
+  loopback, 16 connections: 287 -> 399 MB/s, disk 336-429 MB/s. NOT testable here: multi-GB/s lines or SSDs; the `--disk-cache` 512 MB cap was left as is
+  (no evidence it limits anything).
+* **Earlier this day (desktop):** default connections per server 16 -> 8 (measured best on this line), live-applicable aria2 options, and a settings change no
+  longer restarts aria2 while anything is active (that was the "peers drop on Apply" bug).
+
+---
+
 ## 2026-10-27 (49) - First public release (desktop 1.1.0, TV 0.2.0), a clean removal, and the website
 
 * **Committed and pushed** in three commits (`3d312e0` desktop, `2ded494` TV, `bfa142c` release prep) after the `.gitignore` and the staged files

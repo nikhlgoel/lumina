@@ -77,6 +77,20 @@ export function TorrentDetail({ id }: { id: string }) {
     }
   };
 
+  const move = async () => {
+    const dir = await call('dialog:pick-folder', { title: 'Move this torrent to…' });
+    if (!dir) return;
+    setBusy(true);
+    try {
+      await call('torrent:move', { id, dir });
+      toast('Moved. The download carries on from the new folder.', 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4 border-t border-line bg-sunken px-4 py-4">
       <div className="flex flex-wrap items-start gap-5">
@@ -119,6 +133,7 @@ export function TorrentDetail({ id }: { id: string }) {
             <div className="ml-auto flex gap-2">
               <Button variant="ghost" size="sm" onClick={() => setChecked(detail.files.map((f) => f.index))}>All</Button>
               <Button variant="ghost" size="sm" onClick={() => setChecked([])}>None</Button>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => void move()} title="Move what is downloaded so far to another folder or drive, and carry on there">Move…</Button>
               <Button variant="primary" size="sm" disabled={busy || !changed || selection.length === 0} onClick={() => void apply()}>
                 Apply
               </Button>

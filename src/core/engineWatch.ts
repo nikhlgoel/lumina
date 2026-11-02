@@ -38,6 +38,15 @@ export function rpcAction(silentForMs: number, processAlive: boolean): RpcAction
   return silentForMs >= BUSY_GRACE_MS ? 'restart' : 'wait';
 }
 
+/**
+ * Two status polls are normally a second apart, up to about eleven when one waits out its timeout. A gap much longer than
+ * that means the computer slept (or this process was frozen), not that the engine went quiet. The owner's log has it:
+ * "Resumed from sleep", then a single failed poll reporting 1524 s of silence, then aria2 killed on the spot although it was fine.
+ */
+export const SLEEP_GAP_MS = 45_000;
+
+export const sleptBetween = (lastPollAt: number, now: number): boolean => lastPollAt > 0 && now - lastPollAt > SLEEP_GAP_MS;
+
 export type StallAction = 'none' | 'nudge' | 'readd' | 'restart';
 
 export interface StallState {

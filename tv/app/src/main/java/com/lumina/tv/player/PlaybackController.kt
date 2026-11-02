@@ -3,6 +3,7 @@ package com.lumina.tv.player
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -19,6 +20,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import com.lumina.tv.core.PlaybackSpeed
+import com.lumina.tv.core.RebufferGuard
 import com.lumina.tv.core.StreamPicker
 import com.lumina.tv.core.SubtitleOption
 import com.lumina.tv.core.SubtitleRules
@@ -124,6 +126,19 @@ class PlaybackController(
     private var resolved: ResolvedMedia? = null
     private var dropped = 0
     private var retriedExpiredLink = false
+    private val rebuffers = RebufferGuard()
+    private var lastState = Player.STATE_IDLE
+
+    /** The connection cannot keep up with this picture: go one quality lower, at the same second, and say so. */
+    private fun stepDownForStalls() {
+        val now = nowState.value ?: return
+        val media = resolved ?: return
+        if (now.kind != MediaKind.VIDEO || now.qualityIndex !in 0 until now.qualities.lastIndex) return
+        val lower = now.qualityIndex + 1
+        Log.w(TAG, "Stalled repeatedly at ${now.qualities[now.qualityIndex].label}; stepping down to ${now.qualities[lower].label}")
+        errorState.value = "Slow connection: switched to ${now.qualities[lower].label} for smoother playback."
+        playQuality(media, now.qualities, lower, player.currentPosition)
+    }
 
     init {
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -142,6 +157,19 @@ class PlaybackController(
             override fun onPlaybackStateChanged(state: Int) {
                 // A streamed song that finishes hands over to the next one in its queue, as a library queue does by itself.
                 if (state == Player.STATE_ENDED && nowState.value?.streaming == true && queueState.value.hasNext) nextStream()
+                // Ran dry in the middle of playing (not the first load, not a seek): three of those in a minute and a half means
+                // this picture is too much for the connection, so step down one quality instead of cycling play / load / play.
+                if (state == Player.STATE_BUFFERING && lastState == Player.STATE_READY && player.playWhenReady && nowState.value?.streaming == true) {
+                    // `adb logcat -s Playback` lists every time the picture or sound ran dry, so "smooth" can be counted, not guessed.
+                    Log.i(TAG, "Ran dry at ${player.currentPosition} ms, ${nowState.value?.qualities?.getOrNull(nowState.value?.qualityIndex ?: -1)?.label ?: "audio"}, buffered ahead ${player.totalBufferedDuration} ms")
+                    if (rebuffers.stalled(SystemClock.elapsedRealtime())) stepDownForStalls()
+                }
+                lastState = state
+            }
+
+            // A seek makes the player buffer on purpose; that is not a stall.
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) rebuffers.userAction(SystemClock.elapsedRealtime())
             }
 
             // The caption tracks only exist as selectable groups once the player has prepared them.
@@ -323,6 +351,7 @@ class PlaybackController(
     }
 
     private fun playQuality(media: ResolvedMedia, qualities: List<Quality>, index: Int, startMs: Long) {
+        rebuffers.userAction(SystemClock.elapsedRealtime()) // loading the new stream is expected buffering, not a stall
         val tracks = StreamPicker.audioTracks(media.audio, settings.audioQuality.maxKbps)
         val defaultTrack = StreamPicker.defaultAudioTrack(tracks)
         val track = tracks.firstOrNull { it.id == chosenAudioId } ?: defaultTrack

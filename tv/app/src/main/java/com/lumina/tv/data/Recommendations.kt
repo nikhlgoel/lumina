@@ -1,6 +1,7 @@
 package com.lumina.tv.data
 
 import com.lumina.tv.core.RecommendLogic
+import com.lumina.tv.core.UsefulVideos
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -51,16 +52,27 @@ class Recommendations(
      * [seeds] is newest first: what was played, then what was liked, then what is saved. Rebuilt when those change
      * (a new thing was played) or after the usual half hour; each seed is one page fetch, so only three are used.
      */
-    suspend fun refreshVideos(seeds: List<Track>) = lock.withLock {
+    suspend fun refreshVideos(seeds: List<Track>, watched: List<Track> = emptyList()) = lock.withLock {
         val picked = seeds.distinctBy { it.id }.take(VIDEO_SEEDS)
-        val key = picked.joinToString("|") { it.id }
-        if (picked.isEmpty()) { _videos.value = emptyList(); return@withLock }
+        // What to look for besides "next to what was played": topics from the tech and learning videos already watched, and a couple
+        // of evergreen ones that change daily, so the row is useful from the first day and follows what is actually watched.
+        val day = (now() / DAY_MS).toInt()
+        val queries = (UsefulVideos.interestQueries(watched.map { it.title to it.artist }) + UsefulVideos.curated(day, 2)).distinct()
+        val key = picked.joinToString("|") { it.id } + "#" + queries.joinToString("|")
         if (key == videosSeedKey && _videos.value != null && !RecommendLogic.isDue(videosBuiltAt, now())) return@withLock
         try {
-            val lists = coroutineScope {
-                picked.map { s -> async { runCatching { repo.related(s, VIDEO_PER_SEED) }.getOrDefault(emptyList()) } }.map { it.await() }
+            val (related, searched) = coroutineScope {
+                val r = picked.map { s -> async { runCatching { repo.related(s, VIDEO_PER_SEED) }.getOrDefault(emptyList()) } }
+                val q = queries.map { text -> async { runCatching { repo.videos(text) }.getOrDefault(emptyList()) } }
+                r.map { it.await() } to q.map { it.await() }
             }
-            val merged = RecommendLogic.merge(lists, { it.id }, picked.map { it.id }.toSet(), limit = VIDEO_LIMIT).filterNot(blocks)
+            // Searches first: they are the useful part. The related lists follow, and anything already watched is left out.
+            val seen = (picked + watched).map { it.id }.toSet()
+            val pool = RecommendLogic.merge(searched + related, { it.id }, seen, limit = VIDEO_POOL).filterNot(blocks)
+            val merged = UsefulVideos.rank(pool, { it.title }, { it.artist }, { it.durationSec }, limit = VIDEO_LIMIT)
+            // `adb logcat -s Recs` shows what was searched and what was picked, so the row can be checked without scrolling a TV.
+            android.util.Log.i("Recs", "queries=$queries watched=${watched.size} pool=${pool.size} picked=${merged.size}")
+            merged.take(10).forEach { android.util.Log.i("Recs", "  [${UsefulVideos.score(it.title, it.artist)}] ${it.title.take(70)} — ${it.artist.take(30)}") }
             if (merged.isNotEmpty()) {
                 _videos.value = merged
                 videosSeedKey = key
@@ -110,5 +122,8 @@ class Recommendations(
         const val VIDEO_SEEDS = 3
         const val VIDEO_PER_SEED = 10
         const val VIDEO_LIMIT = 24
+        /** Candidates collected before the useful ones are picked out of them. */
+        const val VIDEO_POOL = 80
+        const val DAY_MS = 86_400_000L
     }
 }

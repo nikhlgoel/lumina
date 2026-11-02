@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { offerableAddresses } from '../core/networkBind';
 import {
   inputSchemas, type DiskUsage, type EventChannel, type EventPayloads, type ExtensionStatus, type InvokeChannel, type InvokeOutputs, type SpotifyStatus,
 } from '../shared/ipc';
@@ -319,6 +321,10 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'ide:search': ({ query, caseSensitive }: { query: string; caseSensitive?: boolean }) => searchInFiles(query, { caseSensitive }),
   'torrent:detail': ({ id }: { id: string }) => torrentDetail(id),
   'torrent:select-files': ({ id, indices }: { id: string; indices: number[] }) => selectTorrentFiles(id, indices),
+  'torrent:move': async ({ id, dir }: { id: string; dir: string }) => {
+    await queue.moveTorrent(id, dir);
+    return true;
+  },
   'usb:drives': () => listDrives(),
   'usb:prepare': ({ root }: { root: string }) => prepareDrive(root),
   'usb:export': ({ root, kinds }: { root: string; kinds: ('audio' | 'video')[] }) =>
@@ -421,6 +427,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
     await shell.openPath(dir);
   },
 
+  'network:interfaces': () => offerableAddresses(os.networkInterfaces()),
   'storage:usage': async () => {
     const s = settings.get().storage;
     const dirs: [string, string][] = [['Music', s.musicDir], ['Videos', s.videoDir], ['Files and torrents', s.otherDir]];
