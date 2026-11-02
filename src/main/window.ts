@@ -107,9 +107,20 @@ export function createWindow(opts: { show: boolean; mode: AppMode; offscreen?: b
     callback(['fullscreen', 'clipboard-read', 'clipboard-sanitized-write', 'media'].includes(permission));
   });
 
-  win.once('ready-to-show', () => {
-    if (opts.show) win?.show();
-  });
+  // Show on whichever comes first: the first paint, the page finishing loading, or a few seconds passing. Waiting for the first paint
+  // alone left a window that never appeared when that event came early or not at all, and the person had to click Lumina again.
+  if (opts.show) {
+    const w = win;
+    let shown = false;
+    const reveal = () => {
+      if (shown || w.isDestroyed()) return;
+      shown = true;
+      bringToFront(w);
+    };
+    w.once('ready-to-show', reveal);
+    w.webContents.once('did-finish-load', reveal);
+    setTimeout(reveal, 4000).unref();
+  }
 
   win.on('close', (event) => {
     const s = settings.get();
@@ -171,7 +182,21 @@ export function showWindow(next?: AppMode) {
   }
   const w = mainWindow() ?? createWindow({ show: true, mode: next ?? mode });
   if (next && next !== mode) setMode(next);
+  bringToFront(w);
+}
+
+/**
+ * Show the window and put it in front of the others.
+ *
+ * Windows only lets a process raise its window when it owns the foreground, and a Lumina that has just been started from a shortcut
+ * often does not by the time its page is ready: the window then opens behind whatever was in front, which looks like nothing happened.
+ * Holding the window on top for an instant gets it raised regardless, and it is let go straight away so it does not stay pinned.
+ */
+function bringToFront(w: BrowserWindow) {
   if (w.isMinimized()) w.restore();
   w.show();
+  w.setAlwaysOnTop(true);
   w.focus();
+  w.moveTop();
+  w.setAlwaysOnTop(false);
 }

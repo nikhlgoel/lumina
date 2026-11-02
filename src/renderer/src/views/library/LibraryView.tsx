@@ -26,7 +26,7 @@ function qualityTag(item: LibraryItem): string | null {
   return item.bitrateKbps ? `${item.bitrateKbps}k` : null;
 }
 
-type MusicView = 'details' | 'compact';
+type MusicView = 'details' | 'compact' | 'tiles';
 type VideoView = 'grid' | 'list';
 
 export function LibraryView() {
@@ -70,7 +70,7 @@ export function LibraryView() {
             <ViewToggle
               value={musicView}
               onChange={(v) => void updateSettings({ library: { musicView: v } })}
-              options={[{ value: 'details', label: 'Details', icon: <Rows3 /> }, { value: 'compact', label: 'Compact', icon: <ListMusic /> }]}
+              options={[{ value: 'details', label: 'Details', icon: <Rows3 /> }, { value: 'compact', label: 'Compact', icon: <ListMusic /> }, { value: 'tiles', label: 'Tiles', icon: <LayoutGrid /> }]}
             />
           )}
           {tab === 'videos' && (
@@ -163,6 +163,7 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
       if (useApp.getState().settings?.player.openPlayerOnPlay) setMode('player');
     });
   };
+  if (view === 'tiles') return <MusicTiles items={items} currentId={currentId} playing={playing} play={play} />;
   const compact = view === 'compact';
   const cols = compact ? 'grid-cols-[32px_1fr_52px_104px]' : 'grid-cols-[44px_1fr_1fr_110px_64px_112px]';
   return (
@@ -219,6 +220,48 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
         }}
       />
       {!compact && <p className="border-t border-line px-3 py-1.5 text-xs text-ink-3">Double-click a song to play it. The rest of the list plays after it.</p>}
+    </div>
+  );
+}
+
+/** Large square covers with the title underneath, like Explorer's large icons. Rendered in pages so a big library stays light. */
+const TILE_PAGE = 240;
+function MusicTiles({ items, currentId, playing, play }: { items: LibraryItem[]; currentId: string | undefined; playing: boolean; play: (index: number) => void }) {
+  const [shown, setShown] = useState(TILE_PAGE);
+  const { reveal } = useItemActions();
+  useEffect(() => setShown(TILE_PAGE), [items]);
+  return (
+    <div className="h-full overflow-auto pr-1 pb-4">
+      <div className="grid auto-rows-min grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-x-4 gap-y-5">
+        {items.slice(0, shown).map((item, index) => {
+          const isCurrent = item.id === currentId;
+          return (
+            <article key={item.id} className="group min-w-0">
+              <button aria-label={`Play ${item.title}`} onClick={() => play(index)} className="relative block aspect-square w-full overflow-hidden rounded-xl border border-line bg-sunken shadow-sm transition-transform duration-200 hover:-translate-y-0.5">
+                <Artwork src={item.hasArtwork ? art(item.id, 200) : null} seed={item.album ?? item.title} className="size-full" rounded="rounded-none" />
+                {isCurrent && playing
+                  ? <span className="absolute inset-0 grid place-items-center bg-black/45"><EqBars /></span>
+                  : <span className="absolute inset-0 grid place-items-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"><Play className="size-6 fill-white text-white" /></span>}
+              </button>
+              <div className="mt-2 flex items-start gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className={cn('truncate text-sm leading-snug font-semibold', isCurrent && 'text-accent')} title={item.title}>{item.title}</p>
+                  <p className="truncate text-xs text-ink-3">{item.artist ?? 'Unknown artist'}</p>
+                </div>
+                <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <LikeButton item={item} />
+                  <IconButton label="Show in folder" size="sm" onClick={() => reveal(item.path)}><FolderOpen /></IconButton>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {shown < items.length && (
+        <div className="mt-5 flex justify-center">
+          <Button variant="ghost" size="sm" onClick={() => setShown((n) => n + TILE_PAGE)}>Show {Math.min(TILE_PAGE, items.length - shown)} more</Button>
+        </div>
+      )}
     </div>
   );
 }

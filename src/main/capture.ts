@@ -187,6 +187,34 @@ export const bigProbe = (url: string, dir: string, pauseAtPct: number, maxSecs: 
   return JSON.stringify({ events, samples });
 })()`;
 
+/**
+ * LUMINA_PROBE_MODE=select: pick files 1-4 of a running multi-file torrent, then pause and resume it, sampling what the job and the
+ * torrent panel report each time. It exists because the panel once showed every file selected right after a selection was applied.
+ */
+export const selectProbe = (url: string, dir: string) => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const info = await inv('media:inspect', { url: ${JSON.stringify(url)} });
+  const options = { contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const { id } = await inv('jobs:add', { url: ${JSON.stringify(url)}, info, options });
+  const t0 = Date.now(), samples = [], events = [];
+  const snap = async (label) => {
+    const j = (await inv('jobs:list')).find((x) => x.id === id);
+    const d = await inv('torrent:detail', { id }).catch(() => null);
+    const sel = d ? d.files.filter((f) => f.selected) : [];
+    samples.push({ t: Date.now() - t0, label, status: j && j.status, jobTotal: j && j.progress.totalBytes, pct: j ? +j.progress.percent.toFixed(1) : null,
+      files: d ? d.files.length : null, selected: d ? sel.length : null, selectedBytes: d ? sel.reduce((a, f) => a + f.sizeBytes, 0) : null,
+      downKBs: d ? Math.round(d.downloadSpeed / 1024) : null, upKBs: d ? Math.round(d.uploadSpeed / 1024) : null });
+  };
+  await sleep(9000); await snap('before');
+  await inv('torrent:select-files', { id, indices: [1, 2, 3, 4] }); events.push({ t: Date.now() - t0, m: 'selected files 1-4' });
+  for (let i = 0; i < 6; i++) { await sleep(2000); await snap('after-select'); }
+  await inv('jobs:pause', { id }); events.push({ t: Date.now() - t0, m: 'paused' }); await sleep(3000); await snap('paused');
+  await inv('jobs:resume', { id }); events.push({ t: Date.now() - t0, m: 'resumed' });
+  for (let i = 0; i < 8; i++) { await sleep(2500); await snap('after-resume'); }
+  return JSON.stringify({ events, samples });
+})()`;
+
 export const shotProbe = (url: string, dir: string, waitMs: number) => `(async () => {
   const inv = (c, a) => window.lumina.invoke(c, a);
   const info = await inv('media:inspect', { url: ${JSON.stringify(url)} });
@@ -230,8 +258,9 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   ...(probeDir && probeRows.length === 3 ? [{ name: 'probe-rows', script: rowsProbe(probeRows, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_MS) || 7000, Number(process.env.LUMINA_PROBE_SETTLE_MS) || 5000), delay: 300 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
+  ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'select' ? [{ name: 'probe-select', script: selectProbe(probeUrl, probeDir), delay: 500 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'big' ? [{ name: 'probe-big', script: bigProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_PCT) || 25, Number(process.env.LUMINA_PROBE_SECS) || 7200, process.env.LUMINA_PROBE_MOVE_TO ?? ''), delay: 500 }] : []),
-  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && !['lifecycle', 'big'].includes(process.env.LUMINA_PROBE_MODE ?? '') ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
+  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && !['lifecycle', 'big', 'select'].includes(process.env.LUMINA_PROBE_MODE ?? '') ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
   ...(probeDir && !probeUrl && probeRows.length !== 3 ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
   { name: '01-download-light', script: "document.documentElement.dataset.theme='light'" },
   { name: '02-download-dark', script: "document.documentElement.dataset.theme='dark'" },
@@ -242,6 +271,7 @@ const STEPS: { name: string; script: string; delay?: number }[] = [
   { name: '03-inspect', script: `(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); })()`, delay: 9000 },
   { name: '04-queue', script: goto('Queue') },
   { name: '05-library', script: goto('Library'), delay: 2500 },
+  { name: '05a-library-tiles', script: `${goto('Library')}; setTimeout(() => document.querySelector('button[aria-label="Tiles"]')?.click(), 900)`, delay: 3000 },
   { name: '05b-library-videos', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 900)`, delay: 12000 },
   { name: '05c-library-playlists', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Playlists')?.click(), 900)`, delay: 3000 },
   { name: '05d-library-files', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Files')?.click(), 900)`, delay: 3000 },

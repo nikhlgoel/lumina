@@ -251,7 +251,7 @@ export function TorrentsSection({ s, set }: SectionProps) {
         <Row id="maxPeers" label="Peers per torrent" description="More peers can mean faster downloads on a good connection.">
           <NumberInput value={t.maxPeers} min={10} max={500} onCommit={(v) => set({ torrents: { maxPeers: v } })} />
         </Row>
-        <Row id="uploadLimit" label="Upload limit" description={t.uploadLimitKbps ? `About ${(t.uploadLimitKbps / 1024).toFixed(1)} MB/s` : 'No limit.'}>
+        <Row id="uploadLimit" label="Upload limit" description={t.uploadLimitKbps ? `About ${(t.uploadLimitKbps / 1024).toFixed(1)} MB/s` : 'Automatic: about a tenth of the download speed (at least 50 KB/s) while downloading, no limit once everything is finished and seeding.'}>
           <NumberInput value={t.uploadLimitKbps} min={0} suffix="KB/s" onCommit={(v) => set({ torrents: { uploadLimitKbps: v } })} />
         </Row>
         <Row id="trackers" label="Use a fresh public tracker list" description="Updated daily. Helps magnet links find peers faster.">

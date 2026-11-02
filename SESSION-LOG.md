@@ -5,6 +5,36 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-02 (51) - Torrent file choice forgotten on re-add; upload ran as fast as download
+
+* **Reported (with two screenshots) right after 1.2.0 went out:** a torrent whose optional files were unticked and Apply pressed halted for a
+  minute, came back, and then listed 20 of 20 files selected, a 37 GB header and 56.5 GB still to get; and upload was about as large as
+  download (646 KB/s up, 628 KB/s down).
+* **Cause of the first:** `select-file` was applied to the running download with `changeOption` only. Any later re-add (pause/resume,
+  restart, recovery) built the torrent from the original add options, so the choice vanished. **Fix:** `engineState.fileSelection` saves the
+  spec ("1-4,16-20") with the job and `addToAria` passes it as `select-file` every time. Reproduced first with `LUMINA_PROBE_MODE=select`
+  (new, `capture.ts` `selectProbe`) on a generated 8 x 150 MiB torrent: 1200 MB -> 600 MB and 4/8 files, back to 8/8 after resume.
+  After the fix: 600 MB and 4/8 through pause and resume; only files 0000-0003 on disk.
+* **Cause of the second:** no default upload limit (`uploadLimitKbps` 0 = unlimited). **Fix:** `core/uploadCap.ts` holds the rule (a tenth
+  of download speed, floor 50 KB/s, off when nothing downloads; a change only when the target moves by over 25%) and `Aria2Daemon.governUpload`
+  applies it every 4 s unless the person set a fixed limit. Seen live in the log: limit followed speed, 50 KB/s while paused, off at the end.
+* **Not proven:** (1) that the smaller upload leaves download speed unchanged in a crowded swarm - the test swarm was one local seed that
+  never asks for anything back, so upload was 0 throughout and only the limit's behaviour, not its effect on peers, was observed;
+  (2) selection surviving a full app restart (the field is saved with the job; not exercised).
+* **Also reported, same message:** the Library listed deleted songs (468) with no covers and "Can't play"; wanted a tile view for music; and
+  the first click on Lumina only ran it in the background.
+  * **Library cause:** settings point at `...\OneDrive\Desktop\Music & Videos`, which no longer exists. `roots()` drops roots that do not exist,
+    and the prune only removed rows under a scanned root, so 428 + 40 rows (and others) stayed for ever. **Fix:** `core/libraryPrune.ts`
+    `shouldForget` (gone from disk and its drive is present), used by `scan()`. Run on a copy of the real db through the harness: "475 no
+    longer on disk", 3 real files kept. Likes count now joins `library_items`. A failed play triggers `library:rescan`.
+  * **Tiles:** `musicView` gained `'tiles'`; `MusicTiles` in `LibraryView.tsx`. Photographed (`05a-library-tiles`) with six generated tone files:
+    covers show when embedded, gradient when not.
+  * **First click (NOT reproduced):** logs show "Window created (visible)" on normal starts and settings do not hide it. Hypothesis: on a cold
+    start Windows refuses to raise a window for a process without foreground rights, so it opens behind others; the second launch goes through
+    `second-instance`, which gets them. Change: show on ready-to-show OR did-finish-load OR 4 s, and `bringToFront` (always-on-top for an
+    instant). Unconfirmed until tried on a real double-click.
+* **Release:** 1.2.0 deleted and re-published with these fixes (same version number, as asked).
+
 ## 2026-11-02 (50) - 50 GiB torrent proved end to end; two download fixes
 
 * **Asked for:** prove a 50+ GB download completes correctly, with a pirated game repack's `.torrent` as the fixture. **Declined:** the

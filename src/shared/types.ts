@@ -239,6 +239,8 @@ export interface Job {
     validators?: { etag: string | null; lastModified: string | null; size: number | null };
     /** Time spent actually downloading or processing so far, across pauses and retries (not time spent queued or paused). */
     activeMs?: number;
+    /** Which files of a torrent were chosen, as aria2 writes it ("1-4,16-20"). Re-applied every time the torrent is (re)started, or a pause lost it. */
+    fileSelection?: string;
   };
   /** Set when the job finishes: what the finished row shows beyond "Done". */
   summary?: JobSummary | null;

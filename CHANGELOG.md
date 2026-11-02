@@ -42,6 +42,27 @@ download that kept getting stuck.
 - **A full disk is said plainly** ("The disk is almost full…") instead of the download restarting over and over, and a torrent that was paused for
   lack of space no longer flips between paused and running as free space changes.
 - **A finished download shows its exact size**, not a figure a fraction of a percent short.
+- **The files you choose in a torrent stay chosen.** After you untick files and press Apply, the choice used to be forgotten the next time the
+  download engine re-added the torrent (a pause and resume, a restart, a recovery), so the torrent went back to all files, the header showed
+  the full size again, and the panel listed every file as selected. The choice is now saved with the download and re-applied each time.
+  Checked on a running 8-file torrent: the size dropped from 1200 MB to 600 MB and stayed there, with 4 of 8 files shown, through a pause and
+  resume; only those four files were written to disk.
+- **A torrent no longer gives away as much as it takes.** Nothing limited the upload, so a download could send out as fast as it received
+  (a user's screen showed 646 KB/s up against 628 KB/s down). While a torrent downloads, the upload is now held to about a tenth of the
+  download speed (never below 50 KB/s, so peers still send to you), and the limit comes off when everything has finished and you are seeding.
+  A limit of your own in Settings › Torrents still wins. Checked in the app: the limit followed the download speed, dropped to 50 KB/s while
+  paused and came off at the end. Whether the smaller upload changes download speed in a busy swarm with many peers that expect something
+  in return has not been measured; the test swarm was one local seed that asks for nothing.
+- **The Library no longer lists songs that are gone.** If a library folder was deleted or moved, every song in it stayed listed for good: no
+  cover, "Can't play" on every click, and no rescan removed them, because a folder that no longer exists was never scanned. A rescan now forgets
+  any file that is no longer on disk (files on a drive that is simply unplugged are kept). Checked on a copy of a real library: 475 of 478
+  entries were gone and were removed, and the 3 files that exist stayed. A song that fails to play also triggers a rescan, and the Liked count
+  no longer counts deleted songs.
+- **Music has a Tiles view**: large square covers with the title and artist underneath, next to Details and Compact.
+- **Lumina opens on the first click.** The window could open behind other windows, or not appear, when Lumina was started from a shortcut, so a
+  second click was needed. It now appears as soon as the page is ready (or after a few seconds at most) and is brought to the front. This was
+  found by reading the code and the logs, not reproduced: the window cannot be opened here without taking over the screen, so it is unconfirmed
+  until it is tried on a real double-click.
 - **Choosing which files of a torrent to download works after the connection was re-made.** It used to fail with "Cannot change option".
 - **Torrents with thousands of files update more smoothly.** The progress check no longer reads every file once a second.
 - **A settings file saved with a byte-order mark** (Notepad does this) is read, instead of being replaced by the defaults without a word.

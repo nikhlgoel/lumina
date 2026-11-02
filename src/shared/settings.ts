@@ -159,7 +159,7 @@ export const settingsSchema = z.object({
   library: section({
     watchFolders: z.boolean().catch(true),
     minAudioSeconds: clampInt(0, 600, 30),
-    musicView: z.enum(['details', 'compact']).catch('details'),
+    musicView: z.enum(['details', 'compact', 'tiles']).catch('details'),
     videoView: z.enum(['grid', 'list']).catch('grid'),
   }),
 

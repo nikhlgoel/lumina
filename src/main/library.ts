@@ -10,6 +10,7 @@ import {
   addPaths, movePath, normalizePlaylistName, removeAt, removePaths, uniquePlaylistName, userPlaylistPath,
 } from '../core/collection';
 import { isDownloaderArtifact, isTrailingVolume } from '../core/fileKind';
+import { shouldForget } from '../core/libraryPrune';
 import { database, transaction } from './db';
 import { settings } from './settings';
 import { probe } from './media/probe';
@@ -171,7 +172,8 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
   /* ---------- the collection: likes + playlists made here ---------- */
 
   likedCount(): number {
-    return (database().prepare('SELECT COUNT(*) AS n FROM likes').get() as { n: number }).n;
+    // Only songs still in the library: a like is kept by path, so one for a deleted file must not inflate the count.
+    return (database().prepare('SELECT COUNT(*) AS n FROM likes lk JOIN library_items li ON li.path = lk.path').get() as { n: number }).n;
   }
 
   /** Like or unlike a song. Keyed by path, so it survives a rescan; unknown paths are ignored. */
@@ -326,18 +328,22 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
       await Promise.all(Array.from({ length: 4 }, worker));
       this.flush(batch);
 
-      // Remove files that disappeared from scanned roots.
+      // Forget files that are gone, including those of a folder that was deleted (see core/libraryPrune).
+      let forgotten = 0;
       transaction(() => {
         const del = db.prepare('DELETE FROM library_items WHERE path = ?');
+        const probe = { seen: (p: string) => seen.has(p), exists: (p: string) => fs.existsSync(p), driveUp: (p: string) => fs.existsSync(path.parse(p).root) };
         for (const [p] of existing) {
-          const underScannedRoot = roots.some((r) => p.startsWith(r + path.sep));
-          if (underScannedRoot && !seen.has(p)) del.run(p);
+          if (shouldForget(p, probe)) {
+            del.run(p);
+            forgotten++;
+          }
         }
       });
 
       this.indexPlaylists(playlistFiles, folders, roots);
       this.lastScanAt = Date.now();
-      log.info(`Scan finished in ${Math.round((Date.now() - started) / 1000)}s: ${media.length} files, ${toRead.length} updated`);
+      log.info(`Scan finished in ${Math.round((Date.now() - started) / 1000)}s: ${media.length} files, ${toRead.length} updated, ${forgotten} no longer on disk`);
     } catch (err) {
       log.error('Library scan failed', err);
     } finally {

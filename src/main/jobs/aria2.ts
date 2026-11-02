@@ -19,6 +19,7 @@ import { cookieHeaderFor } from '../../core/cookies';
 import { initialStall, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '../../core/engineWatch';
 import { bindArg, bindArgFromSlots, cleanBindList, weightedBindList } from '../../core/networkBind';
 import { measureLines } from '../lineSpeed';
+import { autoUploadCapKbps, worthChanging } from '../../core/uploadCap';
 import { isSparse, markSparse } from '../sparse';
 import { allocatedBytes, spaceShortfall } from '../../core/diskSpace';
 import { compareValidators } from '../../core/resumeCheck';
@@ -169,6 +170,7 @@ class Aria2Daemon {
         try {
           await this.call('aria2.getVersion');
           this.watchSchedule();
+          this.watchUpload();
           return;
         } catch {
           await new Promise((r) => setTimeout(r, 150));
@@ -190,6 +192,36 @@ class Aria2Daemon {
   async applySettings() {
     if (!this.running()) return;
     await this.call('aria2.changeGlobalOption', dynamicOptions(settings.get())).catch((err) => log.debug('changeGlobalOption failed', err));
+    this.lastUploadCap = -1; // the line above resets the upload limit; let the governor set its own again at its next look
+  }
+
+  private uploadTimer: NodeJS.Timeout | null = null;
+  private lastUploadCap = -1;
+
+  /**
+   * Keep what is given away to a fraction of what is received (core/uploadCap) while a torrent downloads, unless the person set a
+   * fixed upload limit of their own. Looks every few seconds; the limit only changes when the number does.
+   */
+  private watchUpload() {
+    if (this.uploadTimer) return;
+    this.uploadTimer = setInterval(() => void this.governUpload(), 4000);
+  }
+
+  private async governUpload() {
+    if (!this.running() || settings.get().torrents.uploadLimitKbps > 0) return;
+    try {
+      const active = await this.call<{ downloadSpeed?: string; seeder?: string; bittorrent?: unknown }[]>('aria2.tellActive', ['downloadSpeed', 'seeder', 'bittorrent']);
+      const torrents = active.filter((a) => a.bittorrent);
+      const downloading = torrents.some((a) => a.seeder !== 'true');
+      const downKBps = torrents.reduce((n, a) => n + (Number(a.downloadSpeed) || 0), 0) / 1024;
+      const cap = autoUploadCapKbps(downKBps, downloading);
+      if (!worthChanging(this.lastUploadCap, cap)) return;
+      await this.call('aria2.changeGlobalOption', { 'max-overall-upload-limit': cap > 0 ? `${cap}K` : '0' });
+      this.lastUploadCap = cap;
+      log.info(`upload limit now ${cap > 0 ? `${cap} KB/s` : 'off'} (download ${Math.round(downKBps)} KB/s)`);
+    } catch {
+      // the engine is busy or restarting: look again next time
+    }
   }
 
   /**
@@ -240,6 +272,9 @@ class Aria2Daemon {
   stop() {
     if (this.limitTimer) clearInterval(this.limitTimer);
     this.limitTimer = null;
+    if (this.uploadTimer) clearInterval(this.uploadTimer);
+    this.uploadTimer = null;
+    this.lastUploadCap = -1;
     killTree(this.child);
     this.child = null;
   }
@@ -283,6 +318,9 @@ interface LiveTorrent {
 
 const live = new Map<string, LiveTorrent>();
 
+/** Per running torrent job: saves a new file selection into the job record (set by the runner, called by selectTorrentFiles). */
+const selectionSavers = new Map<string, (spec: string) => void>();
+
 const blankLive = (): LiveTorrent => ({
   gid: null, files: [], history: [], seeds: 0, peers: 0,
   downloadSpeed: 0, uploadSpeed: 0, uploadedBytes: 0, downloadedBytes: 0,
@@ -318,6 +356,9 @@ export async function selectTorrentFiles(jobId: string, indices: number[]): Prom
   if (!spec) throw new Error('Pick at least one file to download.');
   await aria2.call('aria2.changeOption', t.gid, { 'select-file': spec });
   log.info(`Torrent file selection for ${jobId}: ${spec}`);
+  // Remember it with the job: aria2 forgets it whenever the download is added again (resume, restart, recovery), and the files
+  // that were switched off then downloaded after all.
+  selectionSavers.get(jobId)?.(spec);
   t.files = t.files.map((f) => ({ ...f, selected: indices.includes(f.index) }));
   return true;
 }
@@ -342,6 +383,7 @@ export const aria2Runner: Runner = (ctx) => {
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
   const isTorrent = job.source.sourceKind === 'torrent';
+  if (isTorrent) selectionSavers.set(job.id, (spec) => ctx.patch({ engineState: { ...ctx.job().engineState, fileSelection: spec } }));
 
   // aria2 drops "<infohash>.torrent" into the download folder (we ask for it so a magnet link can resume
   // without fetching its metadata again). Once the job is done or cancelled it is just litter, but a file
@@ -454,9 +496,12 @@ export const aria2Runner: Runner = (ctx) => {
   // aria2's --continue plus the .aria2 control file resume from the bytes already on disk.
   const addToAria = async (): Promise<void> => {
     if (!addSpec) return;
+    // A torrent started again must come back with the same files chosen, not with all of them (see selectionSavers).
+    const chosen = isTorrent ? ctx.job().engineState.fileSelection : undefined;
+    const opts = chosen ? { ...addSpec.opts, 'select-file': chosen } : addSpec.opts;
     gid = addSpec.torrentPath
-      ? await aria2.call<string>('aria2.addTorrent', fs.readFileSync(addSpec.torrentPath).toString('base64'), [], addSpec.opts)
-      : await aria2.call<string>('aria2.addUri', [addSpec.url], addSpec.opts);
+      ? await aria2.call<string>('aria2.addTorrent', fs.readFileSync(addSpec.torrentPath).toString('base64'), [], opts)
+      : await aria2.call<string>('aria2.addUri', [addSpec.url], opts);
     // The detail panel changes a torrent's file selection through this id. After a re-add or restart it is a new one, and the
     // panel kept the old one until the next successful poll: four selections in a row failed "Cannot change option for GID…" (log).
     const t = live.get(job.id);
@@ -826,6 +871,7 @@ export const aria2Runner: Runner = (ctx) => {
   return {
     stop: (reason) => {
       stopped = true;
+      selectionSavers.delete(job.id);
       verifyAbort.abort();
       if (timer) clearTimeout(timer);
       if (!gid) return;

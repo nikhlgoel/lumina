@@ -231,6 +231,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
     }
     set({ playing: false, buffering: false });
     useApp.getState().toast(`Can’t play “${item.title}”.`, 'error');
+    // The usual reason is a file that was moved or deleted since the last scan. A scan forgets what is gone, so the list stops offering it.
+    void call('library:rescan').catch(() => undefined);
   });
 
   if ('mediaSession' in navigator) {
