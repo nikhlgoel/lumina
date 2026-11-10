@@ -5,6 +5,88 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-10 (55) - YouTube playlists that "did not download": the shared archive said "already done"
+
+* **Asked for:** in the newer build the owner could not download music or videos from YouTube, playlists included; earlier, 8 songs did not
+  download. "Any music or any kind of video from any source ... that's the whole point of having a downloader."
+* **What the evidence did and did not show.** The installed Lumina (`C:\Program Files\Lumina`, running since 10:28 local) has **no log line
+  after 10:28:24 and no YouTube job in its database** (2 jobs, both torrents), so the failing attempts are not recorded anywhere I can read.
+  I therefore reproduced from outside, in scratch profiles, on public playlists (Blender Foundation, Creative Commons; rule 2). A clean
+  profile works: 3 songs as MP3 in ~100 s; **8 of 8 as FLAC in 142 s with the owner's own download settings** (4 workers, 16 fragments,
+  lyrics, artwork); the real Download screen (paste link, "Download 19") starts the job and runs 4 at once.
+* **Reproduced, and the best fit for "I entered the playlist and nothing came": the shared download archive.** yt-dlp's `--download-archive`
+  is a list of video ids; Lumina kept ONE for everything (the owner's holds **423**). Songs once downloaded (as video, in another folder,
+  or since deleted) were skipped, and a playlist where everything is skipped ended **"Done", 100%, 0 files, no message** (measured: 3 asked,
+  3 skipped, 0 files, status completed). Fix: `core/archiveScope.ts` keeps the memory **per kind (audio/video) and per destination folder**
+  (the old `download-archive.txt` is no longer read); and if a playlist skips every item while its own folder holds fewer files than items
+  (`playlistFolder`, `countMedia`, `skippedEverythingWrongly`), the list is thrown away and the run repeated once; if the files are there it
+  says "Nothing new". Real app: run 1 downloads 2 songs; files deleted, memory kept; run 2 logs "forgetting that list" and both come back;
+  run 3 (files present) does not download again.
+* **A stale saved sign-in can fail a public download.** After the failed in-app Google sign-in the owner's `cookiesFrom` is `lumina`, so every
+  yt-dlp run sends `accounts/cookies.txt`. Not shown to break anything (fake login cookies still download a public video; I did not send
+  the owner's real session). But a run that failed while a saved sign-in was in use is now repeated once without it, for inspect and download
+  (`usesSavedSignIn`, `withAccountCookies`). Real app, corrupt cookie file configured: before, inspect fails and nothing starts; after, both
+  retries log and the MP3 arrives.
+* **Corrected from entry 54:** the saved dead connection list does reach yt-dlp's accelerator (`aria2c exited with code 1`, reproduced), but
+  `isAcceleratorFailure` already retried on one connection, so that cost a retry and speed; I did not show it to be fatal for YouTube.
+* **Mistake, undone:** one probe run lost its `settings.json` (a backslash eaten by the shell) and wrote 11 test `.opus` files into the real
+  `C:\Users\datan\Music\Lumina\Blender Releases`. Deleted exactly that folder after listing it; the two October files beside it were not
+  touched. Probe profiles must set `storage.musicDir/videoDir/otherDir`, and the settings file must be checked before a run.
+* **New harness switches:** `LUMINA_PROBE_ITEMS`, `LUMINA_PROBE_KIND=audio`, `LUMINA_PROBE_TARGET`, `LUMINA_PROBE_UI_DOWNLOAD` (presses the screen's
+  own Download button).
+* **Verified:** `tsc` clean; `vitest` 1332/1332 (80 files); `vite build`.
+* **Not proven:** that this is what the owner saw (their failing attempt left no trace); a real private/age-restricted video; YouTube
+  Music, Shorts, live and members-only links; very long playlists (hundreds of items); a real stale Google session; YouTube changes that
+  need a newer yt-dlp than the bundled 2026.08.19 (the app updates it on its own; the owner's copy is 2026.10.26).
+
+## 2026-11-10 (54) - The engine that would not start, torrents on a stingy swarm, a lost-download loop, YouTube sign-in, smarter link finding
+
+* **Asked for:** pick up from the other session's work (1.2.1); make the downloader steadier (a torrent that "sometimes goes to KB/s and
+  needs a rerun"; a torrent that failed with "The download engine (aria2) did not start"); fix the Settings YouTube sign-in ("Google says not
+  authorized"); make the extension find the real download links, not just names; FitGirl-style parts failed; per-part Turnstile pop-ups
+  take hours. Nothing committed or pushed (rule 4); nothing released.
+* **Root causes, each measured (bundled aria2c 1.37.0):**
+  1. **Engine would not start.** `--interface`/`--multiple-interface` naming an address that no longer exists makes aria2 exit at once:
+     `Failed to find given interface X, cause: not available`. Saved bind lists outlive the network they were chosen on; link-local
+     `169.254.x.x` addresses are listed by the OS but have no network. Fix: `core/networkBind.splitByPresence` (link-local counts as missing),
+     `lineSpeed.activeBindList`, `Aria2Daemon.ensure()` tries up to 3 times with the output captured (`core/engineStart.classifyStartFailure`,
+     `nextStartFix`: drop the bind, then another port, then minimal flags). Settings › Downloading lists a saved-but-absent connection as
+     "Not connected right now". Before/after with the owner's exact bad setting: 40 MiB completed after.
+  2. **A torrent on a stingy swarm crawls.** BitTorrent is tit-for-tat; the upload cap (`core/uploadCap`) starved swarms fed by other
+     downloaders. Now off when fewer than 3 seeds (`SEEDS_THAT_FEED_THE_SWARM`; `governUpload` reads `numSeeders`). One run per condition,
+     a lab torrent: it is a measurement of a mechanism, not a statistic. Also: the stall clock now starts at the add, not at the job (an
+     immediate false "stalled 65 s").
+  3. **A lost download polled for ever (new).** The owner's log: four downloads, each logging `GID … is not found` 93 times. One download's
+     recovery restarts the shared engine and puts back only itself; the others ask the new engine about ids it never had. The engine
+     *answers*, so `rpcAction` said "wait" for 120 s, then that download restarted the engine itself, undoing the others. Reproduced with
+     two paced downloads (`twoJobsProbe` in `capture.ts`, `LUMINA_PROBE_MODE=two`) with the engine process killed from outside:
+     **before**, 119 not-found lines and one download still unfinished at 150 s; **after**, 0 lines, both finished in 40 s, log shows
+     "The download engine no longer has this download; adding it again". `core/engineWatch.isLostFromEngine`, `MAX_QUICK_READDS` (4 in a row).
+  4. **"Invalid range header" (the FitGirl parts in the log).** A host answers a slice with the whole remainder; aria2 gives up (errorCode 8),
+     one connection works. `core/progress.isRangeRefusal` + a one-shot retry with `split=1`, and a plain message if it still fails.
+  5. **YouTube sign-in "not authorized".** Google refuses embedded-browser sign-in. The supported route is the person's own browser: the
+     extension hands the YouTube/Google cookies to `/v1/account-cookies` (loopback, paired, bearer token), imported into the account session
+     (`services/accounts.importBrowserCookies`) and exported for yt-dlp. Nothing leaves the PC. `core/accountCookies` decides what counts.
+  6. **Per-part pop-ups were serial.** After a check is solved the driver now hands the turn on while that page finishes
+     (`hosters.ts`). Stand-in host (`scripts/dl-lab/host-standin.mjs`), 6 parts: 39.6 s to 18.7 s; gap between pop-ups 6.4 s to 2.1 s.
+* **Extension:** `pagelinks.js` counts a link whose label is a file name on any host, names a "Download" button by the file name in its row,
+  and finds buttons that are not links (`data-href`/`data-url`/…, `onclick="window.open('…')"`). `mirrors.js` + a popup selector: a page that
+  offers the same files on several hosts starts on one host (Pixeldrain first) instead of sending everything several times.
+* **Verified:** `npx tsc --noEmit` clean; `npx vitest run` 1318/1318 (79 files); `npx vite build`;
+  `tests/e2e/extension-links-e2e.mjs` 38/38 in real headless Chrome, including a mirror page (3 tables + a button with a click handler + an
+  unknown host), the popup choosing Pixeldrain and sending just those 3. Real-app runs listed per item above.
+* **Not proven:**
+  * **The range-refusal retry end to end.** Raw aria2 does print `Invalid range header` against `scripts/dl-lab/range-liar.mjs`, but it
+    *finishes* anyway because connection 1 carries on; the owner's fatal case (2 GB, failed at 1.4 GB) did not reproduce, so the in-app retry
+    has only unit tests (the message detection and the option change). A dead-end I recorded, not a green light.
+  * yt-dlp downloading a real private video with real imported cookies (needs the owner's login); the Settings screen was photographed with
+    fake cookies. Firefox. Any real file host's page (rule 2: none contacted). The FitGirl failure was diagnosed from the owner's own log only.
+  * ~270 `TimeoutError` status polls with the engine alive: by design a busy engine (hashing/writes) is waited for; not shown to be a bug.
+  * One `EPERM` renaming `yt-dlp.exe.new` (2026-10-26, once): unexplained, not touched.
+* **Open decision for the owner (rule 1):** "click once, all repacks pass" would mean reusing a cleared check across a site's links. That is
+  replaying a clearance, which AGENTS.md rule 1 forbids; so the hand-over above is all that is built. Say if the rule should change.
+* **Left running:** nothing. The lab servers on 18570/18580/18590/18571 were mine and are stopped.
+
 ## 2026-11-03 (53) - Several links at once from the browser; Cloudflare cookies; audit items closed
 
 * **Asked for:** another pass for bugs before releasing again, and the extension reviewed: choosing several links on a page (a release's

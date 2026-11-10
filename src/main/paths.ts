@@ -34,6 +34,7 @@ export const tempDir = () => ensure(path.join(app.getPath('temp'), 'lumina'));
 export const artworkCacheDir = () => ensure(path.join(dataDir(), 'artwork'));
 export const databaseFile = () => path.join(dataDir(), 'lumina.db');
 export const settingsFile = () => path.join(dataDir(), 'settings.json');
-export const archiveFile = () => path.join(dataDir(), 'download-archive.txt');
+/** One memory per kind of download and destination folder (see core/archiveScope); the old shared `download-archive.txt` is no longer read. */
+export const archiveFile = (name: string) => path.join(dataDir(), name);
 
 export const exe = (name: string) => (process.platform === 'win32' ? `${name}.exe` : name);

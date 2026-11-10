@@ -22,6 +22,37 @@ export function cleanBindList(list: readonly string[] | undefined): string[] {
   return out;
 }
 
+/** Every IPv4 address this computer has right now (os.networkInterfaces() shape), loopback included. */
+export function presentAddresses(
+  ifaces: Record<string, ReadonlyArray<{ address: string; family: string | number }> | undefined>,
+): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(ifaces)) {
+    for (const a of list ?? []) {
+      if ((a.family === 'IPv4' || a.family === 4) && isBindAddress(a.address) && !out.includes(a.address)) out.push(a.address);
+    }
+  }
+  return out;
+}
+
+/**
+ * The saved connections that exist right now, and the ones that don't.
+ *
+ * A saved address can outlive its connection: a phone's hotspot hands out a new one each time, an adapter is unplugged, a VPN is off.
+ * aria2 refuses to start at all when it is told to use an address that isn't there ("Failed to find given interface ...",
+ * measured), so every download failed until the setting was found and cleared by hand. Missing ones are skipped, not deleted:
+ * they come back into use by themselves when the connection does.
+ *
+ * A link-local address (169.254.x.x) counts as missing even when the adapter is there: it is what Windows gives an adapter that has no
+ * network, it cannot reach the internet, and binding a download to it made the download fail ("connection lost", measured).
+ */
+export function splitByPresence(saved: readonly string[] | undefined, present: readonly string[]): { use: string[]; missing: string[] } {
+  const use: string[] = [];
+  const missing: string[] = [];
+  for (const a of cleanBindList(saved)) (present.includes(a) && !a.startsWith('169.254.') ? use : missing).push(a);
+  return { use, missing };
+}
+
 /**
  * The aria2 argument for a saved list, or null when it should do nothing.
  * One address pins everything to that connection; two or more share the downloads between them.

@@ -56,6 +56,23 @@ Status: `Open` · `In progress` · `Fixed` · `Won't fix` · `Unexplained`
 
 ## Open — reported from live use
 
+### B15 · Downloads that fail for reasons the person cannot see — `Fixed in the working tree (2026-11-10), two parts unproven`
+
+* **YouTube playlist "Done" with 0 files** (SESSION-LOG 55): one shared yt-dlp archive of video ids (423 in the owner's) skipped songs deleted,
+  moved or fetched in another form. Fixed: archive per kind and folder, stale list thrown away when the folder lacks the files, "Nothing new"
+  otherwise. Reproduced and fixed in the real app. **Open:** the owner's own failing attempt left no log line, so this is the best fit, not a
+  confirmed match.
+* **Saved sign-in gone stale:** retry once without it (inspect and download). Proven with a corrupt cookie file; a real revoked Google session untested.
+
+From the owner's log and screenshot (details and measurements in `SESSION-LOG.md` 54):
+* **Engine would not start** (saved bind address gone): fixed, before/after in the real app.
+* **A download the engine lost polled for ever** (`GID … is not found` ×93 per download, then an engine restart that undid the others):
+  fixed, reproduced by killing the engine under two downloads (119 lines before, 0 after).
+* **`Invalid range header`** (host answers a slice with the whole remainder): retry on one connection written and unit-tested. **Open:** the
+  fatal case did not reproduce locally (aria2 finishes when one connection can carry the file), so the in-app retry is unproven.
+* **Open, unexplained:** one `EPERM` renaming `yt-dlp.exe.new` (2026-10-26); status-poll timeouts while the engine is busy (waited out by design).
+* **Open, needs the owner (AGENTS.md rule 1):** a solved check cannot be reused across a site's links, so each part may still ask once.
+
 ### B14 · A stream manifest with no listed resolution was read as music — `Fixed in the working tree (2026-10-27)`
 
 Found by pressing Play on Apple's public HLS test stream (`bipbop_4x3_variant.m3u8`): the player opened as the music view and nothing moved.

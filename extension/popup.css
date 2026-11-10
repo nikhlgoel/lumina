@@ -22,6 +22,12 @@ button { font: inherit; cursor: pointer; border: 0; }
 .primary:hover { filter: brightness(1.06); }
 .primary:active { transform: scale(.98); }
 .primary:disabled { opacity: .55; cursor: default; }
+.mirror { width: 100%; height: 28px; margin-bottom: 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0 6px; }
+.mirror[hidden] { display: none; }
+.secondary { width: 100%; height: 34px; border-radius: 9px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); font-weight: 600; transition: filter .15s, transform .1s; }
+.secondary:hover { filter: brightness(1.08); }
+.secondary:active { transform: scale(.98); }
+.secondary:disabled { opacity: .55; cursor: default; }
 .error { color: var(--bad); margin-top: 8px; }
 .page { width: 100%; text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); color: var(--ink); display: grid; gap: 2px; transition: background .15s, transform .1s; }
 .page:hover { background: var(--hover); }

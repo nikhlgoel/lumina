@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { BUSY_GRACE_MS, initialStall, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '@core/engineWatch';
+import { BUSY_GRACE_MS, initialStall, isLostFromEngine, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '@core/engineWatch';
+
+describe('an engine that no longer has a download', () => {
+  it('recognises the engine saying it has never heard of the download (the owner\'s log line)', () => {
+    expect(isLostFromEngine(new Error('GID 80acf7aeeb9c332c is not found'))).toBe(true);
+    expect(isLostFromEngine('Error: GID d6ff0173df61232d is not found')).toBe(true);
+  });
+
+  it('does not take a silent, broken or busy engine for a lost download', () => {
+    for (const e of ['TimeoutError: The operation was aborted due to timeout', 'TypeError: fetch failed', 'Error: ECONNREFUSED', 'Error: Cannot change option for GID#774956d041783b57', '']) {
+      expect(isLostFromEngine(e), e).toBe(false);
+    }
+  });
+});
 
 describe('telling a sleeping computer from a silent engine', () => {
   it('does not call a normal poll gap sleep, even when a poll waited out its 10 s timeout', () => {

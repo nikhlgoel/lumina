@@ -336,7 +336,7 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
     onStage('Opening download page');
     wc.loadURL(pageUrl, { userAgent: browserUserAgent() }).catch((err) => log.debug(`Page load: ${err}`));
 
-    const started = Date.now();
+    let started = Date.now();
     let lastProgress = Date.now();
     let lastUrl = '';
     let shownAt = 0;
@@ -398,6 +398,19 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
       const now = Date.now();
       if (shownAt) {
         if (now - shownAt > INTERACTIVE_LIMIT_MS) throw new Error('The quick check wasn’t finished in time. Retry to open it again.');
+        // The person has solved the check (the page no longer shows one). What is left, the host's own countdown and its Download button,
+        // needs nobody, so the next file's check is handed over now. Before this the pop-up stayed until the download had started, four or
+        // five seconds of watching a page count down, one file at a time, for a release of fifty parts. The page carries on out of sight and
+        // asks again, in its place in the line, if it meets another check.
+        if (challenge && challenge.info.reason === 'captcha' && scan && !scan.captcha) {
+          log.info(`Check solved for ${challenge.info.label}; the next one can be shown while this page finishes`);
+          closeChallenge(challenge);
+          waitingTurns.shift()?.resume();
+          challenge = null;
+          shownAt = 0;
+          started = Date.now();
+          lastProgress = Date.now();
+        }
         continue;
       }
       const needsPerson = Boolean(scan?.captcha) || now - lastProgress > STALL_MS || now - started > HEADLESS_LIMIT_MS;

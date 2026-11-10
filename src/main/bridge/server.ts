@@ -2,8 +2,9 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { z } from 'zod';
-import type { RequestInfo } from '../../shared/types';
+import type { CapturedCookie, RequestInfo } from '../../shared/types';
 import { requestInfoSchema } from '../../shared/ipc';
+import { isLoginSite, type LoginSite } from '../../core/accountCookies';
 import { withoutChallengeCookies } from '../../core/challengeCookies';
 import { settings } from '../settings';
 import { loadSecret, saveSecret } from '../secrets';
@@ -54,6 +55,8 @@ const batchSchema = z.object({
   request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
 });
 const pairSchema = z.object({ browser: z.string().min(1).max(60) });
+/** The person pressed "use my YouTube login in Lumina" in the extension: the cookies of that one site, from their own browser. */
+const accountSchema = z.object({ site: z.string().min(1).max(40), request: requestInfoSchema });
 
 /**
  * What leaves the bridge for the rest of the app. Cookies that prove a bot check was passed are dropped here whatever the extension sent
@@ -127,6 +130,8 @@ export interface BridgeHandlers {
   onCapture: (capture: CaptureRequest, signal: AbortSignal) => Promise<CaptureResult>;
   /** Several links picked together on a page. Resolves once Lumina has them in front of the person. */
   onCaptureBatch: (urls: string[], request: RequestInfo, signal: AbortSignal) => Promise<CaptureResult & { count: number }>;
+  /** A site's sign-in, handed over by the person from their own browser. `signedIn` is false when the cookies held no live session. */
+  onAccountCookies: (site: LoginSite, cookies: CapturedCookie[]) => Promise<{ saved: number; signedIn: boolean }>;
   onPaired: () => void;
 }
 
@@ -229,7 +234,7 @@ class BridgeServer {
     if (req.method === 'GET' && url.pathname === '/v1/hello') {
       const s = settings.get().extension;
       return this.json(res, 200, {
-        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired), batch: true,
+        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired), batch: true, accounts: true,
         captureDownloads: s.captureDownloads, minCaptureSizeMb: s.minCaptureSizeMb,
         skipExtensions: s.skipExtensions, skipSites: s.skipSites,
       }, origin);
@@ -295,6 +300,14 @@ class BridgeServer {
       const result = await h.onCaptureBatch(urls, sanitizeRequest(body.data.request as RequestInfo, true), abort.signal);
       if (abort.signal.aborted) return;
       return this.json(res, result.accepted ? 202 : 200, result, origin);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/account-cookies') {
+      const body = accountSchema.safeParse(await readJson(req));
+      if (!body.success || !isLoginSite(body.data.site)) return this.json(res, 400, { error: 'Lumina can’t take a sign-in for that site' }, origin);
+      const result = await h.onAccountCookies(body.data.site, body.data.request.cookies as CapturedCookie[]);
+      if (!result.signedIn) return this.json(res, 422, { ...result, error: 'This browser isn’t signed in to that site. Sign in there first, then try again.' }, origin);
+      return this.json(res, 200, result, origin);
     }
 
     return this.json(res, 404, { error: 'Not found' }, origin);

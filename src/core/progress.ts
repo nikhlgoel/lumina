@@ -222,8 +222,16 @@ export function isDiskCacheFailure(message?: string): boolean {
 }
 
 /** Make aria2's error text readable for people. */
+/**
+ * A server that, asked for one slice of a file, sends back the whole rest of it ("Invalid range header. Request: 1479540736-1561329663/
+ * 2097152000, Response: 1479540736-2097151999/2097152000", from a file host in the owner's log). aria2 splits a download into slices and
+ * treats that answer as an error, so the same file failed again on every retry. One connection asks for the whole file and is not affected.
+ */
+export const isRangeRefusal = (message?: string): boolean => /invalid range header/i.test(message ?? '');
+
 export function friendlyAria2Error(message?: string): string {
   const m = (message ?? '').toLowerCase();
+  if (isRangeRefusal(message)) return 'This server does not allow a file to be fetched in pieces. Press Retry: Lumina will use one connection.';
   if (m.includes('403')) return 'The server refused the download (403). If this came from a website, download it through the Lumina browser extension.';
   if (m.includes('404')) return 'The file wasn’t found on the server (404). The link may have expired.';
   // Windows says "There is not enough space on the disk." (captured from a real full NTFS volume),

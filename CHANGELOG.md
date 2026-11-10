@@ -8,6 +8,39 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
+## [Unreleased]
+
+Not released yet; everything below is in the working tree only.
+
+### Fixed
+- **A playlist you had downloaded before no longer ends as "Done" with nothing in the folder.** Lumina remembered every YouTube video it had
+  ever fetched in one list, so songs you had deleted, moved, or fetched as a video were skipped silently. It now remembers per kind (music or
+  video) and per folder, notices when "already downloaded" songs are not actually in the playlist's folder and downloads them, and says
+  "Nothing new" when they are. Checked in the real app: download, delete the files, ask again: the songs came back.
+- **A saved sign-in that stopped working no longer sinks a public download.** If a link fails while the saved sign-in was in use, Lumina tries
+  once more without it, and tells you.
+- **"The download engine (aria2) did not start" no longer stops a download.** It happened when a network connection Lumina had saved
+  (Settings › Downloading) was no longer there, for example after changing Wi-Fi. Lumina now skips connections that are not present, tells you
+  which ones, and if the engine still cannot start it tries again in simpler ways before giving up. Checked in the real app with the exact
+  setting that failed: the download completed.
+- **A download that the engine forgot is put back at once.** If the download engine was restarted by one download's recovery, the others
+  could sit "reconnecting" for two minutes and then restart it again. Checked by stopping the engine under two running downloads: before, one
+  was still stuck at 150 s; now both finish in 40 s.
+- **Torrents with few seeds no longer crawl because of Lumina's own upload limit.** With fewer than 3 seeds the limit is switched off, so
+  other downloaders can feed the swarm.
+- **Servers that send the wrong part of a file** ("Invalid range header") now get a retry on one connection, with a plain message if that
+  fails too. The retry itself is only unit-tested; see `SESSION-LOG.md` (54).
+- **Pop-ups for a release's parts come one after another faster:** once a check is solved, the next part's pop-up opens while the first page
+  finishes (stand-in host, 6 parts: 39.6 s to 18.7 s). Each part may still ask for its own check.
+
+### Added
+- **YouTube sign-in through your own browser.** Google refuses sign-in inside apps. The Lumina extension can now pass the YouTube sign-in your
+  browser already has to Lumina (on this computer only), for private and age-restricted videos. Settings › Connections explains it.
+  Not yet tried with a real private video.
+- **The extension finds more download links:** buttons that only say "Download" are named after the file in their row, buttons that are not
+  links (a data attribute or a click handler) are found, and a link labelled with a file name counts on any site. When a page offers the same
+  files on several hosts, the extension starts on one host (Pixeldrain first) and lets you switch, so nothing is sent several times over.
+
 ## [1.2.1] — 2026-11-03
 
 A stability release: the downloader's torrent and queue handling, and the browser extension's new way of sending several links at once.

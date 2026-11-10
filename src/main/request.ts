@@ -22,10 +22,22 @@ export function writeNetscapeCookies(file: string, cookies: CapturedCookie[]) {
 }
 
 /**
+ * Would this run send the saved sign-in (Lumina's account cookies, or a cookie file), as opposed to cookies the extension
+ * captured with the link or none at all? A saved sign-in that has gone stale can make an otherwise public download fail, so a
+ * run that used one and failed is worth repeating once without it.
+ */
+export function usesSavedSignIn(request: RequestInfo | undefined): boolean {
+  if (request?.cookies.length) return false;
+  const s = settings.get();
+  return (s.network.cookiesFrom === 'lumina' && fs.existsSync(accountCookiesFile()))
+    || (s.network.cookiesFrom === 'file' && Boolean(s.network.cookiesFile) && fs.existsSync(s.network.cookiesFile));
+}
+
+/**
  * Build the request identity for a yt-dlp run.
  * Cookies captured with the request (from the extension) win; otherwise the Accounts setting applies.
  */
-export function requestContext(request: RequestInfo | undefined, workDir: string | null, opts: { withBrowserCookies?: boolean } = {}): RequestContext {
+export function requestContext(request: RequestInfo | undefined, workDir: string | null, opts: { withBrowserCookies?: boolean; withAccountCookies?: boolean } = {}): RequestContext {
   const s = settings.get();
   let cookies: RequestContext['cookies'] = {};
 
@@ -33,9 +45,9 @@ export function requestContext(request: RequestInfo | undefined, workDir: string
     const file = path.join(workDir, 'site-cookies.txt');
     writeNetscapeCookies(file, request.cookies);
     cookies = { file };
-  } else if (s.network.cookiesFrom === 'lumina' && fs.existsSync(accountCookiesFile())) {
+  } else if (s.network.cookiesFrom === 'lumina' && opts.withAccountCookies !== false && fs.existsSync(accountCookiesFile())) {
     cookies = { file: accountCookiesFile() };
-  } else if (s.network.cookiesFrom === 'file' && s.network.cookiesFile && fs.existsSync(s.network.cookiesFile)) {
+  } else if (s.network.cookiesFrom === 'file' && opts.withAccountCookies !== false && s.network.cookiesFile && fs.existsSync(s.network.cookiesFile)) {
     cookies = { file: s.network.cookiesFile };
   } else if (['chrome', 'edge', 'firefox', 'brave'].includes(s.network.cookiesFrom) && opts.withBrowserCookies !== false) {
     cookies = { browser: s.network.cookiesFrom };

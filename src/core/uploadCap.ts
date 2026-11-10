@@ -24,13 +24,25 @@ export function worthChanging(current: number, next: number): boolean {
 }
 
 /**
+ * Fewer seeds than this and the pieces come mostly from other downloaders. Downloaders send to whoever sends to them (and a seed
+ * does not care), so a small upload limit starves such a swarm.
+ *
+ * Measured (a local swarm: one 400 KB/s seed and three downloaders swapping pieces, 40 MB): with no upload limit all three finished in
+ * 178 s; with 200 KB/s in 179, 239 and 217 s; with 50 KB/s one finished in 178 s and the other two had not finished after 260 s.
+ * The owner's own torrent sat at 51 peers and 0 seeds for hours.
+ */
+export const SEEDS_THAT_FEED_THE_SWARM = 3;
+
+/**
  * The overall upload limit, in KB/s, to apply right now. 0 means no limit.
  *
  * Only while something is actually being downloaded: when everything has finished and the person has chosen to keep seeding
- * (Settings › Torrents), the limit comes off, because then sharing is the point.
+ * (Settings › Torrents), the limit comes off, because then sharing is the point. It also stays off while the torrent has few or no
+ * seeds (`seeds`, the fewest among what is downloading; null when not known): there, giving back is how the download gets its pieces.
  */
-export function autoUploadCapKbps(downloadKBps: number, downloading: boolean): number {
+export function autoUploadCapKbps(downloadKBps: number, downloading: boolean, seeds: number | null = null): number {
   if (!downloading) return 0;
+  if (seeds !== null && seeds < SEEDS_THAT_FEED_THE_SWARM) return 0;
   const wanted = Math.max(UPLOAD_FLOOR_KBPS, (Number.isFinite(downloadKBps) ? downloadKBps : 0) * UPLOAD_SHARE);
   // Steps of 10 KB/s so the limit is not rewritten on every tiny change in speed.
   return Math.round(wanted / 10) * 10;

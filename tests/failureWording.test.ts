@@ -1,10 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import {
-  aria2ExitMessage, friendlyAria2Error, friendlyYtdlpError, httpStatusMessage, isAcceleratorFailure, isControlFileMissing, plainFailure, tidyYtdlpMessage,
+  aria2ExitMessage, friendlyAria2Error, friendlyYtdlpError, httpStatusMessage, isAcceleratorFailure, isControlFileMissing, isRangeRefusal, plainFailure, tidyYtdlpMessage,
 } from '@core/progress';
 import { classifyFailure } from '@core/networkRetry';
 
 // Every raw message below was read out of a real Lumina log, not invented.
+
+describe('a server that ignores the end of a requested slice', () => {
+  // From the owner's log (2 Nov): a file host answered a request for 1479540736-1561329663 with the whole rest of the file, aria2 gave up,
+  // and every retry (also in slices) failed the same way.
+  const raw = 'Invalid range header. Request: 1479540736-1561329663/2097152000, Response: 1479540736-2097151999/2097152000';
+
+  it('is recognised, so the download can be continued over one connection instead of failing again', () => {
+    expect(isRangeRefusal(raw)).toBe(true);
+    expect(isRangeRefusal('The response status is not successful. status=503')).toBe(false);
+    expect(isRangeRefusal(undefined)).toBe(false);
+  });
+
+  it('says what happened in words, not aria2’s', () => {
+    const msg = friendlyAria2Error(raw);
+    expect(msg).toMatch(/in pieces/);
+    expect(msg).toMatch(/one connection/);
+    expect(msg).not.toMatch(/Invalid range header|Request:/);
+  });
+});
 
 describe('what a failed download says, instead of the network layer’s words', () => {
   it('turns a timeout into a sentence that still counts as a slow or lost connection', () => {

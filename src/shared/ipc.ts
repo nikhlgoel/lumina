@@ -514,6 +514,8 @@ export interface EventPayloads {
   'app:navigate': { view: 'download' | 'queue' | 'library' | 'settings'; section?: string };
   'player:command': PlayerCommand;
   'extension:changed': ExtensionStatus;
+  /** A sign-in was added or removed from outside the Settings screen (the extension handed one over). */
+  'accounts:changed': SiteAccountInfo[];
   'hosts:challenge': HostChallenge;
   'hosts:challenge-done': { id: string };
   'browser:state': BrowserState;

@@ -12,7 +12,7 @@ import { parseExtraArgs } from '../shared/settings';
 import { tools } from './tools';
 import { settings } from './settings';
 import { runTool } from './process';
-import { requestContext } from './request';
+import { requestContext, usesSavedSignIn } from './request';
 import { inspectSpotify, parseSpotifyUrl } from './services/spotify';
 import { tempDir } from './paths';
 import { logger } from './log';
@@ -184,10 +184,10 @@ interface YtdlpJson {
   extractor_key?: string;
 }
 
-async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCookies = true, specificOnly = false): Promise<MediaInfo> {
+async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCookies = true, specificOnly = false, accountCookies = true): Promise<MediaInfo> {
   const workDir = fs.mkdtempSync(path.join(tempDir(), 'inspect-'));
   try {
-    const ctx = requestContext(request, workDir, { withBrowserCookies: browserCookies });
+    const ctx = requestContext(request, workDir, { withBrowserCookies: browserCookies, withAccountCookies: accountCookies });
     const args = ['--ignore-config', '--no-warnings', ...(specificOnly ? ['--use-extractors', 'default,-generic'] : []), '--js-runtimes', tools.jsRuntime(), ...requestArgs(ctx), ...parseExtraArgs(settings.get().advanced.extraYtdlpArgs).args, '-J', '--flat-playlist', '--', url];
     const r = await runTool(tools.require('yt-dlp'), args, { timeoutMs: 90_000, env: tools.env() });
 
@@ -197,6 +197,12 @@ async function inspectWithYtdlp(url: string, request?: RequestInfo, browserCooki
         markBrowserCookiesUnreadable();
         const info = await inspectWithYtdlp(url, request, false, specificOnly);
         return { ...info, notes: [...(info.notes ?? []), `Couldn’t read ${ctx.cookies.browser}’s cookies, so this was opened signed-out. Sign in under Settings › Accounts for private or members-only media.`] };
+      }
+      // The saved sign-in may be what is wrong (stale cookies make public links fail): look once more signed-out before giving up.
+      if (accountCookies && !specificOnly && usesSavedSignIn(request) && !isCookieReadError(r.stderr) && !/unsupported url/i.test(r.stderr)) {
+        log.warn('Inspect failed with the saved sign-in; trying once without it', { url, stderr: r.stderr.slice(-300) });
+        const info = await inspectWithYtdlp(url, request, browserCookies, specificOnly, false);
+        return { ...info, notes: [...(info.notes ?? []), 'Opened signed-out: the saved sign-in did not work. Sign in again under Settings › Accounts for private or members-only media.'] };
       }
       const msg = r.stderr.split(/\r?\n/).find((l) => l.startsWith('ERROR:'))?.slice(6).trim() ?? r.stderr.trim().split(/\r?\n/).pop() ?? 'yt-dlp could not read this link.';
       // A quiet failure when only the site-specific extractors were asked: "no extractor knows this" is the expected answer for a file host.

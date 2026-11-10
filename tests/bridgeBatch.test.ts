@@ -18,6 +18,7 @@ let bridge: Bridge;
 let token = '';
 const batches: { urls: string[]; request: { cookies: { name: string }[]; fromLink?: boolean; pageUrl?: string } }[] = [];
 const captures: { kind: string; request: { cookies: { name: string }[]; fromLink?: boolean } }[] = [];
+const logins: { site: string; names: string[] }[] = [];
 
 const call = (path: string, init: { method?: string; body?: unknown; auth?: boolean } = {}) =>
   fetch(`http://127.0.0.1:${PORT}${path}`, {
@@ -35,6 +36,10 @@ beforeAll(async () => {
     window: () => null,
     onCapture: async (c) => { captures.push(c as never); return { accepted: true }; },
     onCaptureBatch: async (urls, request) => { batches.push({ urls, request: request as never }); return { accepted: true, count: urls.length }; },
+    onAccountCookies: async (site, cookies) => {
+      logins.push({ site, names: cookies.map((c) => c.name) });
+      return { saved: cookies.length, signedIn: cookies.some((c) => c.name === 'SID') };
+    },
     onPaired: () => undefined,
   });
   for (let i = 0; i < 50 && !bridge.state.listening; i++) await new Promise((r) => setTimeout(r, 50));
@@ -128,6 +133,43 @@ describe('the extension bridge', () => {
     const res = await call('/v1/capture-batch', { method: 'POST', body: { urls: ['https://example.org/a.zip', 'ftp://example.org/b.zip'], request: { headers: {}, cookies: [] } } });
     expect(res.status).toBe(400);
     expect(batches.length).toBe(before);
+  });
+
+  describe('handing over a site’s sign-in from the person’s own browser', () => {
+    const body = (site: string, names: string[]) => ({ site, request: { headers: {}, cookies: jar(names) } });
+
+    it('tells the extension that the app can take a sign-in, so an older app is simply not offered one', async () => {
+      expect(((await (await call('/v1/hello')).json()) as { accounts?: boolean }).accounts).toBe(true);
+    });
+
+    it('takes the cookies for a site it knows and says it is signed in', async () => {
+      const res = await call('/v1/account-cookies', { method: 'POST', body: body('youtube', ['SID', 'PREF']) });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ saved: 2, signedIn: true });
+      expect(logins.at(-1)).toEqual({ site: 'youtube', names: ['SID', 'PREF'] });
+    });
+
+    it('answers 422 with a plain reason when the browser holds no sign-in', async () => {
+      const res = await call('/v1/account-cookies', { method: 'POST', body: body('youtube', ['PREF']) });
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { error: string }).error).toMatch(/isn’t signed in/);
+    });
+
+    it('refuses a site it does not know how to sign in to, and never calls the app for it', async () => {
+      const before = logins.length;
+      expect((await call('/v1/account-cookies', { method: 'POST', body: body('bank', ['SID']) })).status).toBe(400);
+      expect((await call('/v1/account-cookies', { method: 'POST', body: body('toString', ['SID']) })).status).toBe(400);
+      expect((await call('/v1/account-cookies', { method: 'POST', body: { request: { headers: {}, cookies: [] } } })).status).toBe(400);
+      expect(logins.length).toBe(before);
+    });
+
+    it('refuses anyone who has not paired, and a web page pretending to be the extension', async () => {
+      expect((await call('/v1/account-cookies', { method: 'POST', auth: false, body: body('youtube', ['SID']) })).status).toBe(401);
+      const res = await fetch(`http://127.0.0.1:${PORT}/v1/account-cookies`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example', Authorization: `Bearer ${token}` }, body: JSON.stringify(body('youtube', ['SID'])),
+      });
+      expect(res.status).toBe(403);
+    });
   });
 
   it('still refuses a web page pretending to be the extension', async () => {

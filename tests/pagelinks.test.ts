@@ -7,13 +7,51 @@ interface Found { url: string; text: string; worthy: boolean }
 interface Finder {
   pick: (c: { href: string; text?: string }[], o?: { chosen?: boolean }) => Found[];
   textLinks: (t: string) => string[];
-  worthy: (href: string) => boolean;
+  worthy: (href: string, text?: string) => boolean;
   isHosted: (href: string) => boolean;
+  isGeneric: (text: string) => boolean;
+  nameIn: (text: string) => string;
 }
 let finder: Finder;
 beforeAll(() => { finder = (globalThis as unknown as { __luminaLinks: Finder }).__luminaLinks; });
 
 const link = (href: string, text = '') => ({ href, text });
+
+describe('finding links on hosts Lumina has never heard of', () => {
+  it('counts a link whose label is a file name as a download, on any host', () => {
+    expect(finder.worthy('https://unknown-host.example/get/abc123')).toBe(false);
+    expect(finder.worthy('https://unknown-host.example/get/abc123', 'ICARUS.Build.17072026-OFME.part01.rar')).toBe(true);
+    expect(finder.worthy('https://unknown-host.example/get/abc', 'Game Setup v1.2.exe')).toBe(true);
+  });
+
+  it('does not count an ordinary link just because the page is about downloads', () => {
+    expect(finder.worthy('https://unknown-host.example/about', 'About our downloads')).toBe(false);
+    expect(finder.worthy('https://unknown-host.example/about', 'Home')).toBe(false);
+  });
+
+  it('never makes a non-web address downloadable from its label', () => {
+    expect(finder.worthy('javascript:void(0)', 'Game.part01.rar')).toBe(false);
+    expect(finder.worthy('mailto:a@b.c', 'Game.part01.rar')).toBe(false);
+  });
+
+  it('keeps such a link on a whole page, where only usable links are offered', () => {
+    const found = finder.pick([link('https://unknown-host.example/get/1', 'Release.part01.rar'), link('https://unknown-host.example/blog', 'Blog')]);
+    expect(found.map((l) => l.url)).toEqual(['https://unknown-host.example/get/1']);
+  });
+});
+
+describe('a button that only says "Download"', () => {
+  it('is known as saying nothing, so the file name beside it can be used instead', () => {
+    for (const t of ['Download', 'download', 'Download now', 'Click here', 'Free Download', 'GET', 'Mirror', '', '  ', 'OK'.slice(0, 1)]) expect(finder.isGeneric(t), t).toBe(true);
+    for (const t of ['Part 01', 'ICARUS.Build.part01.rar', 'Download the Windows installer for version 2']) expect(finder.isGeneric(t), t).toBe(false);
+  });
+
+  it('finds the file name in the text of a table row', () => {
+    expect(finder.nameIn('ICARUS.Build.17072026-OFME.part01.rar   DOWNLOAD')).toBe('ICARUS.Build.17072026-OFME.part01.rar   DOWNLOAD'.slice(0, 'ICARUS.Build.17072026-OFME.part01.rar'.length));
+    expect(finder.nameIn('Game (v1.2) [x64].7z  45 MB')).toBe('Game (v1.2) [x64].7z');
+    expect(finder.nameIn('no file name here')).toBe('');
+  });
+});
 
 describe('which links on a page are download links', () => {
   it('recognises magnets, file hosts and links that end in a file name', () => {

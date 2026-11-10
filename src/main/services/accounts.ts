@@ -1,6 +1,7 @@
 import { BrowserWindow, session } from 'electron';
 import fs from 'node:fs';
 import type { CapturedCookie } from '../../shared/types';
+import { cookieUrl, hasLiveSession, loginCookies, type LoginSite } from '../../core/accountCookies';
 import { accountCookiesFile, writeNetscapeCookies } from '../request';
 import { settings } from '../settings';
 import { logger } from '../log';
@@ -29,6 +30,33 @@ async function exportCookies(): Promise<number> {
   }));
   writeNetscapeCookies(accountCookiesFile(), cookies);
   return cookies.length;
+}
+
+/**
+ * Take a site's sign-in from the person's own browser (the extension handed the cookies over when they pressed its button).
+ *
+ * This is the way to sign in to Google, which refuses to sign anyone in inside an embedded window like the one below. The cookies go into
+ * the same store a sign-in window uses, so listing, signing out and the cookie file yt-dlp reads all work as they already do.
+ */
+export async function importBrowserCookies(site: LoginSite, cookies: CapturedCookie[]): Promise<{ saved: number; signedIn: boolean }> {
+  const chosen = loginCookies(cookies, site);
+  if (!hasLiveSession(chosen, site)) return { saved: 0, signedIn: false };
+  const store = accountSession();
+  let saved = 0;
+  for (const c of chosen) {
+    try {
+      await store.cookies.set({
+        url: cookieUrl(c), name: c.name, value: c.value, domain: c.domain, path: c.path || '/', secure: c.secure, httpOnly: c.httpOnly, expirationDate: c.expirationDate,
+      });
+      saved++;
+    } catch (err) {
+      log.debug(`A cookie from the browser was not accepted: ${c.name}`, err);
+    }
+  }
+  await exportCookies();
+  if (settings.get().network.cookiesFrom !== 'lumina') settings.update({ network: { cookiesFrom: 'lumina' } });
+  log.info(`Took ${saved} of ${chosen.length} ${site} cookies from the browser`);
+  return { saved, signedIn: saved > 0 };
 }
 
 /**

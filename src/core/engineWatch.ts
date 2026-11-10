@@ -39,6 +39,20 @@ export function rpcAction(silentForMs: number, processAlive: boolean): RpcAction
 }
 
 /**
+ * Did the engine answer "I have never heard of that download"?
+ *
+ * That is not silence. The engine is alive and talking; it just does not have this download any more, which is what a restart
+ * leaves behind: one download's recovery restarts the shared engine and puts back only its own, so every other running
+ * download keeps asking about an id the new engine never had. The owner's log has four downloads each asking 93 times
+ * ("GID … is not found"), then, once the 120 s grace for a silent engine ran out, restarting the engine again themselves,
+ * which threw away the ones just put back. The cure is to put the download back at once, not to wait or restart.
+ */
+export const isLostFromEngine = (err: unknown): boolean => /\bGID\s+[0-9a-f]+\s+is not found/i.test(String(err));
+
+/** A download put back this many times in a row without one healthy poll in between is not being lost to a restart; fall back to the slow path. */
+export const MAX_QUICK_READDS = 4;
+
+/**
  * Two status polls are normally a second apart, up to about eleven when one waits out its timeout. A gap much longer than
  * that means the computer slept (or this process was frozen), not that the engine went quiet. The owner's log has it:
  * "Resumed from sleep", then a single failed poll reporting 1524 s of silence, then aria2 killed on the spot although it was fine.

@@ -92,6 +92,39 @@ export async function cookiesFor(...urls) {
   return [...seen.values()].slice(0, 400);
 }
 
+// Domains whose cookies make up a site's sign-in. Same list as LOGIN_SITES in src/core/accountCookies.ts; the app drops anything else it is sent.
+const LOGIN_DOMAINS = { youtube: ['youtube.com', 'google.com'] };
+
+/**
+ * Let Lumina use this browser's sign-in to one site, for downloads of private and age-restricted media. Runs only when the person presses
+ * the button. Google will not sign anyone in inside Lumina's own window, but this browser is already signed in, and its cookies go straight
+ * to the app on this computer. Resolves { ok, reason }.
+ */
+export async function shareLogin(site) {
+  const domains = LOGIN_DOMAINS[site];
+  if (!domains) return { ok: false, reason: 'Not a site Lumina can sign in to' };
+  const seen = new Map();
+  for (const domain of domains) {
+    try {
+      for (const c of await chrome.cookies.getAll({ domain })) {
+        seen.set(`${c.domain}|${c.path}|${c.name}`, {
+          name: c.name, value: c.value, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly,
+          ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
+        });
+      }
+    } catch {
+      // cookies permission missing for this domain
+    }
+  }
+  try {
+    const r = await request('/v1/account-cookies', { method: 'POST', timeoutMs: 15_000, body: { site, request: { headers: {}, cookies: [...seen.values()].slice(0, 400) } } });
+    if (r.status === 401) await setConfig({ token: null });
+    return { ok: r.ok, reason: r.data?.error };
+  } catch (err) {
+    return { ok: false, reason: err?.name === 'TimeoutError' ? 'Lumina took too long to answer' : 'Lumina isn’t reachable' };
+  }
+}
+
 /**
  * Send something to Lumina. Resolves { accepted, reason }.
  * For browser downloads Lumina answers only once data is flowing, so this can take a few seconds.

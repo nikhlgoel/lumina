@@ -55,6 +55,16 @@ export function DownloadsSection({ s, set }: SectionProps) {
                 <span className="tabular text-ink-3">{a.address}{a.linkLocal ? ' · not connected to a network' : a.virtual ? ' · virtual, usually no internet' : ''}</span>
               </label>
             ))}
+            {/* A saved connection that has gone (a phone hotspot that changed address) is skipped by the download engine, and shown here
+                so it can be seen and forgotten. It used to be invisible: the list only had connections that exist right now. */}
+            {addrs.length > 0 && bound.filter((a) => !addrs.some((x) => x.address === a)).map((a) => (
+              <label key={a} className="flex items-center gap-2 text-[13px]">
+                <input type="checkbox" className="size-4 accent-[var(--accent)]" checked
+                  onChange={() => set({ network: { bindAddresses: bound.filter((x) => x !== a) } })} />
+                <span className="text-ink-3">Not connected right now</span>
+                <span className="tabular text-ink-3">{a} · skipped until it is back; untick to forget it</span>
+              </label>
+            ))}
           </div>
         </Row>
         <Row id="accelerate" label="Faster downloads (multi-connection)" description="Downloads plain video/audio links with many connections at once (via aria2) instead of one, using the “Connections per file” count. Big speed-up on fast links; leave on unless a site misbehaves.">

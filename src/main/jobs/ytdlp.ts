@@ -12,11 +12,12 @@ import { killTree, onLines, spawnTool } from '../process';
 import { tools } from '../tools';
 import { settings } from '../settings';
 import { archiveFile } from '../paths';
-import { requestContext } from '../request';
+import { archiveName, countMedia, playlistFolder, skippedEverythingWrongly } from '../../core/archiveScope';
+import { requestContext, usesSavedSignIn } from '../request';
 import { matchTracks } from '../services/ytmusic';
 import { logger } from '../log';
-import { cleanBindList, weightedBindList } from '../../core/networkBind';
-import { measureLines } from '../lineSpeed';
+import { weightedBindList } from '../../core/networkBind';
+import { activeBindList, measureLines } from '../lineSpeed';
 import { postprocess } from './postprocess';
 import type { Runner } from './queue';
 
@@ -92,15 +93,15 @@ export const ytdlpRunner: Runner = (ctx) => {
   /** Set when the accelerator failed and the job is being retried over yt-dlp's own downloader. */
   let nativeOnly = false;
   /** The network connections this download may use, repeated to weight the faster one (filled in once measured, see below). */
-  let lineSlots: string[] = cleanBindList(s.network.bindAddresses);
+  let lineSlots: string[] = activeBindList(s.network.bindAddresses);
 
-  const buildArgs = (opts: { batchFile?: string; browserCookies: boolean; playlistItemsArg?: string; archiveFile?: string | null }) => buildDownloadArgs({
+  const buildArgs = (opts: { batchFile?: string; browserCookies: boolean; accountCookies?: boolean; playlistItemsArg?: string; archiveFile?: string | null }) => buildDownloadArgs({
     url: job.url, batchFile: opts.batchFile, options: job.options, outputDir, tempDir: downloadTemp, outputTemplate: template,
     ffmpegDir: tools.ffmpegDir(), jsRuntime: tools.jsRuntime(),
     playlistItemsArg: opts.playlistItemsArg,
     archiveFile: opts.archiveFile ?? null,
     isPlaylist: isPlaylist && !needsMatching,
-    request: requestContext(job.source.request, ctx.workDir, { withBrowserCookies: opts.browserCookies }),
+    request: requestContext(job.source.request, ctx.workDir, { withBrowserCookies: opts.browserCookies, withAccountCookies: opts.accountCookies }),
     speedLimitKbps: speedLimitActive(s) ? s.downloads.speedLimitKbps : 0,
     retries: s.downloads.retries,
     concurrentFragments: s.downloads.concurrentFragments,
@@ -239,9 +240,14 @@ export const ytdlpRunner: Runner = (ctx) => {
     else ctx.progress(step.patch, 'running');
   };
 
+  /** Set once a playlist skipped every item although the folder lacks them: the list was thrown away and the run repeated (only once). */
+  let archiveReset = false;
+  const scopedArchive = (): string | null =>
+    isPlaylist && s.downloads.skipExisting ? archiveFile(archiveName(job.options.format.kind === 'video' ? 'video' : 'audio', outputDir)) : null;
+
   /** Fold each worker's archive back into the shared one. Their item sets are disjoint, so this is a union. */
   const mergeArchives = () => {
-    const target = isPlaylist && s.downloads.skipExisting ? archiveFile() : null;
+    const target = scopedArchive();
     if (!target) return;
     const shardFiles = workers.map((w) => w.archive).filter((a): a is string => Boolean(a) && a !== target);
     if (!shardFiles.length) return;
@@ -263,7 +269,7 @@ export const ytdlpRunner: Runner = (ctx) => {
     }
   };
 
-  const finish = async (opts: { batchFiles?: string[]; browserCookies: boolean }) => {
+  const finish = async (opts: { batchFiles?: string[]; browserCookies: boolean; accountCookies?: boolean }) => {
     if (stopped) return;
     const errors = workers.flatMap((w) => w.errors);
     const stderrTail = workers.map((w) => w.stderrTail).filter(Boolean).join('\n').slice(-8000);
@@ -291,7 +297,43 @@ export const ytdlpRunner: Runner = (ctx) => {
       return;
     }
 
+    // A saved sign-in that has gone stale (Google rotates or revokes them) can make a public download fail. Nothing arrived and the
+    // saved sign-in was in use, so try once more signed-out before telling the person it failed.
+    if (failedCodes.length && !outputs.length && opts.accountCookies !== false && usesSavedSignIn(job.source.request) && !isCookieReadError(allErrors)) {
+      log.warn('The download failed with the saved sign-in; trying once without it', { job: job.title, error: (errors.at(-1) ?? '').slice(0, 200) });
+      ctx.progress({ stage: 'Trying again without the saved sign-in', speedBps: null, etaSec: null }, 'running');
+      start({ ...opts, accountCookies: false });
+      return;
+    }
+
     mergeArchives();
+
+    // Every item skipped as "already downloaded", yet the folder does not hold that many files: the memory is wrong (files deleted,
+    // moved, or fetched in another form). Reproduced: 3 songs asked for, 3 skipped, status "Done", nothing on disk. Throw the memory
+    // away and fetch them; it is rebuilt by this run. If the files are there, say plainly that there was nothing new.
+    if (!failedCodes.length && !outputs.length && isPlaylist && s.downloads.skipExisting && job.options.contentType !== 'series') {
+      const list = (d: string) => {
+        try { return fs.readdirSync(d, { withFileTypes: true }).map((e) => ({ name: e.name, isDir: e.isDirectory() })); } catch { return []; }
+      };
+      // A matched (Spotify) list goes into a folder Lumina named itself, which is already `outputDir`; any other playlist into the one yt-dlp named.
+      const folder = needsMatching ? outputDir : playlistFolder(outputDir, job.title, list);
+      const here = folder ? countMedia(folder, list) : 0;
+      if (!archiveReset && skippedEverythingWrongly(totalItems, here)) {
+        archiveReset = true;
+        const memory = scopedArchive();
+        log.warn('Every item was skipped as already downloaded, but the folder does not hold them; forgetting that list and downloading again', {
+          job: job.title, items: totalItems, filesInFolder: here,
+        });
+        if (memory) { try { fs.rmSync(memory, { force: true }); } catch { /* the run below still works with a stale list only if removal failed */ } }
+        outputs.length = 0;
+        ctx.progress({ stage: 'These were marked as downloaded but are not in the folder; downloading them again', speedBps: null, etaSec: null }, 'running');
+        start({ ...opts });
+        return;
+      }
+      if (!archiveReset) {
+        ctx.patch({ compat: { ...(ctx.job().compat ?? { tvSafe: false }), summary: 'Nothing new: everything in this playlist is already in the folder. Turn off “Skip what’s already downloaded” in Settings › Downloading to fetch them again.' } });
+      }
+    }
 
     // Playlists: yt-dlp exits 1 if some items failed but others succeeded. With several workers the
     // same holds across them — one shard failing is not the job failing.
@@ -318,8 +360,8 @@ export const ytdlpRunner: Runner = (ctx) => {
     }
   };
 
-  const start = (opts: { batchFiles?: string[]; browserCookies: boolean }) => {
-    const globalArchive = isPlaylist && s.downloads.skipExisting ? archiveFile() : null;
+  const start = (opts: { batchFiles?: string[]; browserCookies: boolean; accountCookies?: boolean }) => {
+    const globalArchive = scopedArchive();
 
     // One playlist, several processes. yt-dlp walks a playlist one item at a time, and a measured
     // ~4.8 s of that per item goes on working out what to fetch rather than fetching — so a long
@@ -345,6 +387,7 @@ export const ytdlpRunner: Runner = (ctx) => {
       const child = spawnTool(tools.require('yt-dlp'), buildArgs({
         batchFile: w.batchFile,
         browserCookies: opts.browserCookies,
+        accountCookies: opts.accountCookies,
         playlistItemsArg: w.playlistItems ?? undefined,
         archiveFile: w.archive,
       }), { env: tools.env(), cwd: outputDir });

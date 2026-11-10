@@ -57,11 +57,11 @@ export const downloadProbe = (url: string, dir: string, kind: 'video' | 'audio')
   const url = ${JSON.stringify(url)};
   const format = ${kind === 'video'
     ? "{ kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false }"
-    : "{ kind: 'audio', target: 'mp3', bitrateKbps: 128 }"};
+    : `{ kind: 'audio', target: '${process.env.LUMINA_PROBE_TARGET ?? 'mp3'}', bitrateKbps: 128 }`};
   const info = await window.lumina.invoke('media:inspect', { url });
-  const options = { contentType: ${JSON.stringify(kind === 'video' ? 'video' : 'music')}, format, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const options = { contentType: ${JSON.stringify(kind === 'video' ? 'video' : 'music')}, format, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: ${JSON.stringify((process.env.LUMINA_PROBE_ITEMS ?? '').split(',').filter(Boolean).map(Number))}, targetDir: ${JSON.stringify(dir)} };
   const job = await window.lumina.invoke('jobs:add', { url, info, options });
-  const t0 = Date.now(), samples = [];
+  const t0 = Date.now(), samples = [{ inspected: { kind: info.kind, title: info.title, entries: (info.entries || []).length } }];
   for (;;) {
     await new Promise((r) => setTimeout(r, 500));
     const j = (await window.lumina.invoke('jobs:list')).find((x) => x.id === job.id);
@@ -69,6 +69,32 @@ export const downloadProbe = (url: string, dir: string, kind: 'video' | 'audio')
     const p = j.progress;
     samples.push({ t: Date.now() - t0, status: j.status, engine: j.engine, percent: p.percent, filePercent: p.filePercent ?? null, speedBps: p.speedBps, etaSec: p.etaSec, totalBytes: p.totalBytes, stage: p.stage, error: j.error && j.error.message });
     if (['completed', 'cancelled'].includes(j.status) || (j.status === 'failed' && ${process.env.LUMINA_PROBE_WATCH ? 'false' : 'true'}) || Date.now() - t0 > ${Number(process.env.LUMINA_PROBE_SECS) * 1000 || 420000}) break;
+  }
+  return JSON.stringify(samples);
+})()`;
+
+/**
+ * Two direct downloads at once (LUMINA_PROBE_MODE=two, LUMINA_PROBE_URL=<base>, fetched as <base>/one.bin and <base>/two.bin), sampled
+ * until both end. The caller kills the engine process from outside part-way through: both must come back and finish, which only
+ * works if the download that did not trigger the restart is put back too (log: "GID … is not found", 93 times each, four downloads).
+ */
+export const twoJobsProbe = (base: string, dir: string) => `(async () => {
+  const inv = (c, a) => window.lumina.invoke(c, a);
+  const format = { kind: 'video', maxHeight: null, codec: 'any', container: 'mp4', maxFps: null, allowHdr: true, tvSafe: false };
+  const options = { contentType: 'video', format, englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: ${JSON.stringify(dir)} };
+  const ids = [];
+  for (const name of ['one.bin', 'two.bin']) {
+    const url = ${JSON.stringify(base)} + '/' + name;
+    const info = await inv('media:inspect', { url });
+    ids.push((await inv('jobs:add', { url, info, options })).id);
+  }
+  const t0 = Date.now(), samples = [];
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const all = await inv('jobs:list');
+    const js = ids.map((id) => all.find((x) => x.id === id));
+    samples.push({ t: Date.now() - t0, jobs: js.map((j) => j && ({ status: j.status, pct: +j.progress.percent.toFixed(1), stage: j.progress.stage, activity: j.progress.activity ?? null, err: j.error && j.error.message })) });
+    if (js.every((j) => j && ['completed', 'failed', 'cancelled'].includes(j.status)) || Date.now() - t0 > ${Number(process.env.LUMINA_PROBE_SECS) * 1000 || 180000}) break;
   }
   return JSON.stringify(samples);
 })()`;
@@ -265,13 +291,30 @@ const STEPS: { name: string; script: string; delay?: number; before?: (win: Brow
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_SHOT ? [{ name: 'probe-shot', script: shotProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_SHOT) || 12000), delay: 300 }] : []),
   ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && process.env.LUMINA_PROBE_MODE === 'lifecycle' ? [{ name: 'probe-lifecycle', script: lifecycleProbe(probeUrl, probeDir, Boolean(process.env.LUMINA_PROBE_FAST_RETRY), Boolean(process.env.LUMINA_PROBE_SELECT), Boolean(process.env.LUMINA_PROBE_FULLDISK), Boolean(process.env.LUMINA_PROBE_CANCELONLY)), delay: 500 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'select' ? [{ name: 'probe-select', script: selectProbe(probeUrl, probeDir), delay: 500 }] : []),
+  ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'two' ? [{ name: 'probe-two-jobs', script: twoJobsProbe(probeUrl, probeDir), delay: 500 }] : []),
   ...(probeDir && probeUrl && process.env.LUMINA_PROBE_MODE === 'big' ? [{ name: 'probe-big', script: bigProbe(probeUrl, probeDir, Number(process.env.LUMINA_PROBE_PAUSE_PCT) || 25, Number(process.env.LUMINA_PROBE_SECS) || 7200, process.env.LUMINA_PROBE_MOVE_TO ?? ''), delay: 500 }] : []),
-  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && !['lifecycle', 'big', 'select'].includes(process.env.LUMINA_PROBE_MODE ?? '') ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, 'video'), delay: 500 }] : []),
+  ...(probeDir && probeUrl && !process.env.LUMINA_PROBE_SHOT && !['lifecycle', 'big', 'select', 'two'].includes(process.env.LUMINA_PROBE_MODE ?? '') ? [{ name: 'probe-download-url', script: downloadProbe(probeUrl, probeDir, process.env.LUMINA_PROBE_KIND === 'audio' ? 'audio' : 'video'), delay: 500 }] : []),
   ...(probeDir && !probeUrl && probeRows.length !== 3 ? [{ name: 'probe-download-yt', script: downloadProbe('https://www.youtube.com/watch?v=jNQXAC9IVRw', probeDir, 'video'), delay: 500 }] : []),
   { name: '01-download-light', script: "document.documentElement.dataset.theme='light'" },
   { name: '02-download-dark', script: "document.documentElement.dataset.theme='dark'" },
   // The same step with a link of the caller's choosing (LUMINA_PROBE_INSPECT), to photograph how a particular failure looks.
   ...(process.env.LUMINA_PROBE_INSPECT ? [{ name: 'probe-inspect-shot', script: `(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(process.env.LUMINA_PROBE_INSPECT)}); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); return 'submitted'; })()`, delay: 12000 }] : []),
+  // After the step above has shown a link's options: press the screen's own "Download N" (or "Download") button like a person, then watch
+  // the queue for LUMINA_PROBE_UI_DOWNLOAD seconds. This is the path the IPC probes skip (selection, options, the button itself).
+  ...(process.env.LUMINA_PROBE_INSPECT && process.env.LUMINA_PROBE_UI_DOWNLOAD ? [{ name: 'probe-ui-download', script: `(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const b = [...document.querySelectorAll('button')].find((x) => /^Download( [0-9]+)?$/.test(x.textContent.trim()) && !x.closest('nav,aside'));
+    if (!b) return JSON.stringify({ clicked: false, buttons: [...document.querySelectorAll('button')].map((x) => x.textContent.trim()).filter(Boolean).slice(0, 30) });
+    const label = b.textContent.trim();
+    b.click();
+    const t0 = Date.now(), samples = [];
+    while (Date.now() - t0 < ${Number(process.env.LUMINA_PROBE_UI_DOWNLOAD) * 1000}) {
+      await sleep(2000);
+      const all = await window.lumina.invoke('jobs:list');
+      samples.push({ t: Date.now() - t0, jobs: all.map((j) => ({ title: j.title, status: j.status, pct: +j.progress.percent.toFixed(1), stage: j.progress.stage, err: j.error && j.error.message, dir: j.outputDir })) });
+    }
+    return JSON.stringify({ clicked: true, label, samples });
+  })()`, delay: 500 }] : []),
   // Press Play on a link the way a person would, then read back whether the picture is really moving (LUMINA_PROBE_PLAY).
   ...(process.env.LUMINA_PROBE_PLAY ? playProbe(process.env.LUMINA_PROBE_PLAY) : []),
   { name: '03-inspect', script: `(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); })()`, delay: 9000 },
@@ -309,6 +352,8 @@ const STEPS: { name: string; script: string; delay?: number; before?: (win: Brow
   { name: '06-settings', script: goto('Settings') },
   { name: '06b-settings-subtitles', script: openSettings('Subtitles'), delay: 1600 },
   { name: '06c-settings-downloads', script: openSettings('Downloads'), delay: 1400 },
+  // The Accounts screen. The delay is long on purpose: a test can hand over a sign-in through the bridge while the screen is open.
+  { name: '06d-settings-accounts', script: openSettings('Accounts'), delay: Number(process.env.LUMINA_PROBE_ACCOUNTS_MS ?? 1600) },
   // The integrated terminal, driven the way a person would: open it, type a command, press Enter.
   { name: '07a-ide-terminal', script: `document.documentElement.dataset.theme='dark'; ${goto('Code')}; setTimeout(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u0060', ctrlKey: true, bubbles: true })); }, 1500); setTimeout(() => { const ta = document.querySelector('.xterm-helper-textarea'); if (ta) { ta.focus(); } }, 3000)`, delay: 5000 },
   // Prove the pty round-trip, not just the panel: send a real command and screenshot its output.
@@ -502,6 +547,34 @@ export async function runCapture(win: BrowserWindow, dir: string, extra: { name:
     process.stdout.write(`[capture] ${step.name}\n`);
   }
   if (!only || only.test('tray-roundtrip')) await trayRoundTrip(win);
+  if (process.env.LUMINA_PROBE_HOSTFLOW && (!only || only.test('probe-hostflow'))) await hostFlowProbe(dir);
+}
+
+/**
+ * Gets through a release of N parts on a stand-in file host (scripts/dl-lab/host-standin.mjs), playing the person: each human check is
+ * "solved" a moment after it is shown. Records when each check appeared, so how long the person waits between checks can be read off,
+ * and how long the whole release took. LUMINA_PROBE_HOSTFLOW=<base url>, _N=<parts>, _SOLVE_MS=<how long the person takes>.
+ */
+async function hostFlowProbe(dir: string) {
+  const base = process.env.LUMINA_PROBE_HOSTFLOW!;
+  const parts = Number(process.env.LUMINA_PROBE_HOSTFLOW_N ?? 6);
+  const solveMs = Number(process.env.LUMINA_PROBE_SOLVE_MS ?? 1500);
+  const { resolveHostedLink, challengeEvents } = await import('./hosters');
+  const t0 = Date.now();
+  const shownAtMs: number[] = [];
+  challengeEvents.on('shown', (wc) => {
+    shownAtMs.push(Date.now() - t0);
+    setTimeout(() => void wc.executeJavaScript('window.__solve && window.__solve()').catch(() => undefined), solveMs);
+  });
+  const results = await Promise.allSettled(Array.from({ length: parts }, (_, i) =>
+    resolveHostedLink(`${base}/f/${i + 1}`, { signal: new AbortController().signal, onStage: () => undefined, label: `Part ${i + 1}` })));
+  const outcome = {
+    parts, solveMs, totalS: Math.round((Date.now() - t0) / 100) / 10, checksShown: shownAtMs.length, shownAtMs,
+    gapsBetweenChecksMs: shownAtMs.slice(1).map((t, i) => t - shownAtMs[i]!),
+    results: results.map((r) => (r.status === 'fulfilled' ? r.value.filename : `FAILED: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)),
+  };
+  fs.writeFileSync(path.join(dir, 'probe-hostflow.json'), JSON.stringify(outcome, null, 2));
+  process.stdout.write(`[capture] probe-hostflow ${JSON.stringify({ totalS: outcome.totalS, checks: outcome.checksShown })}\n`);
 }
 
 /**

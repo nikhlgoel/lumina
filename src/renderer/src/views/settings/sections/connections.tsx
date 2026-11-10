@@ -27,6 +27,7 @@ const relative = (ts: number) => {
 
 export function AccountsSection({ s, set }: SectionProps) {
   const toast = useApp((x) => x.toast);
+  const setView = useApp((x) => x.setView);
   const [accounts, setAccounts] = useState<SiteAccountInfo[] | null>(null);
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
   const [firewall, setFirewall] = useState<FirewallStatus | null>(null);
@@ -37,6 +38,8 @@ export function AccountsSection({ s, set }: SectionProps) {
     void call('accounts:list').then(setAccounts);
     void call('spotify:status').then(setSpotify);
     void call('firewall:status').then(setFirewall).catch(() => undefined);
+    // The browser extension can hand over a sign-in while this screen is open.
+    return on('accounts:changed', setAccounts);
   }, []);
 
   const run = async <T,>(key: string, fn: () => Promise<T>, done?: (v: T) => void) => {
@@ -65,10 +68,17 @@ export function AccountsSection({ s, set }: SectionProps) {
           </span>
         </div>
         <Row id="youtubeAccount" label={<span className="flex items-center gap-2">YouTube {youtube && <Badge tone="success"><ShieldCheck className="size-3" /> Signed in</Badge>}</span>}
-          description="For age-restricted, private, members-only videos and your own playlists. Also stops “confirm you’re not a bot” errors.">
+          description={youtube
+            ? 'For age-restricted, private, members-only videos and your own playlists. Also stops “confirm you’re not a bot” errors.'
+            : 'For age-restricted, private and members-only videos. Google won’t let any app’s own window sign in, so use your browser: sign in to YouTube there, click the Lumina extension, and press “Use my YouTube sign-in in Lumina”.'}>
           {youtube
             ? <Button size="sm" variant="ghost" icon={<LogOut className="size-3.5" />} loading={busy === 'yt-out'} onClick={() => run('yt-out', async () => { await call('accounts:sign-out', { domain: 'google.com' }); return call('accounts:sign-out', { domain: 'youtube.com' }); }, setAccounts)}>Sign out</Button>
-            : <Button size="sm" variant="primary" loading={busy === 'yt'} onClick={() => run('yt', () => call('accounts:sign-in', { target: 'youtube' }), (a) => { setAccounts(a); if (a.some((x) => x.domain.endsWith('google.com') || x.domain.endsWith('youtube.com'))) toast('Signed in to YouTube', 'success'); })}>Sign in</Button>}
+            : (
+              <div className="flex flex-col items-end gap-1.5">
+                <Button size="sm" variant="primary" onClick={() => setView('settings', 'extension')}>Set up the browser extension</Button>
+                <Button size="sm" variant="ghost" loading={busy === 'yt'} title="Google usually refuses this" onClick={() => run('yt', () => call('accounts:sign-in', { target: 'youtube' }), (a) => { setAccounts(a); if (a.some((x) => x.domain.endsWith('google.com') || x.domain.endsWith('youtube.com'))) toast('Signed in to YouTube', 'success'); })}>Try signing in here instead</Button>
+              </div>
+            )}
         </Row>
         {accounts?.filter((a) => !['youtube.com', 'google.com'].includes(a.domain)).map((a) => (
           <Row key={a.domain} label={<span className="flex items-center gap-2"><Globe className="size-4 text-ink-3" />{a.domain}</span>} description="Signed in">

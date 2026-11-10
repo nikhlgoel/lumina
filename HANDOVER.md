@@ -27,6 +27,21 @@ passed (61 files)** · `vite build` ok · TV Kotlin **173 passed** · live in El
 build was started hidden). **Still not proven:** real sleep/wake, a real swarm/the owner's large game torrent, the yt-dlp accelerator fallback,
 the installer itself. Queue-row display items D1–D3/D11 wait for a mockup and a yes. Everything is uncommitted.
 
+**Added 2026-11-10 (session 54): downloader stability after 1.2.1, uncommitted** (SESSION-LOG 54, BUGS B15, CHANGELOG [Unreleased]).
+The engine that "did not start" (a saved network address that no longer exists), a download the restarted engine had forgotten (polled for
+ever, then restarted the engine again), a torrent starved by Lumina's own upload cap, a host that answers a slice with the whole remainder,
+the YouTube sign-in handed over from the person's own browser (`/v1/account-cookies`), faster hand-over between host pop-ups, and the
+extension finding file-named links, "Download" buttons that are not links, and per-host mirror choice. **Proven now:** `tsc` clean · `vitest`
+all passing · `vite build` · extension e2e 38/38 in real headless Chrome · before/after runs in the real app for the engine start and the lost
+download. **Not proven:** the range-refusal retry end to end (the fatal case did not reproduce locally), yt-dlp with a real private video,
+Firefox, any real file host. **Needs the owner:** reusing a solved check across a site's links is forbidden by AGENTS.md rule 1; say if that
+should change. Nothing was committed or released.
+**Also 2026-11-10 (session 55): YouTube playlists that "did not download"** (SESSION-LOG 55, BUGS B15). The shared download archive made a
+re-requested playlist finish "Done" with 0 files; it is now per kind and folder and checked against the folder. A stale saved sign-in is
+retried without. 8 songs as FLAC with the owner's settings, and the real Download button, were run and worked. **Not proven:** that this is
+what the owner hit (no trace of their attempt), private/age-restricted/live/Shorts links, very long playlists. Probe profiles must set
+their own storage folders (one run wrote into the real Music folder; cleaned up).
+
 **Added 2026-10-27 (session 49): the first public release, and a website.** Desktop **1.1.0** (the unpublished 3.0.x numbering is retired) and TV
 **0.2.0** are published at `github.com/nikhlgoel/lumina/releases/tag/1.1.0` (tag `1.1.0`, no "v", because `v1.1.0` already exists from September):
 Standard and Full installers, the signed TV APK, extension zips, `SHA256SUMS.txt`; verified against GitHub. Everything is committed and pushed. The

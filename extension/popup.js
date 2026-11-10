@@ -1,4 +1,5 @@
-import { capture, formatBytes, getConfig, hello, pair, setConfig } from './lib.js';
+import { capture, formatBytes, getConfig, hello, pair, setConfig, shareLogin } from './lib.js';
+import { chooseMirror, groupByHost, hostOf, linkName } from './mirrors.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -103,19 +104,20 @@ async function render() {
   }
 
   await renderLinks(tab);
-}
 
-/** A readable name for a link: its own text if it is short, otherwise the file name in the address (a host often keeps it after the #). */
-function linkName(l) {
-  if (l.text && l.text.length <= 60 && !/^https?:|^magnet:/i.test(l.text)) return l.text;
-  try {
-    const u = new URL(l.url);
-    const frag = decodeURIComponent(u.hash.slice(1));
-    if (/\.[a-z0-9]{2,5}$/i.test(frag)) return frag;
-  } catch {
-    // not a parseable address: fall through
-  }
-  return /^magnet:/i.test(l.url) ? (new URLSearchParams(l.url.slice(8)).get('dn') || 'Magnet link') : fileName(l.url);
+  // Offered only when this Lumina can take a sign-in (an older one answers without `accounts`).
+  $('login-box').hidden = !app.accounts;
+  $('share-youtube').onclick = async () => {
+    const btn = $('share-youtube');
+    const note = $('share-youtube-note');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const r = await shareLogin('youtube');
+    btn.disabled = false;
+    btn.textContent = 'Use my YouTube sign-in in Lumina';
+    note.hidden = false;
+    note.textContent = r.ok ? 'Done. Lumina can now download private and age-restricted YouTube videos as you.' : (r.reason || 'Lumina didn’t respond');
+  };
 }
 
 /** Every download link on the page, to pick from and send together. */
@@ -151,8 +153,30 @@ async function renderLinks(tab) {
       else chosen.delete(l.url);
       refresh();
     };
-    rows.push({ li, check, l, haystack: `${linkName(l)} ${l.url}`.toLowerCase() });
+    rows.push({ li, check, l, haystack: `${linkName(l)} ${l.url}`.toLowerCase(), filterOff: false, mirrorOff: false });
     list.append(li);
+  }
+
+  // A page that offers the same files on several hosts: start with one of them, so the files are not all sent several times over.
+  const mirror = chooseMirror(groupByHost(links));
+  const mirrorSel = $('mirror');
+  mirrorSel.hidden = !mirror;
+  const showRow = (r) => { r.li.hidden = r.filterOff || r.mirrorOff; };
+  const applyMirror = (host) => {
+    for (const r of rows) {
+      const on = !host || (/^magnet:/i.test(r.l.url) ? 'magnet' : hostOf(r.l.url)) === host;
+      r.mirrorOff = !on;
+      r.check.checked = on;
+      if (on) chosen.add(r.l.url);
+      else chosen.delete(r.l.url);
+      showRow(r);
+    }
+    refresh();
+  };
+  if (mirror) {
+    mirrorSel.replaceChildren(new Option(`All hosts (${links.length})`, ''), ...groupByHost(links).map((g) => new Option(`${g.host} (${g.links.length})`, g.host)));
+    mirrorSel.value = mirror;
+    mirrorSel.onchange = () => applyMirror(mirrorSel.value);
   }
 
   const send = $('send-links');
@@ -163,6 +187,7 @@ async function renderLinks(tab) {
     send.textContent = chosen.size ? `Send ${chosen.size} to Lumina` : 'Pick at least one link';
     send.disabled = chosen.size === 0;
   };
+  if (mirror) applyMirror(mirror);
   $('links-all').onchange = (e) => {
     for (const r of rows) {
       if (r.li.hidden) continue; // select all applies to what the filter shows
@@ -175,7 +200,10 @@ async function renderLinks(tab) {
   $('links-filter').value = '';
   $('links-filter').oninput = (e) => {
     const q = e.target.value.trim().toLowerCase();
-    for (const r of rows) r.li.hidden = Boolean(q) && !r.haystack.includes(q);
+    for (const r of rows) {
+      r.filterOff = Boolean(q) && !r.haystack.includes(q);
+      showRow(r);
+    }
   };
   send.onclick = async () => {
     send.disabled = true;

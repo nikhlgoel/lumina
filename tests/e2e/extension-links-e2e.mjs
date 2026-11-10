@@ -45,6 +45,15 @@ const PAGES = {
   '/text': { html: doc('<pre id="t">Part 1: https://rapidgator.net/file/aa/Sample.part1.rar\nPart 2: https://rapidgator.net/file/bb/Sample.part2.rar\nPart 3: https://rapidgator.net/file/cc/Sample.part3.rar</pre>') },
   '/frame': { html: doc('<iframe id="f" src="/frame-inner" width="700" height="260"></iframe>') },
   '/frame-inner': { html: PAGE },
+  // Shaped like a release page with one tab per mirror: every row's button only says "DOWNLOAD", the file name is in the row, a mirror's
+  // buttons are not links at all (a data attribute, a click handler), and one mirror is a host Lumina has never heard of.
+  '/mirrors': { html: doc(`<h1>Release</h1>
+<div id="tabs">FileDitch | Pixeldrain | Gofile | Other</div>
+<table id="fd">${[1, 2, 3].map((n) => `<tr><td>Release.part0${n}.rar</td><td><a class="btn" href="https://fileditchfiles.example/s${n}/f${n}">DOWNLOAD</a></td></tr>`).join('')}</table>
+<table id="pd">${[1, 2, 3].map((n) => `<tr><td>Release.part0${n}.rar</td><td><a class="btn" href="https://pixeldrain.com/u/pd${n}">DOWNLOAD</a></td></tr>`).join('')}</table>
+<table id="gf">${[1, 2, 3].map((n) => `<tr><td>Release.part0${n}.rar</td><td><button data-href="https://gofile.io/d/gf${n}">Download</button></td></tr>`).join('')}</table>
+<table id="ot"><tr><td>Release.part01.rar</td><td><button onclick="window.open('https://unknown-mirror.example/get/x1')">Download</button></td></tr></table>
+<p><a href="https://example.org/about">About us</a></p>`) },
 };
 
 const site = http.createServer((req, res) => {
@@ -169,6 +178,8 @@ async function main() {
     const { id: extId } = await cdp.send('Extensions.loadUnpacked', { path: path.join(ROOT, 'extension') });
     const sw = await waitFor(async () => (await cdp.targets()).find((t) => t.type === 'service_worker' && t.url === `chrome-extension://${extId}/background.js`), 40_000, 'extension service worker');
     const worker = await cdp.attach(sw.targetId);
+    // The worker's target exists before its script has finished loading; the first command used to race it ("lumina is not defined").
+    await waitFor(() => worker.eval("typeof lumina !== 'undefined'"), 15_000, 'the extension script to finish loading');
     await worker.eval(`lumina.setConfig({ port: ${BRIDGE_PORT} })`);
     await worker.eval('lumina.pair()');
     check('the extension pairs with the (stub) bridge', (await worker.eval('lumina.hello()')).paired === true);
@@ -381,6 +392,39 @@ async function main() {
     received.length = 0;
     await popup.eval(`chrome.runtime.sendMessage({ type: 'send-links', tabId: ${tabId}, urls: [${JSON.stringify(popupLinks[0].url)}] })`);
     check('a single link takes the ordinary single-link path', received.at(-1)?.path === '/v1/capture' && received.at(-1).body.kind === 'link');
+
+    /* a release page with one tab per mirror: names, buttons that are not links, and choosing a mirror */
+    {
+      const { targetId: mirrorTarget } = await cdp.send('Target.createTarget', { url: `http://127.0.0.1:${SITE_PORT}/mirrors` });
+      const mirrorTab = await cdp.attach(mirrorTarget);
+      await waitFor(() => mirrorTab.eval("document.readyState === 'complete' && !!document.getElementById('gf')"), 20_000, 'mirrors page');
+      await wait(500);
+      const mTabId = await worker.eval(`chrome.tabs.query({ url: 'http://127.0.0.1:${SITE_PORT}/mirrors' }).then((t) => t[0].id)`);
+      const found = await worker.eval(`lumina.linksIn(${mTabId}, false)`);
+      check('every mirror’s ten download buttons are found: links, a data attribute, a click handler, and a host never heard of', found.length === 10, `${found.length}: ${found.map((l) => new URL(l.url).hostname).join(', ')}`);
+      check('each is named by the file name in its row, not "DOWNLOAD"', found.every((l) => /^Release\.part0[123]\.rar$/.test(l.text)), found.map((l) => l.text).join('|'));
+      check('the plain link on the page is left out', !found.some((l) => l.url.includes('example.org/about')));
+
+      await popup.eval(`chrome.tabs.query = async () => [{ id: ${mTabId}, url: 'http://127.0.0.1:${SITE_PORT}/mirrors', title: 'Release' }]; __renderPopup().then(() => 0)`);
+      await wait(900);
+      const options = await popup.eval("[...document.getElementById('mirror').options].map((o) => o.textContent)");
+      check('the popup notices the same files are offered on several hosts', !(await popup.eval("document.getElementById('mirror').hidden")) && options[0] === 'All hosts (10)', options.join(' | '));
+      check('it starts with the host Lumina handles best (Pixeldrain), not the first one on the page', (await popup.eval("document.getElementById('mirror').value")) === 'pixeldrain.com');
+      check('so only that host’s three files are listed and ticked', (await popup.eval("[...document.querySelectorAll('#links li')].filter((li) => !li.hidden).length")) === 3 && (await popup.eval("document.getElementById('send-links').textContent")) === 'Send 3 to Lumina');
+      // Choosing "All hosts" and going back (before sending: a successful send closes the popup after 0.9 s).
+      await popup.eval("(() => { const s = document.getElementById('mirror'); s.value = ''; s.dispatchEvent(new Event('change')); })()");
+      await wait(300);
+      check('choosing "All hosts" lists and ticks all ten', (await popup.eval("document.getElementById('send-links').textContent")) === 'Send 10 to Lumina');
+      await popup.eval("(() => { const s = document.getElementById('mirror'); s.value = 'pixeldrain.com'; s.dispatchEvent(new Event('change')); })()");
+      await wait(300);
+      check('choosing Pixeldrain again goes back to three', (await popup.eval("document.getElementById('send-links').textContent")) === 'Send 3 to Lumina');
+
+      received.length = 0;
+      await popup.eval("document.getElementById('send-links').click()");
+      await wait(1200);
+      const mirrorBatch = received.find((r) => r.path === '/v1/capture-batch');
+      check('pressing Send delivers just those three, once each', mirrorBatch?.body.urls.length === 3 && mirrorBatch.body.urls.every((u) => u.startsWith('https://pixeldrain.com/')), mirrorBatch?.body.urls.join(' '));
+    }
   } finally {
     browser.kill();
     site.close();

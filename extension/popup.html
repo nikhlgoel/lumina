@@ -34,10 +34,18 @@
         <label class="check"><input type="checkbox" id="links-all" checked /><span id="links-count"></span></label>
         <input id="links-filter" type="search" placeholder="Filter" aria-label="Filter links" />
       </div>
+      <select id="mirror" class="mirror" aria-label="Which host to send from" title="This page offers the same files on several hosts" hidden></select>
       <ul id="links"></ul>
       <button id="send-links" class="primary">Send to Lumina</button>
     </div>
     <p id="links-empty" class="empty" hidden>No download links on this page. Highlight links and right-click, or press the button that appears, to send any you pick.</p>
+
+    <div id="login-box" hidden>
+      <h2>Private and age-restricted videos</h2>
+      <p class="empty">Signed in to YouTube in this browser? Let Lumina use that sign-in to download them. It stays on this computer.</p>
+      <button id="share-youtube" class="secondary">Use my YouTube sign-in in Lumina</button>
+      <p id="share-youtube-note" class="empty" hidden></p>
+    </div>
   </section>
 
   <footer>

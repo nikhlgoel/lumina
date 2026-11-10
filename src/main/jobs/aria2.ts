@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { aria2Progress, etaFromSpeed, friendlyAria2Error, isControlFileMissing, isDiskCacheFailure, isMetadataPhase, smoothSpeed, type Aria2Status } from '../../core/progress';
+import { aria2Progress, etaFromSpeed, friendlyAria2Error, isControlFileMissing, isDiskCacheFailure, isMetadataPhase, isRangeRefusal, smoothSpeed, type Aria2Status } from '../../core/progress';
 import { toSelectFileSpec, toTorrentFiles, type TorrentFile } from '../../core/torrentFiles';
 import { pushSample, shareRatio, type SpeedSample } from '../../core/speedHistory';
 import type { TorrentDetail } from '../../shared/types';
@@ -16,9 +16,10 @@ import { tools } from '../tools';
 import { settings } from '../settings';
 import { dataDir } from '../paths';
 import { cookieHeaderFor } from '../../core/cookies';
-import { initialStall, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '../../core/engineWatch';
+import { initialStall, isLostFromEngine, MAX_QUICK_READDS, needsSparse, rpcAction, sleptBetween, stallStep, type StallState } from '../../core/engineWatch';
 import { bindArg, bindArgFromSlots, cleanBindList, weightedBindList } from '../../core/networkBind';
-import { measureLines } from '../lineSpeed';
+import { activeBindList, measureLines } from '../lineSpeed';
+import { classifyStartFailure, ENGINE_WILL_NOT_START, nextStartFix, type StartFix } from '../../core/engineStart';
 import { autoUploadCapKbps, worthChanging } from '../../core/uploadCap';
 import { isSparse, markSparse } from '../sparse';
 import { allocatedBytes, spaceShortfall } from '../../core/diskSpace';
@@ -85,6 +86,9 @@ function dynamicOptions(s: Settings): Record<string, string> {
   };
 }
 
+/** Options that only tune or extend a download. Left out on the last try at starting, so a setting aria2 dislikes cannot stop it. */
+const OPTIONAL_FLAGS = /^--(?:bt-request-peer-speed-limit|optimize-concurrent-downloads|bt-max-open-files|bt-tracker|bt-remove-unselected-file|enable-dht6|bt-enable-lpd|enable-peer-exchange|disk-cache|auto-save-interval|follow-torrent|bt-save-metadata|bt-load-saved-metadata|user-agent|all-proxy|multiple-interface|interface|max-overall-upload-limit|bt-max-peers)=/;
+
 /** The settings aria2 can only read when it starts. A change to one of these needs a restart; nothing else does. */
 export function restartOnlyKey(s: Settings): string {
   return JSON.stringify([s.torrents.listenPort, s.torrents.dht, s.torrents.requireEncryption, s.network.forceIpv4, cleanBindList(s.network.bindAddresses)]);
@@ -115,12 +119,36 @@ class Aria2Daemon {
     if (this.running()) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
+      // Up to three tries, each undoing what the last one's own error message blamed (core/engineStart). Nobody who has just pressed
+      // Download can act on "aria2 exited (1)", and the commonest cause, a saved network connection that has gone, is one to fix here.
+      let fix: StartFix = {};
+      let failure = '';
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const out = await this.launch(fix);
+        if (out === null) return;
+        failure = out;
+        const kind = classifyStartFailure(out);
+        log.warn(`The download engine did not start (try ${attempt} of 3): ${kind.plain}`, { detail: out.slice(-500) });
+        fix = nextStartFix(fix, kind.kind);
+      }
+      throw new Error(ENGINE_WILL_NOT_START);
+    })().finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
+  }
+
+  /** One try at starting aria2: null once it answers, otherwise what it printed before it stopped. */
+  private launch(fix: StartFix): Promise<string | null> {
+    return (async () => {
       const s = settings.get();
       this.port = await this.freePort();
       const t = s.torrents;
+      const listenPort = fix.otherPort ? await this.freePort() : t.listenPort;
       // Two or more connections: measure each for a few seconds and share the download in proportion to speed. Equal shares came
       // out 5% slower than the fast line alone when the other was a 2 MB/s Wi-Fi (measured); weighted, the slow one costs nothing.
-      const bound = cleanBindList(s.network.bindAddresses);
+      // Only the connections that exist now: aria2 will not start when told to use an address that has gone (a hotspot's, say).
+      const bound = fix.dropBind ? [] : activeBindList(s.network.bindAddresses);
       const bindFlag = bound.length >= 2 ? bindArgFromSlots(weightedBindList(bound, await measureLines(bound))) : bindArg(bound);
       const args = [
         '--enable-rpc', `--rpc-listen-port=${this.port}`, '--rpc-listen-all=false', `--rpc-secret=${this.secret}`,
@@ -148,7 +176,7 @@ class Aria2Daemon {
         // We upload each .torrent to aria2 over RPC, and by default aria2 then saves a copy named after the
         // SHA-1 of the file (NOT the info hash) into the download folder and keeps it open while seeding.
         // Lumina already has the file, so that copy is only litter.
-        '--rpc-save-upload-metadata=false', `--listen-port=${t.listenPort}`, `--dht-listen-port=${t.listenPort}`,
+        '--rpc-save-upload-metadata=false', `--listen-port=${listenPort}`, `--dht-listen-port=${listenPort}`,
         `--enable-dht=${t.dht}`, `--enable-dht6=${t.dht}`, '--bt-enable-lpd=true', '--enable-peer-exchange=true',
         `--bt-tracker=${(await trackers()).join(',')}`, '--bt-remove-unselected-file=true',
         `--seed-ratio=${t.seedRatio}`, `--seed-time=${t.seedMinutes}`,
@@ -160,27 +188,36 @@ class Aria2Daemon {
         ...(s.network.userAgent ? [`--user-agent=${s.network.userAgent}`] : []),
         ...Object.entries(dynamicOptions(s)).map(([k, v]) => `--${k}=${v}`),
       ];
-      this.child = spawnTool(tools.require('aria2c'), args, { detached: false });
-      this.child.stderr?.on('data', (c: Buffer) => log.debug(c.toString().trim()));
-      this.child.on('exit', (code) => {
+      // The last resort drops every option that only tunes or extends a download, keeping what a download cannot do without.
+      const finalArgs = fix.minimal ? args.filter((a) => !OPTIONAL_FLAGS.test(a)) : args;
+      const child = spawnTool(tools.require('aria2c'), finalArgs, { detached: false });
+      this.child = child;
+      // What aria2 says as it dies is the reason; it used to be thrown away at debug level, leaving "exited (1)" and nothing else.
+      let said = '';
+      const keep = (c: Buffer) => { said = (said + c.toString()).slice(-2000); };
+      child.stdout?.on('data', keep);
+      child.stderr?.on('data', (c: Buffer) => { keep(c); log.debug(c.toString().trim()); });
+      let exited = false;
+      child.on('exit', (code) => {
+        exited = true;
         log.info(`aria2 exited (${code})`);
-        this.child = null;
+        if (this.child === child) this.child = null;
       });
       for (let i = 0; i < 40; i++) {
+        // A process that has already died will never answer: stop waiting at once instead of polling it for six seconds.
+        if (exited) return said.trim() || 'aria2 exited straight away without saying why';
         try {
           await this.call('aria2.getVersion');
           this.watchSchedule();
           this.watchUpload();
-          return;
+          return null;
         } catch {
           await new Promise((r) => setTimeout(r, 150));
         }
       }
-      throw new Error('The download engine (aria2) did not start.');
-    })().finally(() => {
-      this.starting = null;
-    });
-    return this.starting;
+      killTree(child);
+      return said.trim() || 'aria2 started but never answered';
+    })();
   }
 
   /** Re-apply limits every minute so scheduled speed limits switch on and off on time. */
@@ -213,11 +250,14 @@ class Aria2Daemon {
   private async governUpload() {
     if (!this.running() || settings.get().torrents.uploadLimitKbps > 0) return;
     try {
-      const active = await this.call<{ downloadSpeed?: string; seeder?: string; bittorrent?: unknown }[]>('aria2.tellActive', ['downloadSpeed', 'seeder', 'bittorrent']);
+      const active = await this.call<{ downloadSpeed?: string; seeder?: string; numSeeders?: string; bittorrent?: unknown }[]>('aria2.tellActive', ['downloadSpeed', 'seeder', 'numSeeders', 'bittorrent']);
       const torrents = active.filter((a) => a.bittorrent);
-      const downloading = torrents.some((a) => a.seeder !== 'true');
+      const getting = torrents.filter((a) => a.seeder !== 'true');
+      const downloading = getting.length > 0;
       const downKBps = torrents.reduce((n, a) => n + (Number(a.downloadSpeed) || 0), 0) / 1024;
-      const cap = autoUploadCapKbps(downKBps, downloading);
+      // The limit is overall, so it follows the torrent with the fewest seeds: one that is fed by other downloaders is not to be starved.
+      const seeds = downloading ? Math.min(...getting.map((a) => Number(a.numSeeders) || 0)) : null;
+      const cap = autoUploadCapKbps(downKBps, downloading, seeds);
       if (!worthChanging(this.lastUploadCap, cap)) return;
       await this.call('aria2.changeGlobalOption', { 'max-overall-upload-limit': cap > 0 ? `${cap}K` : '0' });
       this.lastUploadCap = cap;
@@ -454,8 +494,11 @@ export const aria2Runner: Runner = (ctx) => {
   let addSpec: { url: string; torrentPath: string | null; opts: Record<string, string | string[]> } | null = null;
   let silentSince = 0;
   let recoveries = 0;
+  /** Times in a row this download was put back because the engine had lost it (see isLostFromEngine). */
+  let quickReadds = 0;
   let cacheRetried = false;
   let nameRetried = false;
+  let rangeRetried = false;
   /** Running average of the download speed, for the ETA (see core/progress smoothSpeed). */
   let avgSpeed: number | null = null;
   let stall: StallState = initialStall(Date.now());
@@ -527,6 +570,7 @@ export const aria2Runner: Runner = (ctx) => {
       // Healthy again: forget earlier transient failures.
       silentSince = 0;
       recoveries = 0;
+      quickReadds = 0;
       // Magnets first fetch metadata, then continue as a new download.
       if (status.status === 'complete' && status.followedBy?.[0]) {
         gid = status.followedBy[0];
@@ -608,6 +652,22 @@ export const aria2Runner: Runner = (ctx) => {
             log.warn('Could not retry with the cache off', e);
           }
         }
+        // A server that answers a request for one slice with the whole rest of the file makes aria2 give up ("Invalid range header").
+        // It was retried the same way, in pieces, and failed the same way every time. One connection does not ask for slices.
+        if (!isTorrent && !rangeRetried && isRangeRefusal(status.errorMessage) && addSpec) {
+          rangeRetried = true;
+          log.warn('The server does not honour slice requests; continuing with one connection', { job: job.title });
+          addSpec.opts = { ...addSpec.opts, 'max-connection-per-server': '1', split: '1' };
+          ctx.progress({ stage: 'This server does not allow splitting the download; continuing with one connection…', speedBps: null, etaSec: null }, 'running');
+          try {
+            await addToAria();
+            stall = initialStall(Date.now(), stall.bytes);
+            timer = setTimeout(poll, 1000);
+            return;
+          } catch (e) {
+            log.warn('Could not retry with one connection', e);
+          }
+        }
         // aria2 will not continue into a file that has no control file (it cannot tell a partial from someone else's
         // file, and refuses rather than truncate it; seen in the log). The existing file is not ours to touch, so
         // start again under a new name beside it instead of failing.
@@ -683,6 +743,23 @@ export const aria2Runner: Runner = (ctx) => {
       }, 'running');
     } catch (err) {
       if (stopped) return;
+      // The engine answered, and what it said is "I do not have that download": it was restarted (often by another download's
+      // recovery) and only that download was put back. This is not silence, so do not wait out the grace period and then restart the
+      // engine again, which would throw away the others just put back. Add this one again; the bytes on disk are kept.
+      if (isLostFromEngine(err) && quickReadds < MAX_QUICK_READDS && aria2.running()) {
+        quickReadds++;
+        log.warn('The download engine no longer has this download; adding it again', { job: job.title, attempt: quickReadds });
+        try {
+          await addToAria();
+          stall = initialStall(Date.now(), stall.bytes);
+          silentSince = 0;
+          ctx.progress({ stage: 'Downloading', activity: 'reconnecting', speedBps: null, etaSec: null }, 'running');
+          timer = setTimeout(poll, 500);
+          return;
+        } catch (e) {
+          log.warn('Adding the download again failed', e);
+        }
+      }
       if (!silentSince) silentSince = Date.now();
       const silentForMs = Date.now() - silentSince;
       // Free space is in the line because "the engine stopped answering" has been unexplained in the owner's log for days;
@@ -842,6 +919,9 @@ export const aria2Runner: Runner = (ctx) => {
       opts,
     };
     await addToAria();
+    // The stall clock starts now, when the engine has the download, not when this job began. A download that first waited on a host's page
+    // (a check, a countdown) was declared "stalled for 65 s" three milliseconds after it started (log, 2 Nov) and was paused and resumed.
+    stall = initialStall(Date.now());
     // Structured start line so a stuck/slow aria2 download is diagnosable from the log alone.
     log.info(`aria2 download started: ${job.title}`, {
       kind: isTorrent ? 'torrent' : 'direct',

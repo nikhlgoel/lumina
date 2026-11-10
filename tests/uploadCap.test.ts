@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { autoUploadCapKbps, UPLOAD_FLOOR_KBPS, worthChanging } from '@core/uploadCap';
+import { autoUploadCapKbps, SEEDS_THAT_FEED_THE_SWARM, UPLOAD_FLOOR_KBPS, worthChanging } from '@core/uploadCap';
+
+describe('a swarm fed by other downloaders is not starved', () => {
+  it('puts no limit on a torrent with no seeds, where the pieces come from peers who send to whoever sends to them', () => {
+    // Measured: three downloaders swapping pieces, 40 MB. No limit: 178 s each. 50 KB/s each: two of three had not finished at 260 s.
+    expect(autoUploadCapKbps(212, true, 0)).toBe(0);
+    expect(autoUploadCapKbps(5000, true, 0)).toBe(0);
+  });
+
+  it('puts no limit on one with only a few seeds either', () => {
+    expect(autoUploadCapKbps(300, true, SEEDS_THAT_FEED_THE_SWARM - 1)).toBe(0);
+  });
+
+  it('still limits one with plenty of seeds, which need nothing back', () => {
+    expect(autoUploadCapKbps(10_000, true, SEEDS_THAT_FEED_THE_SWARM)).toBe(1000);
+    expect(autoUploadCapKbps(400, true, 40)).toBe(UPLOAD_FLOOR_KBPS);
+  });
+
+  it('behaves as before when the number of seeds is not known', () => {
+    expect(autoUploadCapKbps(10_000, true, null)).toBe(1000);
+    expect(autoUploadCapKbps(10_000, true)).toBe(1000);
+  });
+
+  it('is off when nothing is downloading whatever the seeds', () => {
+    expect(autoUploadCapKbps(0, false, 50)).toBe(0);
+  });
+});
 
 describe('how much to share while downloading', () => {
   it('is a tenth of the download speed', () => {

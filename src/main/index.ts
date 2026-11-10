@@ -23,6 +23,7 @@ import { broadcast, extensionStatus, registerIpc } from './ipc';
 import { createWindow, mainWindow, refreshWindowChrome, setQuitting, showWindow, type AppMode } from './window';
 import { applyLoginItem, createTray } from './tray';
 import { bridge } from './bridge/server';
+import { importBrowserCookies, listAccounts } from './services/accounts';
 import { applyGlobalShortcut, watchClipboard } from './shortcuts';
 import { watchQueuePower } from './power';
 import { iconPath } from './paths';
@@ -211,6 +212,11 @@ if (!app.requestSingleInstanceLock()) {
         log.info(`Batch from browser: ${urls.length} links from ${request.pageUrl?.slice(0, 120) ?? 'a page'}`);
         openLinks(urls, request);
         return { accepted: true, count: urls.length };
+      },
+      onAccountCookies: async (site, cookies) => {
+        const result = await importBrowserCookies(site, cookies);
+        if (result.signedIn) broadcast('accounts:changed', await listAccounts());
+        return result;
       },
       onPaired: () => broadcast('extension:changed', extensionStatus()),
     });
