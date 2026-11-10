@@ -1,9 +1,10 @@
-// Cookies that prove a bot check was passed. Lumina never carries them from one place to another.
+// Cookies that prove a bot check was passed. They do not travel from the person's browser to Lumina.
 //
-// AGENTS.md rule 1: no `cf_clearance` harvesting or replay. When a site puts up a check, the only supported path is the person solving it
-// themselves, in the in-app browser or through the extension. The extension used to read every cookie for a page and its links and send
-// them all to Lumina, clearance included, so a check solved in the browser was quietly replayed from Lumina. These names are dropped at
-// both ends: the extension does not send them, and the bridge does not accept them (so an older extension cannot either).
+// The person solves a check themselves, in Lumina's own download page or in their browser. The extension used to read every cookie for a page
+// and its links and send them all to Lumina, clearance included, so a check solved in the browser was quietly replayed from Lumina. These
+// names are dropped at both ends: the extension does not send them, and the bridge does not accept them (so an older extension cannot either).
+// What Lumina's own download pages do with a check solved in one of them (remember it for that site's other files, in memory, for a short
+// while) is core/clearance.ts.
 //
 // The extension cannot import this file; `extension/lib.js` keeps the same list, and a test holds the two together.
 

@@ -88,6 +88,29 @@
   };
   const ON_CLICK_URL = /(?:location(?:\.href)?\s*=|window\.open\()\s*['"]([^'"]+)['"]/;
 
+  /**
+   * Links a page keeps as JSON in a data attribute: hoster pages hold one list per file host (a tab each) and draw only the selected one, so
+   * the other hosts' links are never in the page as links. Reading them lets the mirror chooser pick between hosts. An entry the page itself
+   * marks `is_dangerous` is left out, since the page is warning about it.
+   */
+  function fromJsonList(raw, base) {
+    let list;
+    try { list = JSON.parse(String(raw ?? '')); } catch { return []; }
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const item of list) {
+      if (!item || typeof item !== 'object' || item.is_dangerous === true) continue;
+      const address = [item.direct_link, item.url, item.href, item.link, item.download_url].find((v) => typeof v === 'string' && v);
+      const name = [item.file_name, item.filename, item.name].find((v) => typeof v === 'string' && v.trim());
+      if (!address) continue;
+      try {
+        const href = new URL(address, base).href;
+        if (/^https?:/i.test(href)) out.push({ href, text: name ? name.trim() : '' });
+      } catch { /* not an address */ }
+    }
+    return out;
+  }
+
   /** Read the page (or the highlighted part of it) now. */
   function read({ selectionOnly = false } = {}) {
     const sel = globalThis.getSelection?.();
@@ -107,10 +130,11 @@
         if (!raw) continue;
         try { candidates.push({ href: new URL(raw, location.href).href, text: labelFor(el, el.textContent) }); } catch { /* not an address */ }
       }
+      for (const el of document.querySelectorAll('[data-links]')) candidates.push(...fromJsonList(el.getAttribute('data-links'), location.href));
     }
     if (selectionOnly && sel && !sel.isCollapsed) for (const u of textLinks(sel.toString())) candidates.push({ href: u, text: '' });
     return pick(candidates, { chosen: selectionOnly });
   }
 
-  globalThis.__luminaLinks = { pick, read, textLinks, worthy, isHosted, isGeneric, nameIn };
+  globalThis.__luminaLinks = { pick, read, textLinks, worthy, isHosted, isGeneric, nameIn, fromJsonList };
 })();

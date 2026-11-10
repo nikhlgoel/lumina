@@ -34,8 +34,24 @@ the YouTube sign-in handed over from the person's own browser (`/v1/account-cook
 extension finding file-named links, "Download" buttons that are not links, and per-host mirror choice. **Proven now:** `tsc` clean · `vitest`
 all passing · `vite build` · extension e2e 38/38 in real headless Chrome · before/after runs in the real app for the engine start and the lost
 download. **Not proven:** the range-refusal retry end to end (the fatal case did not reproduce locally), yt-dlp with a real private video,
-Firefox, any real file host. **Needs the owner:** reusing a solved check across a site's links is forbidden by AGENTS.md rule 1; say if that
-should change. Nothing was committed or released.
+Firefox, any real file host. (The note here that reusing a solved check was forbidden by rule 1 is superseded: the owner loosened rules 1
+and 2 in AGENTS.md, and session 58 built it.) Nothing was committed or released.
+**Also 2026-11-10 (session 58): rules loosened; hoster pages' hidden mirrors; solve once, reuse for the site** (SESSION-LOG 58). The owner's
+own link was read (200, no check): the page keeps 5 hosts' lists in `data-links` JSON, which the extension and `extractFileLinks` now read
+(`core/pageFiles.ts embeddedLinkLists`, `extension/pagelinks.js fromJsonList`; entries the page flags `is_dangerous` are skipped). A check the
+person solves in a Lumina download page is remembered for that site (`core/clearance.ts`, `main/hosters.ts`: proof cookies only, memory only,
+30 min max); proven offscreen in the real app with `LUMINA_SELFTEST=1 LUMINA_SELFTEST_GATE=1` (4 files, asked once instead of 4 times).
+**Not proven:** a real Cloudflare/DataDome host, the "not accepted" path, the `data-links` path in the extension in a real browser, any
+real download from that page. Nothing committed; the installed build predates all of it.
+Same session, later: the page driver was rewritten (`core/hostsDriver.ts`, label scorer tested in `tests/hostsDriver.test.ts`) and measured on 35
+layouts in the real app (17 -> 35); learned clicks (`core/learnedClicks.ts`, profile file `learned-clicks.json`); skip-all now dismisses a
+site's not-yet-opened files too. Real-app suites, all offscreen: `LUMINA_SELFTEST_DRIVER=1` (layouts + learning; `LUMINA_SELFTEST_ONLY=learning`
+for just that), `LUMINA_SELFTEST_GATE=1` (solve-once, 10 checks), `LUMINA_SELFTEST_HOSTS=1 LUMINA_SELFTEST_OFFSCREEN=1` (14 checks).
+**Needs the owner's yes:** the quick-check pop-up redesign (mockup was shown; nothing built). No Settings control yet to forget learned clicks.
+**Also 2026-11-10 (session 56): pages that list files** (SESSION-LOG 56): `core/pageFiles.ts`, `main/pageFiles.ts`, IPC `page:files`; share-link
+rewriting in `inspect()`; a no-media page is read for files and goes to the existing batch plan. Real app: release page 6 files, folder 202,
+file page ok. Dropbox/Drive rewrites unproven live. Last session's commit `6bc4348` is local, **not pushed**. Next on the owner's list:
+games from Steam/Epic through Lumina (notes in SESSION-LOG 56, nothing built).
 **Also 2026-11-10 (session 55): YouTube playlists that "did not download"** (SESSION-LOG 55, BUGS B15). The shared download archive made a
 re-requested playlist finish "Done" with 0 files; it is now per kind and folder and checked against the folder. A stale saved sign-in is
 retried without. 8 songs as FLAC with the owner's settings, and the real Download button, were run and worked. **Not proven:** that this is

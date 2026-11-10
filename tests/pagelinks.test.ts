@@ -11,6 +11,7 @@ interface Finder {
   isHosted: (href: string) => boolean;
   isGeneric: (text: string) => boolean;
   nameIn: (text: string) => string;
+  fromJsonList: (raw: string, base: string) => { href: string; text: string }[];
 }
 let finder: Finder;
 beforeAll(() => { finder = (globalThis as unknown as { __luminaLinks: Finder }).__luminaLinks; });
@@ -112,5 +113,29 @@ describe('links the person highlighted', () => {
     expect(finder.textLinks(text)).toEqual([
       'https://rapidgator.net/file/abc/Game.part1.rar', 'https://nitroflare.com/view/XYZ/Game.part1.rar', 'magnet:?xt=urn:btih:abc',
     ]);
+  });
+});
+
+describe('link lists a page keeps as JSON in a data attribute (a tab per file host)', () => {
+  const raw = JSON.stringify([
+    { direct_link: 'https://pixeldrain.com/u/aaa', file_name: 'Sample.part01.rar', is_dangerous: false },
+    { direct_link: 'https://pixeldrain.com/u/bbb', file_name: 'Sample.part02.rar' },
+    { direct_link: 'https://risky.example/d/ccc', file_name: 'Sample.part03.rar', is_dangerous: true },
+  ]);
+
+  it('turns each entry into a link named by its file name, and leaves out the ones the page flags as dangerous', () => {
+    expect(finder.fromJsonList(raw, 'https://hosters.example/GAME')).toEqual([
+      { href: 'https://pixeldrain.com/u/aaa', text: 'Sample.part01.rar' },
+      { href: 'https://pixeldrain.com/u/bbb', text: 'Sample.part02.rar' },
+    ]);
+  });
+
+  it('finds nothing in an attribute that is not a list of links', () => {
+    for (const bad of ['', 'not json', '{"a":1}', '[1,2,3]', '[{"x":1}]', '[{"direct_link":"javascript:alert(1)"}]']) expect(finder.fromJsonList(bad, 'https://hosters.example/'), bad).toEqual([]);
+  });
+
+  it('gives links the picker counts as downloads, so the mirror chooser can pick between the hosts', () => {
+    const found = finder.pick(finder.fromJsonList(raw, 'https://hosters.example/'));
+    expect(found.map((l) => l.url)).toEqual(['https://pixeldrain.com/u/aaa', 'https://pixeldrain.com/u/bbb']);
   });
 });

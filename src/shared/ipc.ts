@@ -73,6 +73,7 @@ export const inputSchemas = {
   'presets:list': z.void(),
   'media:inspect': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
   'media:play': z.object({ url: z.string().min(1).max(8192), info: z.unknown().optional(), request: requestInfoSchema.optional() }),
+  'page:files': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
   'search:query': z.object({ query: z.string().min(1).max(200) }),
   'jobs:list': z.void(),
   'jobs:add': z.object({ url: z.string().min(1).max(8192), info: z.unknown(), options: downloadOptionsSchema }),
@@ -321,6 +322,7 @@ export interface InvokeOutputs {
   'presets:list': Preset[];
   'media:inspect': MediaInfo;
   'media:play': PlayableItem;
+  'page:files': { files: { url: string; name: string; sizeBytes?: number }[]; source: 'github' | 'folder' | 'page'; title: string | null };
   'search:query': SearchResults;
   'jobs:list': Job[];
   'jobs:add': Job;
@@ -485,7 +487,7 @@ export type InvokeInputs = {
       ? { url: string; info: MediaInfo; options: DownloadOptions }
       : K extends 'jobs:convert'
         ? { paths: string[]; format: FormatChoice }
-        : K extends 'media:inspect'
+        : K extends 'media:inspect' | 'page:files'
           ? { url: string; request?: RequestInfo }
           : z.input<(typeof inputSchemas)[K]>;
 };

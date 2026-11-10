@@ -23,7 +23,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT = path.join(ROOT, 'resources', 'bin', `${platform}-${arch}`);
 const CACHE = path.join(ROOT, '.tools-cache');
 
-const YTDLP_VERSION = '2026.08.19';
+const YTDLP_VERSION = '2026.10.26';
 const FFMPEG_TAG = 'latest';
 const ARIA2_VERSION = '1.37.0';
 const WHISPER_TAG = 'b5130';
@@ -188,7 +188,13 @@ async function main() {
   const manifest = { platform, arch, fetchedAt: new Date().toISOString(), tools: {} };
 
   for (const tool of tools) {
-    const file = path.join(CACHE, path.basename(new URL(tool.url).pathname));
+    // yt-dlp's release file is always called yt-dlp.exe, so the cached copy of an older release would be taken for the new one
+    // and fail (or, worse, pass) its checksum. Key it by version. The other tools' file names already carry theirs.
+    const baseName = path.basename(new URL(tool.url).pathname);
+    // (a per-version folder, not a renamed file: the checksum list is looked up by the file's own name)
+    const cacheDir = tool.name === 'yt-dlp' ? path.join(CACHE, `yt-dlp-${tool.version}`) : CACHE;
+    await mkdir(cacheDir, { recursive: true });
+    const file = path.join(cacheDir, baseName);
     process.stdout.write(`• ${tool.name} ${tool.version} … `);
     await download(tool.url, file);
     if (tool.sums) await verify(file, tool.sums);

@@ -3,6 +3,7 @@ import { ArrowDownToLine, ClipboardPaste, FileDown, FileUp, Link2, Play, Triangl
 import type { MediaInfo, RequestInfo, SearchHit, SearchResults as SearchResultsData } from '@shared/types';
 import { extractLinks, toInspectTarget } from '@core/url';
 import { planBatch, type BatchPlan } from '@core/batch';
+import { isNoMediaMessage } from '@core/pageFiles';
 import { classifyFailure } from '@core/networkRetry';
 import { call, errorMessage, pathForFile } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
@@ -68,7 +69,7 @@ export function DownloadView() {
     setOpening(false);
   };
 
-  const inspect = async (url: string, opts: { request?: RequestInfo; source?: PendingLink['source'] } = {}) => {
+  const inspect = async (url: string, opts: { request?: RequestInfo; source?: PendingLink['source']; fromPageFiles?: boolean } = {}) => {
     setInput(url);
     const token = ++request.current;
     setPhase({ kind: 'inspecting', url, source: opts.source });
@@ -76,7 +77,25 @@ export function DownloadView() {
       const info = await call('media:inspect', { url, request: opts.request });
       if (token === request.current) setPhase({ kind: 'ready', url, info, source: opts.source });
     } catch (err) {
-      if (token === request.current) setPhase({ kind: 'error', url, message: errorMessage(err), request: opts.request });
+      const message = errorMessage(err);
+      // A page with no video or music in it (a GitHub release, an open folder, a downloads page) may still list files: read it
+      // for them, and hand them to the same batch plan a pasted list of links gets, instead of ending in a dead-end message.
+      // Not again for a link that came out of such a page: a page that lists itself would otherwise send this round and round.
+      if (isNoMediaMessage(message) && /^https?:/i.test(url) && !opts.fromPageFiles) {
+        const found = await call('page:files', { url, request: opts.request }).catch(() => null);
+        if (token !== request.current) return;
+        const [only] = found?.files ?? [];
+        if (found?.files.length === 1 && only) {
+          void inspect(only.url, { request: opts.request, source: opts.source, fromPageFiles: true });
+          return;
+        }
+        if (found && found.files.length > 1) {
+          setInput('');
+          setPhase({ kind: 'batch', plan: planBatch(found.files.map((f) => f.url)), request: opts.request });
+          return;
+        }
+      }
+      if (token === request.current) setPhase({ kind: 'error', url, message, request: opts.request });
     }
   };
 

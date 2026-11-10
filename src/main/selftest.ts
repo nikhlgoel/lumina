@@ -47,6 +47,21 @@ export async function runSelftest(): Promise<void> {
   const statuses = await tools.probeAll();
   for (const s of statuses) out(`tool ${s.name}: ${s.ok ? `${s.version} (${s.source})` : `MISSING ${s.error}`}`);
 
+  if (process.env.LUMINA_SELFTEST_SHOTS) {
+    const { runShotsSelftest } = await import('./selftestHosts');
+    await runShotsSelftest();
+    return;
+  }
+  if (process.env.LUMINA_SELFTEST_DRIVER) {
+    const { runDriverSelftest } = await import('./selftestHosts');
+    await runDriverSelftest();
+    return;
+  }
+  if (process.env.LUMINA_SELFTEST_GATE) {
+    const { runGateSelftest } = await import('./selftestHosts');
+    await runGateSelftest(dir);
+    return;
+  }
   if (process.env.LUMINA_SELFTEST_HOSTS) {
     const { runHostsSelftest } = await import('./selftestHosts');
     await runHostsSelftest(dir);

@@ -34,12 +34,32 @@ Not released yet; everything below is in the working tree only.
   finishes (stand-in host, 6 parts: 39.6 s to 18.7 s). Each part may still ask for its own check.
 
 ### Added
+- **Pages that list files now work.** Paste a GitHub release page, an open folder on a web server, or a page of download links and Lumina
+  reads it for the files and shows them in the usual list to pick from (it used to say it did not recognise media on the page). Links to a
+  file's page rather than the file (GitHub, GitLab, Codeberg, Hugging Face, Dropbox, Google Drive) are turned into the file itself.
+  Checked in the real app with a GitHub release (6 files), an open folder (202 files) and a GitHub file page. Dropbox and Google Drive are
+  not yet tried on a real file.
 - **YouTube sign-in through your own browser.** Google refuses sign-in inside apps. The Lumina extension can now pass the YouTube sign-in your
   browser already has to Lumina (on this computer only), for private and age-restricted videos. Settings › Connections explains it.
   Not yet tried with a real private video.
 - **The extension finds more download links:** buttons that only say "Download" are named after the file in their row, buttons that are not
   links (a data attribute or a click handler) are found, and a link labelled with a file name counts on any site. When a page offers the same
   files on several hosts, the extension starts on one host (Pixeldrain first) and lets you switch, so nothing is sent several times over.
+- **A quick check you solve once now covers the rest of that site's files.** A release of fifty parts used to ask for the same human check
+  fifty times. Lumina now remembers that you passed it, for that site only, in memory only and for at most half an hour, and the other
+  parts go through. Files already waiting for their turn are cleared by the same click. If the site does not accept it, Lumina asks again.
+  Checked in the real app against a stand-in site: four files asked once instead of four times. Not yet tried on a real protected site.
+- **Download pages that get redesigned keep working.** Lumina used to find a host's download button mostly by an English name, so a renamed or
+  restyled button meant waiting for a new release. It now reads the button in some twenty languages, finds icon-only, image and click-handler
+  buttons, buttons inside frames and web components, and file links worded "Mirror 1", and it leaves Premium, advert and installer buttons
+  and menu links alone. Checked in the real app against 35 page layouts: 17 worked before, all 35 now.
+- **Lumina learns from your click.** If a page needs you and you click its download button, Lumina remembers that control for the site (only a
+  description of the button, kept on this computer) and finds it again on the site's next page, even if it was moved or restyled.
+- **"Skip all" skips them all.** It used to skip only the files already waiting, so a long list asked again, a few files at a time.
+- **Hoster pages that hide their other mirrors are read in full.** Some pages show one host's links and keep the rest in tabs drawn by
+  script, so the extension saw only the first host. It now reads those lists too, so the mirror chooser can offer Pixeldrain or Gofile, and
+  leaves out any entry the page itself marks as dangerous. Checked on a real hoster page by reading it (3 usable lists, 2 flagged ones
+  skipped); not yet tried in the extension in a real browser, only in tests.
 
 ## [1.2.1] — 2026-11-03
 

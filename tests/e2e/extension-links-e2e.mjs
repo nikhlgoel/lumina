@@ -47,6 +47,13 @@ const PAGES = {
   '/frame-inner': { html: PAGE },
   // Shaped like a release page with one tab per mirror: every row's button only says "DOWNLOAD", the file name is in the row, a mirror's
   // buttons are not links at all (a data attribute, a click handler), and one mirror is a host Lumina has never heard of.
+  // Shaped like a hoster page: only the first host's links are drawn; every host's list also sits as JSON in a data attribute that script swaps in.
+  // One host is flagged dangerous by the page itself and must never be offered.
+  '/hoster': { html: doc(`<h1>Release</h1>${(() => {
+    const list = (host, danger) => JSON.stringify([1, 2, 3].map((n) => ({ direct_link: `https://${host}/u/p${n}`, file_name: `Sample.part0${n}.rar`, is_dangerous: danger })));
+    return `<div id="opts"><div class="option" data-links='${list('fileditchfiles.example', false)}'>FileDitch</div><div class="option" data-links='${list('pixeldrain.com', false)}'>Pixeldrain</div>`
+      + `<div class="option" data-links='${list('gofile.io', false)}'>Gofile</div><div class="option" data-links='${list('risky-host.example', true)}'>Risky</div></div>`;
+  })()}<div id="files">${[1, 2, 3].map((n) => `<p>Sample.part0${n}.rar <a class="downloadBtn" href="https://fileditchfiles.example/u/p${n}">Download</a></p>`).join('')}</div>`) },
   '/mirrors': { html: doc(`<h1>Release</h1>
 <div id="tabs">FileDitch | Pixeldrain | Gofile | Other</div>
 <table id="fd">${[1, 2, 3].map((n) => `<tr><td>Release.part0${n}.rar</td><td><a class="btn" href="https://fileditchfiles.example/s${n}/f${n}">DOWNLOAD</a></td></tr>`).join('')}</table>
@@ -424,6 +431,21 @@ async function main() {
       await wait(1200);
       const mirrorBatch = received.find((r) => r.path === '/v1/capture-batch');
       check('pressing Send delivers just those three, once each', mirrorBatch?.body.urls.length === 3 && mirrorBatch.body.urls.every((u) => u.startsWith('https://pixeldrain.com/')), mirrorBatch?.body.urls.join(' '));
+    }
+
+    /* a hoster page that keeps the other hosts' lists as JSON in data attributes */
+    {
+      const { targetId: hosterTarget } = await cdp.send('Target.createTarget', { url: `http://127.0.0.1:${SITE_PORT}/hoster` });
+      const hosterTab = await cdp.attach(hosterTarget);
+      await waitFor(() => hosterTab.eval("document.readyState === 'complete' && !!document.getElementById('files')"), 20_000, 'hoster page');
+      await wait(500);
+      const hTabId = await worker.eval(`chrome.tabs.query({ url: 'http://127.0.0.1:${SITE_PORT}/hoster' }).then((t) => t[0].id)`);
+      const links = await worker.eval(`lumina.linksIn(${hTabId}, false)`);
+      const hosts = [...new Set(links.map((l) => new URL(l.url).hostname))].sort();
+      check('hidden host lists are read in a real browser: the drawn links plus Pixeldrain and Gofile, each file once per host', links.length === 9, `${links.length}: ${hosts.join(', ')}`);
+      check('the host the page itself flags as dangerous is never offered', !links.some((l) => l.url.includes('risky-host.example')), hosts.join(', '));
+      check('the three hosts are all there for the mirror chooser', hosts.join() === ['fileditchfiles.example', 'gofile.io', 'pixeldrain.com'].join(), hosts.join(', '));
+      check('each is named by its file name', links.every((l) => /^Sample\.part0[123]\.rar$/.test(l.text)), links.map((l) => l.text).join('|'));
     }
   } finally {
     browser.kill();

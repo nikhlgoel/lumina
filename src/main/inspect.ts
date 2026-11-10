@@ -4,6 +4,7 @@ import type { MediaInfo, PlaylistEntry, RequestInfo } from '../shared/types';
 import { classifyUrl, cleanUrl, isMusicSite, siteName } from '../core/url';
 import { directApiUrl, isLinkFromPage, isPageHost } from '../core/hosts';
 import { fileNameFromUrl } from '../core/batch';
+import { rewriteShareLink } from '../core/pageFiles';
 import { parseStreams, parseSubtitles, type RawFormat } from '../core/streams';
 import { friendlyYtdlpError, httpStatusMessage, isCookieReadError, plainFailure } from '../core/progress';
 import { browserCookiesUnreadable, markBrowserCookiesUnreadable } from './cookieHealth';
@@ -28,6 +29,14 @@ const base = (url: string, site: string): Omit<MediaInfo, 'sourceKind' | 'title'
 });
 
 export async function inspect(rawUrl: string, request?: RequestInfo): Promise<MediaInfo> {
+  // A share or "view" link (a GitHub file page, a Dropbox preview, a Google Drive view) is a page about the file; read the file itself.
+  const shared = rewriteShareLink(cleanUrl(rawUrl));
+  if (shared) {
+    log.info('Share link rewritten to the file itself', { from: cleanUrl(rawUrl).slice(0, 120), to: shared.slice(0, 120) });
+    const direct = await inspectDirect(shared, request, true).catch(() => null);
+    if (direct) return direct;
+    // not answered as a file after all: carry on with the link as it was
+  }
   const url = cleanUrl(rawUrl);
   const kind = classifyUrl(url);
   if (kind === 'invalid') {
@@ -117,7 +126,8 @@ const MEDIA_OR_FILE =/^(video|audio|application\/(octet-stream|zip|x-|pdf|vnd|gz
  * Probe a URL for a downloadable file. Uses a 1-byte ranged GET (many servers mishandle HEAD)
  * with the same headers the browser used, if the link came from the extension.
  */
-async function inspectDirect(url: string, request?: RequestInfo): Promise<MediaInfo | null> {
+/** `anyFile`: the link is already known to be a file's own address (a rewritten share link), so any answer that is not a web page is the file. */
+async function inspectDirect(url: string, request?: RequestInfo, anyFile = false): Promise<MediaInfo | null> {
   const headers: Record<string, string> = { 'User-Agent': settings.get().network.userAgent || BROWSER_UA, Range: 'bytes=0-0', ...(request?.headers ?? {}) };
   if (request?.pageUrl && !headers.Referer) headers.Referer = request.pageUrl;
   if (request?.cookies.length) headers.Cookie = request.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
@@ -141,7 +151,7 @@ async function inspectDirect(url: string, request?: RequestInfo): Promise<MediaI
   if (/text\/html|application\/(json|xhtml)/i.test(type)) return null;
   if (/mpegurl|dash\+xml/i.test(type)) return null; // a stream manifest: let yt-dlp handle it
   const disposition = res.headers.get('content-disposition');
-  if (!MEDIA_OR_FILE.test(type) && !disposition) return null;
+  if (!anyFile && !MEDIA_OR_FILE.test(type) && !disposition) return null;
 
   let filename = decodeURIComponent(path.basename(new URL(res.url || url).pathname)) || 'download';
   const m = disposition?.match(/filename\*=(?:UTF-8'')?([^;]+)|filename="?([^";]+)"?/i);

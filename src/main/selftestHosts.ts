@@ -7,12 +7,15 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
+import { BrowserWindow } from 'electron';
 import type { Job } from '../shared/types';
 import { planBatch, releaseTagFor } from '../core/batch';
 import { inspect } from './inspect';
 import { queue } from './jobs/queue';
-import { challengeEvents, resolveHostedLink } from './hosters';
+import { DRIVER_VARIANTS } from './selftestDriverPages';
+import { challengeAction, challengeEvents, forgetLearnedClicks, forgetSolvedChecks, learnedFor, resolveHostedLink } from './hosters';
 import { createWindow } from './window';
+import { settings } from './settings';
 import { runTool } from './process';
 import { tools } from './tools';
 
@@ -70,7 +73,7 @@ async function buildFixtures(dir: string) {
 
 function mockHost(pub: string) {
   const tokens = new Map<string, string>(); // token -> file name
-  const stats = { ranged: 0, cdnNoCookie: 0, trustedClicks: 0, untrustedClicks: 0, adRedirects: 0, served: new Set<string>() };
+  const stats = { ranged: 0, cdnNoCookie: 0, trustedClicks: 0, untrustedClicks: 0, adRedirects: 0, gateChecks: 0, gateOpen: 0, served: new Set<string>() };
   let adOrigin = '';
   const cookie = (req: http.IncomingMessage, name: string) => req.headers.cookie?.split(/;\s*/).find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
   const html = (res: http.ServerResponse, body: string) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><meta charset="utf-8"><title>Mock host</title><style>body{font:16px sans-serif;padding:40px}button{padding:14px 30px;font-size:16px;margin:10px}</style></head><body>${body}</body></html>`);
@@ -112,6 +115,63 @@ function mockHost(pub: string) {
             fetch('/beacon?trusted=' + e.isTrusted);
             if (!e.isTrusted) { e.preventDefault(); return; }
             setTimeout(() => { document.getElementById('captcha').remove(); document.getElementById('f').style.display = 'block'; }, 400);
+          });
+        </script>`);
+    }
+    // A host that asks for the human check until the visitor holds its clearance cookie, like a site behind a bot check.
+    if (parts[0] === 'g' && parts.length === 3) {
+      return void res.writeHead(302, { 'Set-Cookie': `file_code=${parts[1]}; Path=/`, Location: '/gcheck' }).end();
+    }
+    if (url.pathname === '/pass') return void res.writeHead(204, { 'Set-Cookie': 'cf_clearance=passed; Path=/; HttpOnly' }).end();
+    if (url.pathname === '/gcheck') {
+      const code = cookie(req, 'file_code');
+      const name = fileByCode.get(code ?? '');
+      if (!name) return void res.writeHead(403).end('no file');
+      const cleared = cookie(req, 'cf_clearance') === 'passed';
+      if (cleared) stats.gateOpen++;
+      else stats.gateChecks++;
+      const rand = randomBytes(8).toString('hex');
+      tokens.set(`pending:${rand}`, name);
+      return html(res, `
+        <h2>${name}</h2>
+        ${cleared ? '' : `<div class="cf-turnstile" id="captcha" style="width:304px;height:78px;border:1px solid #d3d3d3;border-radius:3px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#f9f9f9">
+          <input type="checkbox" id="robot" style="width:28px;height:28px"><label for="robot">I'm not a robot</label>
+        </div>`}
+        <form method="POST" action="/download" id="f" style="display:${cleared ? 'block' : 'none'}">
+          <input type="hidden" name="op" value="download2"><input type="hidden" name="id" value="${code}"><input type="hidden" name="rand" value="${rand}">
+          <button type="submit">Free Download</button>
+        </form>
+        <script>
+          const robot = document.getElementById('robot');
+          if (robot) robot.addEventListener('click', (e) => {
+            if (!e.isTrusted) { e.preventDefault(); return; }
+            fetch('/pass').then(() => setTimeout(() => { document.getElementById('captcha').remove(); document.getElementById('f').style.display = 'block'; }, 400));
+          });
+        </script>`);
+    }
+    // A host that sets the clearance but then refuses to honour it (expired, or tied to something else): it asks every time.
+    if (parts[0] === 'n' && parts.length === 3) {
+      return void res.writeHead(302, { 'Set-Cookie': `file_code=${parts[1]}; Path=/`, Location: '/ncheck' }).end();
+    }
+    if (url.pathname === '/ncheck') {
+      const code = cookie(req, 'file_code');
+      const name = fileByCode.get(code ?? '');
+      if (!name) return void res.writeHead(403).end('no file');
+      const rand = randomBytes(8).toString('hex');
+      tokens.set(`pending:${rand}`, name);
+      return html(res, `
+        <h2>${name}</h2>
+        <div class="cf-turnstile" id="captcha" style="width:304px;height:78px;border:1px solid #d3d3d3;border-radius:3px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#f9f9f9">
+          <input type="checkbox" id="robot" style="width:28px;height:28px"><label for="robot">I'm not a robot</label>
+        </div>
+        <form method="POST" action="/download" id="f" style="display:none">
+          <input type="hidden" name="op" value="download2"><input type="hidden" name="id" value="${code}"><input type="hidden" name="rand" value="${rand}">
+          <button type="submit">Free Download</button>
+        </form>
+        <script>
+          document.getElementById('robot').addEventListener('click', (e) => {
+            if (!e.isTrusted) { e.preventDefault(); return; }
+            fetch('/pass').then(() => setTimeout(() => { document.getElementById('captcha').remove(); document.getElementById('f').style.display = 'block'; }, 400));
           });
         </script>`);
     }
@@ -258,7 +318,9 @@ export async function runHostsSelftest(dir: string): Promise<void> {
 
   // 2. A captcha page opens as a quick check inside the main window; a person solves it and the download continues.
   {
-    const win = createWindow({ show: true, mode: 'downloader' });
+    // LUMINA_SELFTEST_OFFSCREEN=1 renders this window into a bitmap instead of showing it (this machine's rule: never open the app window).
+    const offscreen = process.env.LUMINA_SELFTEST_OFFSCREEN === '1';
+    const win = createWindow({ show: !offscreen, mode: 'downloader', offscreen });
     await new Promise<void>((r) => (win.webContents.isLoading() ? win.webContents.once('did-finish-load', () => r()) : r()));
     await new Promise((r) => setTimeout(r, 2500));
     const name = 'captcha-test.bin';
@@ -362,4 +424,303 @@ export async function runHostsSelftest(dir: string): Promise<void> {
   host.server.close();
   const failed = results.filter((r) => !r.ok);
   out(`${results.length - failed.length}/${results.length} checks passed`);
+}
+
+/**
+ * One solved check clears the rest of that site's files, proven on the real download-page code against a stand-in host that asks for the
+ * human check until it holds a clearance cookie. Runs with an OFFSCREEN main window, so nothing shows on screen: the quick-check page is a
+ * hidden window that takes input anyway. `LUMINA_SELFTEST=1 LUMINA_SELFTEST_GATE=1`.
+ *
+ * Every scenario has a time limit: the first version of this feature hung a page forever, and a hang must show up as a failed check, not as
+ * a run that never ends.
+ */
+export async function runGateSelftest(dir: string): Promise<void> {
+  const pub = path.join(dir, 'gatepub');
+  fs.rmSync(pub, { recursive: true, force: true });
+  fs.mkdirSync(pub, { recursive: true });
+  const host = mockHost(pub);
+  await new Promise<void>((r) => host.server.listen(0, '127.0.0.1', r));
+  const port = (host.server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
+  const otherSite = `http://localhost:${port}`;
+  host.setAdOrigin(`http://localhost:${port}`);
+  const signal = new AbortController().signal;
+  createWindow({ show: false, mode: 'downloader', offscreen: true });
+  await new Promise((r) => setTimeout(r, 2500));
+
+  const names = [1, 2, 3, 4].map((n) => {
+    const name = `gate-${n}.bin`;
+    fs.writeFileSync(path.join(pub, name), randomBytes(64 << 10));
+    return name;
+  });
+  const link = (origin: string, route: 'g' | 'n', name: string) => {
+    const code = `${route}${randomBytes(4).toString('hex')}`;
+    host.fileByCode.set(code, name);
+    return `${origin}/${route}/${code}/${name}`;
+  };
+  const resolveOne = (url: string) => resolveHostedLink(url, { signal, onStage: () => undefined });
+  const within = <T>(p: Promise<T>, ms: number, what: string) =>
+    Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what}: no answer after ${ms / 1000}s (a page is stuck)`)), ms))]);
+
+  // The stand-in person. `skipAll` makes them dismiss everything instead of ticking.
+  let asked = 0;
+  let skipAll = false;
+  const person = async (wc: Electron.WebContents, info: { id: string }) => {
+    asked++;
+    await new Promise((r) => setTimeout(r, 1800));
+    if (skipAll) return void challengeAction(info.id, 'skip-all');
+    try {
+      const rect = JSON.parse(await wc.executeJavaScript('JSON.stringify(document.getElementById("robot").getBoundingClientRect())')) as DOMRect;
+      const x = Math.round(rect.x + rect.width / 2);
+      const y = Math.round(rect.y + rect.height / 2);
+      wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+    } catch (err) {
+      out(`  note: the stand-in person could not click (${String(err)})`);
+    }
+  };
+  challengeEvents.on('shown', person);
+  const fresh = () => { forgetSolvedChecks(); asked = 0; };
+  const seconds = (t: number) => Math.round((Date.now() - t) / 1000);
+
+  try {
+    // 1. Baseline: the check forgotten before each file, as it behaved before this feature.
+    fresh();
+    for (const name of names) {
+      forgetSolvedChecks();
+      await within(resolveOne(link(base, 'g', name)), 60_000, 'baseline');
+    }
+    check('baseline: with the solved check forgotten every file asks again', asked === names.length, `asked ${asked} times for ${names.length} files`);
+
+    // 2. Four files at once, one site: asked once, every file its own file.
+    fresh();
+    let t = Date.now();
+    const four = await within(Promise.all(names.map((n) => resolveOne(link(base, 'g', n)))), 90_000, 'four at once');
+    check('a solved check is asked for once, however many files the site has', asked === 1, `asked ${asked} time(s) for ${names.length} files in ${seconds(t)}s`);
+    check('and every file still comes out as its own file', four.map((r) => r.filename).sort().join() === [...names].sort().join(), four.map((r) => r.filename).join(', '));
+    check('what carried over was the proof of the check, not the file cookie', host.stats.gateOpen >= 1, `${host.stats.gateOpen} pages opened already cleared`);
+
+    // 3. A big batch: 24 files of one site.
+    fresh();
+    t = Date.now();
+    const many = await within(Promise.all(Array.from({ length: 24 }, (_, i) => resolveOne(link(base, 'g', names[i % names.length] ?? names[0] ?? ''))) ), 240_000, '24 files');
+    check('24 files of one site ask once', asked === 1 && many.length === 24, `asked ${asked} time(s), ${many.length} resolved in ${seconds(t)}s`);
+
+    // 4. Files opened one after another, after the check was solved.
+    fresh();
+    for (const name of names.slice(0, 3)) await within(resolveOne(link(base, 'g', name)), 60_000, 'one after another');
+    check('files opened later, one by one, do not ask again', asked === 1, `asked ${asked} time(s) for 3 files in turn`);
+
+    // 5. Two sites: a check solved on one is not used on the other.
+    fresh();
+    const mixed = await within(Promise.all([
+      resolveOne(link(base, 'g', names[0] ?? '')), resolveOne(link(otherSite, 'g', names[1] ?? '')),
+      resolveOne(link(base, 'g', names[2] ?? '')), resolveOne(link(otherSite, 'g', names[3] ?? '')),
+    ]), 120_000, 'two sites');
+    check('two different sites each ask once, and neither borrows the other’s check', asked === 2 && mixed.length === 4, `asked ${asked} time(s) for 2 files on each of 2 sites`);
+
+    // 6. A host that refuses the reused proof: it must ask again for each file, and nothing may hang.
+    fresh();
+    t = Date.now();
+    const refused = await within(Promise.allSettled(names.map((n) => resolveOne(link(base, 'n', n)))), 180_000, 'host that refuses the proof');
+    check('a host that does not honour the reused check is asked again, and no file is lost', refused.every((r) => r.status === 'fulfilled') && asked === names.length,
+      `${refused.filter((r) => r.status === 'fulfilled').length}/${names.length} resolved, asked ${asked} times in ${seconds(t)}s`);
+
+    // 7. The person dismisses everything: all of it ends, none hangs.
+    fresh();
+    skipAll = true;
+    t = Date.now();
+    const eight = Array.from({ length: 8 }, (_, i) => names[i % names.length] ?? '');
+    const skipped = await within(Promise.allSettled(eight.map((n) => resolveOne(link(base, 'g', n)))), 90_000, 'skip all');
+    skipAll = false;
+    check('skipping the check ends every file of the site, including those not yet opened', skipped.every((r) => r.status === 'rejected' && /Skipped/.test(String(r.reason))) && asked === 1,
+      `${skipped.filter((r) => r.status === 'rejected').length}/${eight.length} skipped, asked ${asked} time(s) in ${seconds(t)}s`);
+
+    // 8. After a skip nothing is remembered, and the next attempt works again.
+    fresh();
+    const again = await within(resolveOne(link(base, 'g', names[0] ?? '')), 60_000, 'after a skip');
+    check('after skipping, the next try asks and works', asked === 1 && again.filename === names[0], `asked ${asked} time(s)`);
+  } catch (err) {
+    check('the gate scenarios ran to the end', false, String(err));
+  } finally {
+    challengeEvents.off('shown', person);
+  }
+
+  host.server.close();
+  const failed = results.filter((r) => !r.ok);
+  out(`${results.length - failed.length}/${results.length} checks passed`);
+}
+
+/**
+ * The page driver against many layouts of "get the file" control, in the real app with nobody to help (`interactive: false`): a layout the
+ * driver cannot read fails here instead of on the owner's machine after a host redesigns its page. Nothing is shown on screen.
+ * `LUMINA_SELFTEST=1 LUMINA_SELFTEST_DRIVER=1`. `LUMINA_SELFTEST_ONLY=<id,id>` runs just those layouts.
+ */
+export async function runDriverSelftest(): Promise<void> {
+  const only = (process.env.LUMINA_SELFTEST_ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const variants = DRIVER_VARIANTS.filter((v) => !only.length || only.includes(v.id));
+  const page = (inner: string) => `<!doctype html><html><head><meta charset="utf-8"><title>Download page</title><style>body{font:16px sans-serif;padding:30px}button,.btn{padding:12px 28px;font-size:16px}</style></head><body><h2>Sample file</h2>${inner}</body></html>`;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const parts = url.pathname.split('/').filter(Boolean);
+    const send = (status: number, type: string, body: string) => res.writeHead(status, { 'Content-Type': type }).end(body);
+    const file = (name: string) => res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"`, 'Content-Length': 2048 }).end(Buffer.alloc(2048, 7));
+    if (parts[0] === 'v' && parts.length === 3) {
+      const v = DRIVER_VARIANTS.find((x) => x.id === parts[1]);
+      if (!v) return void send(404, 'text/plain', 'no such layout');
+      return void send(200, 'text/html; charset=utf-8', page(v.body(`/get/${parts[2]}`, `/decoy/${parts[2]}`)));
+    }
+    if (parts[0] === 'frame') {
+      const go = url.searchParams.get('go') ?? '/';
+      return void send(200, 'text/html; charset=utf-8', page(`<button onclick="location.href='${go}'">Download</button>`));
+    }
+    // Layouts the driver cannot read by itself: a bare arrow. Used by the learned-click scenario below.
+    if (parts[0] === 'arrow' && parts[1]) {
+      return void send(200, 'text/html; charset=utf-8', page(`<div class="g-recaptcha" style="width:304px;height:78px;border:1px solid #ccc">I'm not a robot</div><button id="nx" class="r-btn" onclick="location.href='/get/${parts[1]}'">→</button>`));
+    }
+    if (parts[0] === 'arrow2' && parts[1]) {
+      return void send(200, 'text/html; charset=utf-8', page(`<div style="margin-top:500px"><button id="nx" class="totally-new-look" onclick="location.href='/get/${parts[1]}'">→</button></div>`));
+    }
+    if (parts[0] === 'arrow3' && parts[1]) {
+      return void send(200, 'text/html; charset=utf-8', page(`<button id="other" onclick="location.href='/get/${parts[1]}'">←</button>`));
+    }
+    if (parts[0] === 'get') return void file(`driver-${(parts[1] ?? 'x').replace(/\.rar$/, '')}.bin`);
+    if (parts[0] === 'decoy') return void file('DECOY.bin');
+    if (parts[0] === 'ad') return void send(200, 'text/html', '<h1>Win a prize!</h1>');
+    send(404, 'text/plain', 'not found');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const runOne = async (v: (typeof DRIVER_VARIANTS)[number]): Promise<void> => {
+    const code = randomBytes(4).toString('hex');
+    const limitS = 25 + (v.waitS ?? 0);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), limitS * 1000);
+    const started = Date.now();
+    try {
+      const got = await resolveHostedLink(`${base}/v/${v.id}/${code}`, { signal: ac.signal, onStage: () => undefined, interactive: false });
+      const right = got.filename === `driver-${code}.bin`;
+      check(`layout "${v.id}" (${v.note})`, right, right ? `${Math.round((Date.now() - started) / 100) / 10}s` : `took the wrong file: ${got.filename}`);
+    } catch (err) {
+      check(`layout "${v.id}" (${v.note})`, false, ac.signal.aborted ? `nothing found in ${limitS}s` : String(err).replace(/^Error:\s*/, '').slice(0, 140));
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const queue = [...variants];
+  await Promise.all(Array.from({ length: 3 }, async () => {
+    for (let v = queue.shift(); v; v = queue.shift()) await runOne(v);
+  }));
+
+  // Learning from the person: a control the driver cannot read is clicked once by a person, and the site's next page needs nobody.
+  if (!only.length || only.includes('learning')) {
+    createWindow({ show: false, mode: 'downloader', offscreen: true });
+    await new Promise((r) => setTimeout(r, 2500));
+    const noPerson = (route: string) => {
+      const code = randomBytes(4).toString('hex');
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 15_000);
+      return resolveHostedLink(`${base}/${route}/${code}`, { signal: ac.signal, onStage: () => undefined, interactive: false })
+        .then((r) => ({ ok: r.filename === `driver-${code}.bin`, detail: r.filename }), (err: unknown) => ({ ok: false, detail: String(err).slice(0, 90) }))
+        .finally(() => clearTimeout(timer));
+    };
+    forgetLearnedClicks();
+    const before = await noPerson('arrow');
+    check('learning: an unlabelled arrow cannot be read by the driver alone', !before.ok, before.detail);
+
+    const clickArrow = async (wc: Electron.WebContents) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      const rect = JSON.parse(await wc.executeJavaScript('JSON.stringify(document.getElementById("nx").getBoundingClientRect())')) as DOMRect;
+      const x = Math.round(rect.x + rect.width / 2);
+      const y = Math.round(rect.y + rect.height / 2);
+      wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+    };
+    challengeEvents.once('shown', (wc) => void clickArrow(wc));
+    const code2 = randomBytes(4).toString('hex');
+    const ac2 = new AbortController();
+    const t2 = setTimeout(() => ac2.abort(), 60_000);
+    const helped = await resolveHostedLink(`${base}/arrow/${code2}`, { signal: ac2.signal, onStage: () => undefined }).catch((err: unknown) => err);
+    clearTimeout(t2);
+    check('learning: a person clicks the arrow once and the file comes', !(helped instanceof Error) && (helped as { filename: string }).filename === `driver-${code2}.bin`, helped instanceof Error ? helped.message : 'ok');
+    const known = learnedFor('127.0.0.1');
+    check('learning: the control is remembered for the site', known.length === 1 && known[0]?.text === '→' && known[0]?.id === 'nx', JSON.stringify(known[0] ?? null));
+
+    const moved = await noPerson('arrow2');
+    check('learning: the next page of the site, with the arrow restyled and moved, needs nobody', moved.ok, moved.detail);
+    const other = await noPerson('arrow3');
+    check('learning: a page with a different control is not clicked at random', !other.ok, other.detail);
+    forgetLearnedClicks();
+    const forgotten = await noPerson('arrow2');
+    check('learning: once forgotten, the restyled page needs a person again (so it was the learning that worked)', !forgotten.ok, forgotten.detail);
+  }
+  server.close();
+  const failed = results.filter((r) => !r.ok);
+  out(`${results.length - failed.length}/${results.length} layouts read`);
+}
+
+/**
+ * Photographs the quick-check pop-up the way the person sees it, offscreen: the app screen and the live page window laid over it are
+ * separate windows, so both are captured and composited. `LUMINA_SELFTEST=1 LUMINA_SELFTEST_SHOTS=1 LUMINA_SHOT_DIR=<dir>
+ * LUMINA_SHOT_MODE=light|dark LUMINA_STALL_MS=4000`. Cases: a tick-the-box check, and a stuck page that needs a button pressed.
+ */
+export async function runShotsSelftest(): Promise<void> {
+  const outDir = process.env.LUMINA_SHOT_DIR ?? path.join(process.cwd(), 'shots');
+  fs.mkdirSync(outDir, { recursive: true });
+  const mode = process.env.LUMINA_SHOT_MODE === 'dark' ? 'dark' : 'light';
+  settings.update({ appearance: { ...settings.get().appearance, colorMode: mode } });
+  const body = (inner: string) => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font:16px system-ui,sans-serif;background:#fafafa;color:#222;display:grid;place-items:center;min-height:100vh}</style></head><body>${inner}</body></html>`;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const parts = url.pathname.split('/').filter(Boolean);
+    const send = (inner: string) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(body(inner));
+    if (parts[0] === 'check') {
+      return void send(`<div style="padding:60px 0;text-align:center"><h1 style="font-size:24px;margin:0 0 6px">Checking your browser</h1><p style="color:#666;margin:0 0 28px">Verify you are human to continue</p>
+        <div id="box" class="cf-turnstile" style="display:inline-flex;align-items:center;gap:14px;width:300px;height:65px;border:1px solid #d0d0d0;border-radius:4px;background:#fff;padding:0 16px;box-sizing:border-box">
+          <input type="checkbox" id="robot" style="width:24px;height:24px"><label for="robot">Verify you are human</label></div></div>`);
+    }
+    if (parts[0] === 'stuck') return void send(`<div style="text-align:center"><p style="color:#666">Your file is ready</p><button id="go" style="padding:14px 34px;font-size:18px;border-radius:10px;border:1px solid #bbb;background:#fff">→</button></div>`);
+    res.writeHead(404).end('not found');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const win = createWindow({ show: false, mode: 'downloader', offscreen: true });
+  await new Promise((r) => setTimeout(r, 3000));
+
+  const compose = async (appPng: Electron.NativeImage, pagePng: Electron.NativeImage, rect: { x: number; y: number; width: number; height: number }, size: { width: number; height: number }, file: string) => {
+    const w = new BrowserWindow({ show: false, width: size.width, height: size.height, webPreferences: { offscreen: true } });
+    const html = `<body style="margin:0;position:relative;width:${size.width}px;height:${size.height}px;overflow:hidden"><img src="${appPng.toDataURL()}" style="position:absolute;left:0;top:0;width:${size.width}px;height:${size.height}px"><img src="${pagePng.toDataURL()}" style="position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></body>`;
+    await w.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+    await new Promise((r) => setTimeout(r, 800));
+    fs.writeFileSync(file, (await w.webContents.capturePage()).toPNG());
+    w.destroy();
+  };
+
+  const cases: { name: string; route: string; sizes: { width: number; height: number }[]; act: (wc: Electron.WebContents) => Promise<void> }[] = [
+    { name: 'check', route: 'check', sizes: [{ width: 1360, height: 860 }, { width: 960, height: 640 }], act: async () => undefined },
+    { name: 'button', route: 'stuck', sizes: [{ width: 1360, height: 860 }, { width: 960, height: 640 }], act: async () => undefined },
+  ];
+  for (const c of cases) {
+    const code = randomBytes(4).toString('hex');
+    const ac = new AbortController();
+    const shown = new Promise<{ wc: Electron.WebContents; reason: string }>((resolve) => challengeEvents.once('shown', (wc, info) => resolve({ wc, reason: info.reason })));
+    const resolving = resolveHostedLink(`${base}/${c.route}/${code}`, { signal: ac.signal, onStage: () => undefined }).catch(() => undefined);
+    const { wc, reason } = await Promise.race([shown, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`${c.name}: the pop-up never appeared`)), 60_000))]);
+    out(`${c.name}: pop-up shown for reason "${reason}"`);
+    for (const size of c.sizes) {
+      win.setSize(size.width, size.height);
+      await new Promise((r) => setTimeout(r, 2500));
+      const rect = JSON.parse(await win.webContents.executeJavaScript('JSON.stringify(document.querySelector("[aria-label=\\"Quick check\\"] .bg-white").getBoundingClientRect())')) as { x: number; y: number; width: number; height: number };
+      const appPng = await win.webContents.capturePage();
+      const pagePng = await wc.capturePage();
+      const file = path.join(outDir, `${mode}-${c.name}-${size.width}x${size.height}.png`);
+      await compose(appPng, pagePng, rect, size, file);
+      out(`  saved ${path.basename(file)} (frame ${Math.round(rect.width)}x${Math.round(rect.height)} at ${Math.round(rect.x)},${Math.round(rect.y)})`);
+    }
+    ac.abort();
+    await resolving;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  server.close();
 }

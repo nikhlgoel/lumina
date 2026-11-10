@@ -5,6 +5,143 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-10 (58) - AGENTS.md rules 1 and 2 loosened by the owner
+
+* **What changed (uncommitted edit to `AGENTS.md`, made by the owner):** rule 1 now also allows "developing a way around [a challenge]
+  strictly and smartly" when it improves downloads and fits the convenience features / smart extension. Rule 2 now allows any source,
+  infringing ones included, as a test fixture, and says to use the scrapling tool for web work. **Entry 57's line "rule 2 stands" and the
+  earlier "one click for all not implemented because of rule 1" are superseded by this.**
+* **How I read it, and where I stop (stated so nobody over-reads the log):** in scope: the person solves a check once and Lumina reuses
+  that for the same site in the same session, so many links need one click; smarter link finding on any page; testing the grabber against
+  any real page by *listing* its links. Out of scope for me regardless of the file: automated CAPTCHA/Turnstile solving, solver services,
+  `navigator.webdriver`/fingerprint spoofing, and downloading or running executables from untrusted hosts to test with. The grabber is
+  tested by reading pages, not by fetching their payloads.
+* **Owner's link:** it was not in any owner message in the saved transcript, so the owner pasted it again; it is tested below.
+* **The link-grabber test, on the owner's page** (`hosters.online-fix.me:2053/ICARUS`): read with a plain GET through scrapling; HTTP 200,
+  no challenge, so nothing was bypassed. Only the page was read; no file was fetched. The page shows 11 links (one host, FileDitch) and keeps
+  five hosts' lists as JSON in `data-links` attributes, swapped in by script. **Gap found:** neither `extractFileLinks` (main app) nor
+  `extension/pagelinks.js` read `data-links`, so the extension could never offer the other mirrors and the existing mirror chooser (Pixeldrain
+  first) had nothing to choose from here. **Fixed:** `embeddedLinkLists` in `src/core/pageFiles.ts` (used when a page has no plain links) and
+  `fromJsonList` in the extension. An entry with `is_dangerous: true` is skipped (the page warns about it: Rootz and VikingFile here).
+  Run on the live page through the real code: 11 anchors, lists FileDitch 11 / Pixeldrain 12 / Gofile 12, 2 flagged lists skipped, 11 from
+  the fallback with the anchors removed.
+* **Verification:** tsc clean, vitest 1360/1360 (+8 new), vite build, extension e2e 38/38 (unchanged). **Not proven:** the new `data-links`
+  path in a real browser with the extension (unit tests and a live-page run of the core only); that the downloads themselves work (not
+  attempted: only the link list was tested); the `is_dangerous` skip drops those hosts entirely, with no way yet to opt back in.
+* **"One click for all" built** (`src/core/clearance.ts`, `src/main/hosters.ts`). Every download page opens with an empty cookie jar on
+  purpose (hosts keep the chosen file in `file_code`), so a check the person had just solved was forgotten and each part asked again. Now,
+  when the person solves a check in a Lumina download page, only the proof-of-check cookies (`cf_clearance`, `__cf_bm`, `datadome`; not
+  `file_code`, not the session, not `cf_chl_*`) are kept **in memory** for that site, for 30 min at most (or the cookie's own expiry), and set in
+  the next page's jar. A page that was already open and waiting takes them when its turn comes and reloads before troubling the person. If
+  a page that reused them still meets a check, they are dropped. The extension's cookies are still stripped at the bridge
+  (`challengeCookies.ts`), so this never moves a check from the person's browser into Lumina. Nothing is solved or faked.
+* **Proof, real Electron app, offscreen (new `LUMINA_SELFTEST_GATE=1` mode, no window):** a stand-in host that asks the human check until the
+  visitor holds `cf_clearance`. Baseline (check forgotten each time): 4 files asked 4 times. With the fix, 4 files at once: asked **1** time,
+  6 s, 4 distinct files out, 3 pages opened already cleared. **That run found a real bug the unit tests could not:** a waiting page that
+  reuses the check never opens a check of its own, and a page's own check was what woke the next one in line, so one of the four files hung
+  until the timeout. Fixed (the reusing page passes the turn on) and re-run.
+* **Not proven:** a real Cloudflare/DataDome-protected host (only a stand-in that sets and checks a cookie by that name; real clearance is
+  tied to IP and browser identity, which are the same here, but that is reasoning, not a measurement).
+* **Hardening, same session, after the owner asked for "all the ways" so a host redesign needs no release.** Measured first: a new matrix of
+  35 download-page layouts (`src/main/selftestDriverPages.ts`, run by `LUMINA_SELFTEST=1 LUMINA_SELFTEST_DRIVER=1`, real app, offscreen, nobody
+  to help) read **17 of 35** with the old driver. The failures were every redesign a host might do: other languages (Spanish, French, German,
+  Russian, Chinese, Arabic ...), a label after an arrow or in capitals, a sentence link, a click-handler span, an icon-only button, an image
+  button, a file link worded "Mirror 1", a `download` attribute, a shadow-root button, a button in a same-site iframe. The driver was rewritten
+  as `src/core/hostsDriver.ts`: scores every reachable control (page, open shadow roots, same-site frames) by its words in ~25 languages
+  (whole-word, accent-folded), its id/class/icon, and whether it links to a file, and penalises menus, footers, Premium/ad/app/installer
+  decoys. Result **35 of 35**. Findings on the way: the first overlay-removal step deleted a shadow host it took for an ad layer (fixed:
+  ask the button's own root); `İndir` and "rápida/быстро" were missed (fixed). `tests/hostsDriver.test.ts` runs the same label scorer in Node.
+* **Skip all** used to dismiss only pages already waiting; the rest of a long list asked again one by one. Now it dismisses every file of
+  that site asked for before the press (a retry afterwards is a fresh try). Found by the 8-file skip scenario, not by reading.
+* **Learned clicks** (`src/core/learnedClicks.ts`, `src/main/hosters.ts`): when a page is handed to the person and they click a control, a small
+  description of it (tag, id, name, stable classes, text, role; nothing typed, no address) is kept per site in `learned-clicks.json` in the
+  profile (5 per site, 180 days). Next time the driver looks for it first, even if restyled or moved; a click on the check itself is never
+  learned. Real app: an unlabelled arrow the driver cannot read -> one click by a stand-in person -> the same site's restyled, moved page
+  needs nobody -> a page with a different control is not clicked -> after forgetting, the restyled page needs a person again.
+* **Regression, real app, offscreen:** hosts self-test 14/14 (needed `LUMINA_SELFTEST_OFFSCREEN=1`, new, since its step 2 used to show a real
+  window), solve-once suite 10/10, layouts 35/35 + 6 learning checks. See the final line of this entry for the last run.
+* **Real hosts, read-only (no check solved, no file fetched):** `fuckingfast.co` answers plain requests with a Cloudflare *managed challenge*
+  ("Just a moment", `Cf-Mitigated: challenge`), site-wide. Cloudflare's own docs (read this session) say a challenge page grants a
+  `cf_clearance` cookie for the zone for the site's "Challenge Passage" time, tied to the visitor and device, and that a Turnstile widget
+  gives a one-time token unless the site opted into pre-clearance. So the solve-once model fits this host. `datanodes.to` answered 200
+  from Cloudflare with no challenge on its front page; its file pages were not reached (no real file id), so **its per-file check type is
+  unknown**. `pixeldrain.com`, `gofile.io` and `fileditchfiles.st` showed no check to a plain request.
+* **Pop-up redesigned** (`QuickCheck.tsx`), after the owner asked for it simple and built around the click: one headline ("Tick the box to
+  continue" / "Press the button to continue"), the live page as the centrepiece in a small frame for a check and a large one for a stuck
+  page, a soft ring that says where to look (stops for reduced motion), one quiet line about the other files, small skip buttons. The old
+  explainer strip, address bar and matte are gone. The driver also scrolls the check to the middle of the frame. Photographed offscreen with
+  the new `LUMINA_SELFTEST_SHOTS=1` mode (app screen + live page window composited), light and dark, 1360x860 and 960x640, both cases.
+  `LUMINA_STALL_MS` (dev only) shortens the stuck-page wait for that. The mockup shown earlier was not seen by the owner; they described the
+  design in words instead, which is what was built.
+* **Three independent reviews** (code, TypeScript, security) of the whole diff. Real findings, all fixed and re-tested: (a) two page-reading
+  regexes went quadratic or worse on a page of unclosed tags (about a second at 400 KB, cubic on one shape): a hostile page could freeze the
+  main process; now bounded, linear, with hostile-page timing tests; (b) the page reader sent every cookie and header the extension had
+  collected to whatever host a link pointed at, and followed redirects with them: now only that address's cookies (`cookieHeaderFor`), a safe
+  header list, and redirects followed by hand; (c) a second, different check (a per-file reCAPTCHA) could make Lumina drop a good clearance or
+  reload for nothing: now only a Cloudflare/"human" check counts as "not accepted"; (d) a page woken for its turn that left without opening a
+  check stranded the pages behind it; (e) a second pop-up could open over an active one; (f) learned clicks could pick up a stray click (an
+  ad, a cookie banner): now only a click on a real control, within 20 s, and not before Lumina's own click; a learned match on words alone
+  now scores below id hints; (g) the pop-up's live page was left about 12 px off when the "other files" line appeared; (h) Korean without
+  spaces and Japanese voicing were damaged by the accent folding; (i) a page that lists itself could loop the files fallback; (j) a page
+  whose script never answers could hold a download slot; (k) shared-hosting domains (github.io ...) were one "site". Not fixed, said so:
+  no public-suffix list beyond that short list; no private-address check on pages read by `page:files`; the extension reads only
+  `data-links` where core reads any `data-*`.
+* **Final verification on the final code:** tsc clean, vitest 1450/1450, vite build, real-app suites offscreen 41/41 layouts + learning,
+  14/14 host flow, 10/10 solve-once, extension e2e 42/42 (now including a real-browser check of the hidden `data-links` lists). Pop-up
+  re-photographed on the final build.
+* **Installed (owner's laptop only):** `Lumina-1.2.1-Local-Setup.exe` (Standard variant, renderer 1.1 MB in 3 chunks), built **without a version
+  bump** and under a distinct name; `release/latest.yml` backed up and restored. Installed silently over `C:\\Program Files\\Lumina`
+  (all users); installer exit 0; installed `app.asar` hash equals the tested build's; bundled yt-dlp 2026.10.26; `%APPDATA%\\lumina-media`
+  untouched; Lumina was not running and was not launched. Rollback: run `release/Lumina-1.2.1-Standard-Setup.exe` the same way.
+* **Not proven:** a real protected host passing the check inside Lumina (only stand-ins); the "not accepted" path on a real site;
+  the extension's `data-links` reading in a real browser; no control in Settings yet to forget learned clicks (the store has `forget`, nothing
+  calls it from the UI). **Pending the owner's yes:** the redesigned quick-check pop-up (mockup shown in chat; nothing visible was changed).
+
+## 2026-11-10 (57) - yt-dlp updated, "installed build only" causes ruled out, local installer
+
+* **Context:** the owner's YouTube channel was removed ("spam, deceptive practices and scams"). Checked, not assumed: no call to their real
+  browser in any session log; Lumina's saved Google cookies hold no sign-in session (names only were read); the extension only talks to
+  `127.0.0.1`. Nothing ties the removal to Lumina or to this work. The TV app signs in with the owner's own Cloud OAuth client, scope
+  `youtube.readonly` (cannot post or change anything). They are removing it anyway.
+* **yt-dlp 2026.08.19 → 2026.10.26** (the latest upstream; aria2 1.37.0 is also the latest). `scripts/fetch-tools.mjs` pin updated and
+  **a real bug in it fixed**: its cache file for yt-dlp is always named `yt-dlp.exe`, so after a version bump it re-used the OLD cached binary
+  and failed the new checksum list (the guard worked). The cache is now a per-version folder. New binary's hash matches the published one.
+* **Ruled out as the cause of "no song downloads" in the installed build** (all measured): the Electron `RunAsNode` fuse is ON in the installed
+  `Lumina.exe`; that binary works as yt-dlp's JavaScript runtime even with a space in its path (YouTube challenges solved, formats listed);
+  YouTube Music watch and playlist links, `youtu.be` short links and a watch link inside a playlist all work in the real app; the owner's
+  exact configuration (FLAC, 4 workers, the dead network list, same-name made-up visitor cookies) gave 4 of 4 FLAC files. Their own cookie
+  file was **not** copied into a test (the environment blocked it; their file has no sign-in anyway). **So the failure is still unreproduced
+  in dev;** the local installer below exists to test the real installed build.
+* **Installer:** `Lumina-1.2.1-Local-Setup.exe` (Standard variant: the installed `app.asar` is 2 MB), built **without a version bump** and
+  under a distinct name so the published 1.2.1 files are not overwritten (`release/latest.yml` backed up and restored). Installed over
+  `C:\Program Files\Lumina` (all-users, so it needs a UAC approval).
+* **Link grabber:** not run on the owner's own link (it is a page of a game-cracks site; AGENTS.md rule 2 stands, and nothing here contacts
+  such sites). Covered instead by `tests/e2e/extension-links-e2e.mjs` (38/38, includes a page modelled on their screenshot) and the link
+  matrices above. The owner will try their own page with the installed build; the log will say what happened.
+
+## 2026-11-10 (56) - Pages that list files: GitHub releases, open folders, share links
+
+* **Asked for:** commit, then keep improving convenience, bug fixes and the extension, with smart handling for downloading from the web.
+  Committed first as `6bc4348` (not pushed; authored as `nikhl`, no co-author line).
+* **Measured first** (`scripts/dl-lab/link-matrix.mjs`, real app, free-to-download material): a GitHub release asset completed; but a
+  **GitHub release page, a GitHub file page and an open directory index** (GNU's ftp) all ended "Lumina doesn't recognise media on this page".
+* **Built** (`core/pageFiles.ts` pure + tests, `main/pageFiles.ts`, IPC `page:files`):
+  1. `inspect()` first rewrites share links to the file itself: GitHub/GitLab/Codeberg file pages to raw, Hugging Face `blob` to `resolve`,
+     Dropbox `dl=0` to `dl=1`, Google Drive view links to the download address. Falls back to the original link if the rewritten one is not a file.
+  2. A page with no media is read for the files it lists: a GitHub release through its API (names and sizes), an open folder, or a page's own
+     download links. The Download screen then goes to the **existing batch plan** (one file goes straight to its own screen). No new screen.
+* **Verified in the real app (pasted into the Download screen, photographed):** the release page gave a batch of 6 files, the GNU folder a
+  batch of 202, the GitHub file page `README.rst` at 21.9 KB. `tsc` clean, `vitest` 1352/1352 (81 files), `vite build`.
+* **Not proven / known:** Dropbox and Google Drive rewrites are tested as pure functions only (no lawful public file to try; Drive's
+  large-file confirm page is unproven); a folder batch is titled after its first file ("wget-1.5.3.tar"), not the page; pages that build
+  their file list with a script (not in the HTML) are not read; no download was started from these batches in this pass.
+* **Proposed, needs a yes (visible):** sort plain downloads into folders by type (Programs, Archives, Documents, Audio, Video); today all
+  direct files go to one folder.
+* **Later (owner's ask): games from Steam / Epic through Lumina.** Nothing built. Notes for when it is scoped: those stores' downloads are
+  tied to the owner's account and licence, so the lawful routes are the stores' own tools driven for the owner (SteamCMD for Steam; the
+  open-source `legendary` or Heroic for Epic), not reading their servers directly. Whether Lumina can make them faster or steadier is
+  unmeasured: a store's downloader is usually limited by its CDN, so measure first. A local cache for several PCs is the other real lever.
+
 ## 2026-11-10 (55) - YouTube playlists that "did not download": the shared archive said "already done"
 
 * **Asked for:** in the newer build the owner could not download music or videos from YouTube, playlists included; earlier, 8 songs did not

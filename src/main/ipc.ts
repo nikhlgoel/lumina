@@ -14,6 +14,7 @@ import { settings } from './settings';
 import { tools } from './tools';
 import { loudnessFor } from './media/loudness';
 import { inspect } from './inspect';
+import { findPageFiles } from './pageFiles';
 import { searchMulti } from './search';
 import { queue } from './jobs/queue';
 import { runTool } from './process';
@@ -205,6 +206,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'presets:list': () => BUILT_IN_PRESETS,
 
   'media:inspect': ({ url, request }: { url: string; request?: RequestInfo }) => inspect(url, request),
+  'page:files': ({ url, request }: { url: string; request?: RequestInfo }) => findPageFiles(url, request),
   'media:play': ({ url, info, request }: { url: string; info?: unknown; request?: RequestInfo }) => {
     // `info` comes from the page; it is only trusted for what the link bar already read, and is read again when it isn't a MediaInfo.
     const known = info && typeof info === 'object' && typeof (info as MediaInfo).sourceKind === 'string' ? (info as MediaInfo) : undefined;

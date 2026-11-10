@@ -7,10 +7,15 @@
 // exactly over the "Quick check" panel, so nothing reloads and the page keeps its state and cookies. It
 // follows Lumina's window and disappears on its own once the download starts.
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { app, BrowserWindow, Notification, session, type Session, type WebContents } from 'electron';
 import type { CapturedCookie, HostChallenge, RequestInfo } from '../shared/types';
-import { PAGE_DRIVER, siteOf, type PageScan } from '../core/hosts';
+import { pageDriver } from '../core/hostsDriver';
+import { siteOf, type PageScan } from '../core/hosts';
+import { LearnedClicks } from '../core/learnedClicks';
+import { ClearanceJar, clearanceSite } from '../core/clearance';
 import { appIconPath } from './paths';
 import { mainWindow, showWindow } from './window';
 import { logger } from './log';
@@ -23,7 +28,7 @@ const PARTITION_PREFIX = 'lumina-host-';
 const MAX_PARALLEL = 3;
 const TICK_MS = 700;
 /** No click, countdown or navigation for this long means the page needs a person. */
-const STALL_MS = 60_000;
+const STALL_MS = !app.isPackaged && Number(process.env.LUMINA_STALL_MS) > 0 ? Number(process.env.LUMINA_STALL_MS) : 60_000;
 const HEADLESS_LIMIT_MS = 180_000;
 const INTERACTIVE_LIMIT_MS = 15 * 60_000;
 const PAGE_SIZE = { width: 1280, height: 860 };
@@ -94,6 +99,70 @@ function pageSession(): { s: Session; partition: string } {
     event.preventDefault();
   });
   return { s, partition };
+}
+
+/**
+ * Checks the person has solved, by site, in memory only. A page's jar is fresh (see pageSession), so without this a release of fifty parts
+ * asked for the same check fifty times. Only the "this visitor passed" cookies are kept, never the per-file ones (core/clearance.ts).
+ */
+const clearances = new ClearanceJar();
+
+/* ---------- learned clicks: what the person clicked when a page needed them, per site, so the next page of that site needs nobody ---------- */
+
+let learnedStore: LearnedClicks | null = null;
+const learnedFile = () => path.join(app.getPath('userData'), 'learned-clicks.json');
+function learnedClicks(): LearnedClicks {
+  if (!learnedStore) {
+    try {
+      learnedStore = LearnedClicks.fromJSON(JSON.parse(fs.readFileSync(learnedFile(), 'utf8')));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') log.warn(`The learned clicks file could not be read; starting empty: ${err}`);
+      learnedStore = new LearnedClicks();
+    }
+  }
+  return learnedStore;
+}
+function saveLearnedClicks() {
+  try {
+    const file = learnedFile();
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(learnedClicks().toJSON()));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch (err) {
+    log.debug(`Could not save the learned clicks: ${err}`);
+  }
+}
+/** What has been learned for a site (the self-test reads it). */
+export const learnedFor = (site: string) => learnedClicks().recall(site, Date.now());
+
+/** Forget what was learned from the person's clicks, for one site or all of them. */
+export function forgetLearnedClicks(site?: string): void {
+  learnedClicks().forget(site);
+  saveLearnedClicks();
+}
+
+/** Let go of the checks remembered so far: for one site, or all of them. */
+export function forgetSolvedChecks(site?: string): void {
+  if (site) clearances.forget(site);
+  else clearances.clear();
+}
+
+/** Put the proof of an earlier solved check into a new page's jar. Returns how many cookies went in. */
+async function applyClearance(s: Session, site: string): Promise<number> {
+  let put = 0;
+  for (const c of clearances.recall(site, Date.now())) {
+    try {
+      await s.cookies.set({
+        url: `${c.secure ? 'https' : 'http'}://${c.domain.replace(/^\./, '')}${c.path}`, name: c.name, value: c.value,
+        // A cookie the site set for its own name only (no leading dot) must go back the same way; naming a domain would widen it.
+        ...(c.domain.startsWith('.') ? { domain: c.domain } : {}),
+        path: c.path, secure: c.secure, httpOnly: c.httpOnly, ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}),
+      });
+      put++;
+    } catch (err) {
+      log.debug(`Could not reuse a solved check on ${site}: ${err}`);
+    }
+  }
+  return put;
 }
 
 /** One hidden window per page: stacked pages in one window would swallow each other's clicks. */
@@ -223,6 +292,18 @@ function closeChallenge(c: ActiveChallenge) {
   challengeEvents.emit('done', c.info.id);
 }
 
+/** When "skip all" was last pressed for a site. A file asked for before that moment is dismissed with it; one asked for after is a fresh try. */
+const skippedAllAt = new Map<string, number>();
+const SKIPPED = 'Skipped: the download page needed a quick check. Retry to open it again.';
+/** A page whose script never answers (an endless loop, a huge page) is treated as a page that gave nothing this time. */
+const SCRIPT_LIMIT_MS = 10_000;
+const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+  Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('The page did not answer')), ms).unref?.())]);
+/** The checks a saved "this visitor passed" cookie can answer; a per-file reCAPTCHA or image code is not one of them. */
+const CLEARANCE_KINDS = new Set(['Cloudflare check', 'human check']);
+/** How long before the download started a click may be and still be what the person did to get it. */
+const LEARN_WINDOW_MS = 20_000;
+
 export function currentChallenge(): HostChallenge | null {
   return active ? { ...active.info, waiting: waitingTurns.length } : null;
 }
@@ -241,6 +322,9 @@ export function challengeAction(id: string, action: 'reload' | 'skip' | 'skip-al
     return;
   }
   if (action === 'skip-all') {
+    // Also dismiss this site's files that have not reached their check yet (still waiting for a free slot, or still loading): each would
+    // otherwise ask in turn, and with hundreds of files "skip all" would have to be pressed again and again.
+    skippedAllAt.set(clearanceSite(active.info.host), Date.now());
     // Give up every file queued behind this one too, so a wall of captchas can be dismissed in one click.
     // Drain first, then tell each to skip: a skipped page's own cleanup calls waitingTurns.shift(), which
     // would otherwise resume a page we're about to skip.
@@ -312,12 +396,21 @@ function guardNavigation(wc: WebContents, startUrl: string) {
 export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): Promise<ResolvedLink> {
   const { signal, onStage } = opts;
   const interactive = opts.interactive ?? true;
+  const requestedAt = Date.now();
+  const site = clearanceSite(new URL(pageUrl).hostname);
+  const dismissed = () => (skippedAllAt.get(site) ?? 0) >= requestedAt;
   onStage('Waiting for a free download page slot');
   const release = await acquire(signal);
+  if (dismissed()) {
+    release();
+    throw new Error(SKIPPED);
+  }
   const { s, partition } = pageSession();
   let page: BrowserWindow | null = null;
   let challenge: ActiveChallenge | null = null;
   let wcId = -1;
+  /** This page was woken for its turn at the screen and has not yet used it or passed it on (the finally block passes it on). */
+  let holdsTurn = false;
 
   try {
     page = pageWindow(partition);
@@ -332,6 +425,17 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
       caught = item;
     });
     let skipped = false;
+    /** The control the person last clicked while the page was in their hands: learned for this site if the download then starts. */
+    let personClick: { sig: unknown; at: number } | null = null;
+    /** This page's own solved check is in the jar already: reloading with it again would only repeat the click-through. */
+    let ownClearance = false;
+    /** When Lumina last clicked in this page itself: a person's click before that did not start the download. */
+    let ownClickAt = 0;
+    /** When the page was first handed to the person (shownAt is cleared once a check is solved). */
+    let handedOverAt = 0;
+
+    let reused = await applyClearance(s, site);
+    if (reused) log.info(`Reusing the check already solved on ${site} (${reused} cookies)`);
 
     onStage('Opening download page');
     wc.loadURL(pageUrl, { userAgent: browserUserAgent() }).catch((err) => log.debug(`Page load: ${err}`));
@@ -351,6 +455,7 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
 
     while (!caught) {
       await sleep(TICK_MS, signal);
+      if (signal.aborted) throw new Error('Cancelled');
       if (caught) break;
       if (skipped) throw new Error('Skipped: the download page needed a quick check. Retry to open it again.');
       if (wc.isDestroyed()) throw new Error('The download page closed before the download started.');
@@ -368,12 +473,13 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
       let scan: PageScan | null = null;
       if (!wc.isLoading()) {
         try {
-          scan = (await wc.executeJavaScript(PAGE_DRIVER, true)) as PageScan;
+          scan = (await withTimeout(wc.executeJavaScript(pageDriver(learnedClicks().recall(site, Date.now())), true), SCRIPT_LIMIT_MS)) as PageScan;
         } catch {
           // navigating between steps
         }
       }
       if (caught) break;
+      if (handedOverAt && scan?.lastClick?.control && scan.lastClick.at >= handedOverAt) personClick = { sig: scan.lastClick.sig, at: scan.lastClick.at };
 
       if (scan?.blocked && !shownAt) {
         const msg = scan.blocked.trim();
@@ -382,10 +488,12 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
       }
       if (scan?.target) {
         realClick(wc, scan.target.x, scan.target.y);
+        ownClickAt = Date.now();
         lastProgress = Date.now();
         log.debug(`Clicked “${scan.target.label}” on ${current}`);
         stage(shownAt ? `Continuing · ${scan.target.label}` : `Download page · ${scan.target.label}`);
       } else if (scan?.clicked) {
+        ownClickAt = Date.now();
         lastProgress = Date.now();
         stage(`Download page · ${scan.clicked}`);
       } else if (scan?.countdown) {
@@ -404,6 +512,11 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
         // asks again, in its place in the line, if it meets another check.
         if (challenge && challenge.info.reason === 'captcha' && scan && !scan.captcha) {
           log.info(`Check solved for ${challenge.info.label}; the next one can be shown while this page finishes`);
+          const kept = clearances.remember(site, await capturedCookies(s), Date.now());
+          if (kept) {
+            ownClearance = true;
+            log.info(`Remembering the solved check on ${site} for this site's other files (${kept} cookies, kept in memory only)`);
+          }
           closeChallenge(challenge);
           waitingTurns.shift()?.resume();
           challenge = null;
@@ -419,6 +532,12 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
 
       // One check at a time: wait for the person to finish the page in front of this one.
       const reason: HostChallenge['reason'] = scan?.captcha ? 'captcha' : 'stalled';
+      if (dismissed()) throw new Error(SKIPPED);
+      // A reused clearance that still met a check was not accepted (it expired, or the site ties it to something else): stop offering it.
+      if (reused && reason === 'captcha' && CLEARANCE_KINDS.has(scan?.captchaKind ?? '')) {
+        clearances.forget(site);
+        log.info(`The check solved earlier on ${site} was not accepted; asking again and not reusing it`);
+      }
       if (active) {
         onStage('Needs you: waiting for your earlier quick check');
         if (active) sendChallenge(active);
@@ -439,23 +558,61 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
           }, { once: true });
         });
         if (caught) break;
-        if (skipped) throw new Error('Skipped: the download page needed a quick check. Retry to open it again.');
+        if (skipped) throw new Error(SKIPPED);
+        holdsTurn = true;
+      }
+      // This page opened before another one's check was solved, so its jar has no proof of it. Take it now and load the page again before
+      // troubling the person: with several pages open at once, one solved check then clears the others.
+      if (!reused && !ownClearance && CLEARANCE_KINDS.has(scan?.captchaKind ?? '') && clearances.has(site, Date.now())) {
+        reused = await applyClearance(s, site);
+        if (reused) {
+          log.info(`Reusing the check solved meanwhile on ${site} (${reused} cookies)`);
+          stage('Continuing with the check you already solved');
+          wc.reload();
+          lastProgress = Date.now();
+          started = Date.now();
+          // This page will not open a check of its own, and a page's own check is what used to wake the next one in line; pass the turn on
+          // (it takes the same proof, or asks the person if there is none), or it would wait for a turn that never comes.
+          holdsTurn = false;
+          if (!active) waitingTurns.shift()?.resume();
+          continue;
+        }
+      }
+      // Another page may have taken the screen while this one was busy above: wait for it again instead of opening a second check.
+      if (active) {
+        holdsTurn = false;
+        continue;
       }
       const info: HostChallenge = {
         id: randomUUID(), label: opts.label ?? 'Download', host: new URL(pageUrl).hostname.replace(/^www\./, ''), reason,
         check: scan?.captchaKind ?? null,
         waiting: waitingTurns.length, url: current, stage: reason === 'captcha' ? 'Waiting for you to solve the check' : 'Looking for the download button',
       };
+      holdsTurn = false; // the check this page now opens passes the turn on when it ends
       challenge = openChallenge(page, info, () => {
         skipped = true;
       });
       active = challenge;
       shownAt = Date.now();
+      handedOverAt ||= shownAt;
       onStage(reason === 'captcha' ? 'Needs you: quick check open in Lumina' : 'Needs you: finish the download page in Lumina');
       log.info(`Quick check for ${info.label} on ${current} (${reason})`);
     }
 
     const item = caught as CaughtDownload;
+    // The click that started the download ends the loop before the next look at the page, so read it once more here.
+    if (handedOverAt && !wc.isDestroyed()) {
+      try {
+        const last = (await wc.executeJavaScript('window.__luminaLast || null', true)) as { sig?: unknown; at?: unknown; control?: unknown } | null;
+        // The page can set this value itself, so its time is checked, not trusted.
+        if (last?.control === true && typeof last.at === 'number' && Number.isFinite(last.at) && last.at >= handedOverAt) personClick = { sig: last.sig, at: last.at };
+      } catch { /* the page is gone; what was seen before stands */ }
+    }
+    // A click long before the download started was probably something else (a dismissed pop-up, an ad): learn only a recent one.
+    if (personClick && personClick.at >= ownClickAt && Date.now() - personClick.at <= LEARN_WINDOW_MS && learnedClicks().remember(site, personClick.sig, Date.now())) {
+      saveLearnedClicks();
+      log.info(`Learned the control you clicked on ${site}; the next page there will not need you`);
+    }
     if (challenge) stage('Download found · starting');
     const request: RequestInfo = {
       pageUrl: wc.isDestroyed() ? pageUrl : wc.getURL() || pageUrl,
@@ -471,6 +628,7 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
       // Next page waiting for the person gets its turn.
       waitingTurns.shift()?.resume();
     }
+    if (holdsTurn && !active) waitingTurns.shift()?.resume();
     if (page && !page.isDestroyed()) page.destroy();
     void s.clearStorageData().catch(() => undefined);
     release();
