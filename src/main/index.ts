@@ -68,9 +68,9 @@ function openLink(url: string, source: 'extension' | 'clipboard' | 'system', req
 }
 
 /** Bring Lumina forward with several links picked on a page, to be planned together (archive parts, optional extras, checksums). */
-function openLinks(urls: string[], request: RequestInfo) {
+function openLinks(urls: string[], request: RequestInfo, names: Record<string, string> = {}) {
   showWindow('downloader');
-  const send = () => broadcast('app:open-links', { urls, request, source: 'extension' });
+  const send = () => broadcast('app:open-links', { urls, request, names, source: 'extension' });
   const wc = mainWindow()?.webContents;
   if (wc?.isLoading()) wc.once('did-finish-load', send);
   else send();
@@ -208,9 +208,9 @@ if (!app.requestSingleInstanceLock()) {
         openLink(c.url, 'extension', c.request);
         return { accepted: true };
       },
-      onCaptureBatch: async (urls, request) => {
-        log.info(`Batch from browser: ${urls.length} links from ${request.pageUrl?.slice(0, 120) ?? 'a page'}`);
-        openLinks(urls, request);
+      onCaptureBatch: async (urls, request, _signal, names) => {
+        log.info(`Batch from browser: ${urls.length} links (${Object.keys(names).length} named) from ${request.pageUrl?.slice(0, 120) ?? 'a page'}`);
+        openLinks(urls, request, names);
         return { accepted: true, count: urls.length };
       },
       onAccountCookies: async (site, cookies) => {

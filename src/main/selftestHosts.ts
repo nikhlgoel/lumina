@@ -13,6 +13,7 @@ import { planBatch, releaseTagFor } from '../core/batch';
 import { inspect } from './inspect';
 import { queue } from './jobs/queue';
 import { DRIVER_VARIANTS } from './selftestDriverPages';
+import { queueUrlFor } from '../core/hosts';
 import { challengeAction, challengeEvents, forgetLearnedClicks, forgetSolvedChecks, learnedFor, resolveHostedLink } from './hosters';
 import { createWindow } from './window';
 import { settings } from './settings';
@@ -175,6 +176,29 @@ function mockHost(pub: string) {
           });
         </script>`);
     }
+    // A stand-in for a share-link host (Pixeldrain): /u/<id> is a web page, /api/file/<id>?download is the file.
+    if (parts[0] === 'u' && parts[1]) {
+      return html(res, `<h2>Shared file</h2><div id="app">${'x'.repeat(Math.max(0, 4372 - 150))}</div>`);
+    }
+    if (parts[0] === 'api' && parts[1] === 'file' && parts[2] && url.searchParams.has('download')) {
+      const shared = fileByCode.get(parts[2]);
+      if (!shared) return void res.writeHead(404).end('gone');
+      const body = fs.readFileSync(path.join(pub, shared));
+      return void res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${shared}"`, 'Content-Length': body.length }).end(body);
+    }
+    // A direct file link behind a challenge page, answered as Cloudflare does: 403 and "cf-mitigated: challenge" until the visitor passed the check.
+    if (parts[0] === 'dl' && parts[1] && !parts[1].includes('..')) {
+      const file = path.join(pub, parts[1]);
+      if (cookie(req, 'cf_clearance') === 'passed' && fs.existsSync(file)) {
+        const body = fs.readFileSync(file);
+        stats.served.add(parts[1]);
+        return void res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${parts[1]}"`, 'Content-Length': body.length }).end(body);
+      }
+      stats.gateChecks++;
+      return void res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'cf-mitigated': 'challenge', Server: 'cloudflare' }).end(`<!doctype html><html><head><meta charset="utf-8"><title>Just a moment...</title></head><body style="font:16px sans-serif;padding:40px"><h2>Checking your browser</h2>
+        <div class="cf-turnstile" style="display:inline-flex;align-items:center;gap:12px;width:300px;height:65px;border:1px solid #d0d0d0;background:#fff;padding:0 16px;box-sizing:border-box"><input type="checkbox" id="robot" style="width:24px;height:24px"><label for="robot">Verify you are human</label></div>
+        <script>document.getElementById('robot').addEventListener('click', (e) => { if (!e.isTrusted) return; fetch('/pass').then(() => setTimeout(() => location.reload(), 400)); });</script></body></html>`);
+    }
     if (parts[0] === 'f' && parts.length === 3) {
       return void res.writeHead(302, { 'Set-Cookie': `file_code=${parts[1]}; Path=/`, Location: '/download' }).end();
     }
@@ -319,7 +343,7 @@ export async function runHostsSelftest(dir: string): Promise<void> {
   // 2. A captcha page opens as a quick check inside the main window; a person solves it and the download continues.
   {
     // LUMINA_SELFTEST_OFFSCREEN=1 renders this window into a bitmap instead of showing it (this machine's rule: never open the app window).
-    const offscreen = process.env.LUMINA_SELFTEST_OFFSCREEN === '1';
+    const offscreen = process.env.LUMINA_SELFTEST_VISIBLE !== '1';
     const win = createWindow({ show: !offscreen, mode: 'downloader', offscreen });
     await new Promise<void>((r) => (win.webContents.isLoading() ? win.webContents.once('did-finish-load', () => r()) : r()));
     await new Promise((r) => setTimeout(r, 2500));
@@ -540,6 +564,81 @@ export async function runGateSelftest(dir: string): Promise<void> {
     fresh();
     const again = await within(resolveOne(link(base, 'g', names[0] ?? '')), 60_000, 'after a skip');
     check('after skipping, the next try asks and works', asked === 1 && again.filename === names[0], `asked ${asked} time(s)`);
+
+    // 9. A direct file link behind a bot check (FileDitch): Lumina must open the quick check once, not fail with "refused (403)", and the
+    // file must then come through aria2 using the proof the page earned. The host refuses the file without that cookie, so a finished
+    // download is the evidence.
+    fresh();
+    t = Date.now();
+    const direct = names.map((n) => `${base}/dl/${n}?c=${randomBytes(3).toString('hex')}`);
+    const infos = await within(Promise.all(direct.map((u) => inspect(u))), 60_000, 'inspect direct links');
+    check('a file link behind a bot check is recognised as needing the quick check, not as a refusal', infos.every((i) => i.direct?.hosted === true), infos.map((i) => `${i.sourceKind}/hosted=${i.direct?.hosted}`).join(' '));
+    const target = path.join(dir, 'Other', 'challenged');
+    fs.mkdirSync(target, { recursive: true });
+    const jobs = infos.map((info, i) => queue.addFromInfo(direct[i] ?? '', info, {
+      contentType: 'video', format: { kind: 'video', maxHeight: null, codec: 'any', container: 'mkv', maxFps: null, allowHdr: true, tvSafe: false },
+      englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: target,
+    }, target));
+    const settled = await within(Promise.all(jobs.map((job) => new Promise<Job>((resolve) => {
+      const timer = setInterval(() => {
+        const j = queue.get(job.id);
+        if (j && ['completed', 'failed', 'cancelled'].includes(j.status)) {
+          clearInterval(timer);
+          resolve(j);
+        }
+      }, 500);
+    }))), 150_000, 'download the challenged files');
+    check('all four challenged files download through aria2 after one check', settled.every((j) => j.status === 'completed') && asked === 1,
+      `${settled.filter((j) => j.status === 'completed').length}/4 completed, asked ${asked} time(s) in ${seconds(t)}s ${settled.find((j) => j.status === 'failed')?.error?.message ?? ''}`);
+    const onDisk = names.filter((n) => fs.existsSync(path.join(target, n)) && fs.statSync(path.join(target, n)).size === 64 << 10);
+    check('and every file is on disk, whole', onDisk.length === names.length, `${onDisk.length}/${names.length} files of the right size`);
+
+    // 10. A share link whose file is at another address (Pixeldrain). The batch screen used to queue each file under the pasted link, so every
+    // download saved the 4 KB share page and failed with "the server sent a web page instead of the file". Queued as the screens now do (the
+    // address the probe found), the real file must come. The control queues one the old way and must fail with that exact error, which shows
+    // this scenario can see the bug.
+    process.env.LUMINA_SELFTEST_DIRECT_API_HOST = '127.0.0.1';
+    const shareTarget = path.join(dir, 'Other', 'share');
+    fs.mkdirSync(shareTarget, { recursive: true });
+    const shares = names.map((n) => {
+      const code = `s${randomBytes(4).toString('hex')}`;
+      host.fileByCode.set(code, n);
+      return `${base}/u/${code}`;
+    });
+    const readShares = await within(Promise.all(shares.map((u) => inspect(u))), 60_000, 'read share links');
+    check('a share link is read at its direct address, not as a web page', readShares.every((i) => /\/api\/file\/[^/?]+\?download$/.test(i.url) && i.sourceKind === 'direct'), readShares.map((i) => i.url.replace(base, '')).join(' '));
+    const shareOptions = (target: string) => ({
+      contentType: 'video' as const, format: { kind: 'video' as const, maxHeight: null, codec: 'any' as const, container: 'mkv' as const, maxFps: null, allowHdr: true, tvSafe: false },
+      englishSubtitles: false, subtitleOutput: [], embedMetadata: false, embedLyrics: false, sponsorBlock: false, playlistItems: [], targetDir: target,
+    });
+    const shareJobs = readShares.map((info, i) => queue.addFromInfo(queueUrlFor(info, shares[i] ?? ''), info, shareOptions(shareTarget), shareTarget));
+    const settledShares = await within(Promise.all(shareJobs.map((job) => new Promise<Job>((resolve) => {
+      const timer = setInterval(() => {
+        const j = queue.get(job.id);
+        if (j && ['completed', 'failed', 'cancelled'].includes(j.status)) {
+          clearInterval(timer);
+          resolve(j);
+        }
+      }, 500);
+    }))), 120_000, 'download the share links');
+    check('all four share links download the real file', settledShares.every((j) => j.status === 'completed'), `${settledShares.filter((j) => j.status === 'completed').length}/4 completed ${settledShares.find((j) => j.status === 'failed')?.error?.message ?? ''}`);
+    const real = names.filter((n) => fs.existsSync(path.join(shareTarget, n)) && fs.statSync(path.join(shareTarget, n)).size === 64 << 10);
+    check('and each is the whole file, not a 4 KB web page', real.length === names.length, `${real.length}/${names.length} files of the right size`);
+
+    const oldWayTarget = path.join(dir, 'Other', 'oldway');
+    fs.mkdirSync(oldWayTarget, { recursive: true });
+    const first = readShares[0];
+    const oldWay = queue.addFromInfo(shares[0] ?? '', first as NonNullable<typeof first>, shareOptions(oldWayTarget), oldWayTarget);
+    const oldResult = await within(new Promise<Job>((resolve) => {
+      const timer = setInterval(() => {
+        const j = queue.get(oldWay.id);
+        if (j && ['completed', 'failed', 'cancelled'].includes(j.status)) {
+          clearInterval(timer);
+          resolve(j);
+        }
+      }, 500);
+    }), 60_000, 'the old way');
+    check('control: queued under the pasted link, the same file fails with the owner’s error', oldResult.status === 'failed' && /web page instead of the file/i.test(oldResult.error?.message ?? ''), `${oldResult.status}: ${oldResult.error?.message ?? ''}`);
   } catch (err) {
     check('the gate scenarios ran to the end', false, String(err));
   } finally {

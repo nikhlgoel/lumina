@@ -154,12 +154,12 @@ export async function capture({ url, kind, pageUrl, pageTitle, headers = {}, fil
  * checksums separated) and the person confirms once. Resolves { accepted, count, reason, unsupported }; `unsupported` means this Lumina is
  * older than the batch request, and the caller should send the links one at a time instead.
  */
-export async function captureBatch({ urls, pageUrl, pageTitle }, timeoutMs = 15_000) {
+export async function captureBatch({ urls, names = {}, pageUrl, pageTitle }, timeoutMs = 15_000) {
   const origins = [...new Set(urls.map((u) => { try { return new URL(u).origin; } catch { return ''; } }).filter(Boolean))].slice(0, 6);
   const cookies = await cookiesFor(pageUrl, ...origins);
   const headers = pageUrl && /^https?:/.test(pageUrl) ? { Referer: pageUrl } : {};
   try {
-    const r = await request('/v1/capture-batch', { method: 'POST', timeoutMs, body: fitToBridge({ urls, request: { pageUrl, pageTitle, headers, cookies } }) });
+    const r = await request('/v1/capture-batch', { method: 'POST', timeoutMs, body: fitToBridge({ urls, names: urls.map((u) => String(names?.[u] ?? '').slice(0, 200)), request: { pageUrl, pageTitle, headers, cookies } }) });
     if (r.status === 401) await setConfig({ token: null });
     if (r.status === 404) return { accepted: false, unsupported: true };
     return { accepted: Boolean(r.ok && r.data?.accepted !== false), count: r.data?.count ?? urls.length, reason: r.data?.reason ?? r.data?.error };

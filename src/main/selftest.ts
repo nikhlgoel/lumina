@@ -47,6 +47,20 @@ export async function runSelftest(): Promise<void> {
   const statuses = await tools.probeAll();
   for (const s of statuses) out(`tool ${s.name}: ${s.ok ? `${s.version} (${s.source})` : `MISSING ${s.error}`}`);
 
+  if (process.env.LUMINA_SELFTEST_LIBRARY) {
+    // Scans the folder named by LUMINA_LIB_ROOT as the library would (in this scratch profile only) and reports what it found.
+    const root = process.env.LUMINA_LIB_ROOT ?? '';
+    settings.update({ storage: { libraryRoots: [root] } });
+    out(`library: roots() = ${library.roots().join(' ; ') || 'none'}`);
+    await library.scan();
+    await new Promise((r) => setTimeout(r, 6000)); // a scan already running makes scan() return at once; give it time
+    const items = library.items({});
+    const pls = library.playlists();
+    out(`library: ${items.length} items from ${root}`);
+    out(`library: playlists = ${pls.map((p) => `${p.source}:${p.name}(${p.itemCount})`).join(' | ') || 'none'}`);
+    out(`library: roots recorded = ${[...new Set(items.map((i) => (i as { root?: string }).root ?? '?'))].join(' ; ')}`);
+    return;
+  }
   if (process.env.LUMINA_SELFTEST_SHOTS) {
     const { runShotsSelftest } = await import('./selftestHosts');
     await runShotsSelftest();

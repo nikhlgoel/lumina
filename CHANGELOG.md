@@ -33,6 +33,25 @@ Not released yet; everything below is in the working tree only.
 - **Pop-ups for a release's parts come one after another faster:** once a check is solved, the next part's pop-up opens while the first page
   finishes (stand-in host, 6 parts: 39.6 s to 18.7 s). Each part may still ask for its own check.
 
+### Fixed (after the first live test)
+- **Pixeldrain links now download the file.** Every one used to save Pixeldrain's own web page (about 4 KB) and fail with "the server sent a
+  web page instead of the file", because the queue was given the share link instead of the file's address. Checked in the real app against a
+  stand-in host: four of four files downloaded whole.
+- **Pixeldrain is no longer overloaded.** It drops a client that opens many connections, and Lumina opened about 96. It now takes one file at
+  a time with four connections; any other host that starts dropping connections is held back the same way for 20 minutes.
+- **A link a host does not answer for a moment is no longer refused as "not media".** The probe asks again, and if the host is still quiet the
+  link is queued and the download retries by itself. A file that is really gone still says so.
+- **Links sent from the browser are listed by their file names**, not as web addresses, and their parts group into one ordered set.
+- **Files behind a Cloudflare check (FileDitch) open the quick check** instead of failing with "refused (403)". One tick covers the rest of
+  that site's files. Checked against a stand-in host only.
+- **A music folder showed nothing in the Library.** Windows reported its files as links and the scanner skipped them: 40 tracks in a folder
+  gave 0 results, and now give 41 and their playlist. The USB copy had the same blind spot.
+- **Gofile links are opened as a download page** (the bundled yt-dlp has no Gofile support, so they ended as "unsupported"). Not yet tried on
+  the real site.
+- **The sidebar's logo and collapse button line up with the menu below them.**
+- **Cookies and sign-in headers are no longer sent along a redirect to another site**, and a public address can no longer send Lumina to a
+  private one.
+
 ### Added
 - **Pages that list files now work.** Paste a GitHub release page, an open folder on a web server, or a page of download links and Lumina
   reads it for the files and shows them in the usual list to pick from (it used to say it did not recognise media on the page). Links to a

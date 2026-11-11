@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { directApiUrl, isPageHost, siteOf } from '@core/hosts';
+import { directApiUrl, isPageHost, queueUrlFor, siteOf } from '@core/hosts';
 import { installerIn, parseListing, parseProgress, unpackError } from '@core/archive';
 import { planBatch, releaseTagFor } from '@core/batch';
 
@@ -63,5 +63,45 @@ describe('release tags', () => {
       ['optional', null, null, null],
       ['optional', 'set:fg-optional-hd.rar', 1, 2], ['optional', 'set:fg-optional-hd.rar', 2, 2],
     ]);
+  });
+});
+
+describe('the address a download is queued under', () => {
+  const direct = (url: string, hosted = false) => ({ sourceKind: 'direct', url, direct: { hosted } });
+
+  it('is the direct file address the probe found, not the share page the person pasted', () => {
+    const api = 'https://pixeldrain.com/api/file/Zawwdeun?download';
+    expect(queueUrlFor(direct(api), 'https://pixeldrain.com/u/Zawwdeun')).toBe(api);
+  });
+
+  it('keeps the pasted address for a file host that opens a download page, which is the page', () => {
+    const page = 'https://fuckingfast.co/abc#Game.part1.rar';
+    expect(queueUrlFor(direct(page, true), page)).toBe(page);
+  });
+
+  it('keeps the pasted address for anything that is not a direct file', () => {
+    expect(queueUrlFor({ sourceKind: 'single', url: 'https://www.youtube.com/watch?v=x&t=1' }, 'https://youtu.be/x')).toBe('https://youtu.be/x');
+    expect(queueUrlFor({ sourceKind: 'torrent', url: 'magnet:?xt=urn:btih:a' }, 'magnet:?xt=urn:btih:a')).toBe('magnet:?xt=urn:btih:a');
+  });
+
+  it('keeps the pasted address when the probe gave nothing usable', () => {
+    expect(queueUrlFor({ sourceKind: 'direct', url: '' }, 'https://a.example/f.zip')).toBe('https://a.example/f.zip');
+    expect(queueUrlFor({ sourceKind: 'direct', url: 'ftp://a.example/f.zip' }, 'https://a.example/f.zip')).toBe('https://a.example/f.zip');
+    expect(queueUrlFor({ sourceKind: 'direct' }, 'https://a.example/f.zip')).toBe('https://a.example/f.zip');
+  });
+});
+
+describe('the direct address of a Pixeldrain share link', () => {
+  it('is its API address, for either of its domains', () => {
+    expect(directApiUrl('https://pixeldrain.com/u/Zawwdeun')).toBe('https://pixeldrain.com/api/file/Zawwdeun?download');
+    expect(directApiUrl('https://pixeldra.in/u/Zawwdeun')).toBe('https://pixeldrain.com/api/file/Zawwdeun?download');
+  });
+  it('is nothing for other hosts or for a link with no file in it', () => {
+    expect(directApiUrl('https://example.com/u/abc')).toBeNull();
+    expect(directApiUrl('https://pixeldrain.com/l/abc')).toBeNull();
+  });
+  it('answers for a stand-in host only when the self-test names it, and keeps that host’s own origin', () => {
+    expect(directApiUrl('http://127.0.0.1:5000/u/abc')).toBeNull();
+    expect(directApiUrl('http://127.0.0.1:5000/u/abc', '127.0.0.1')).toBe('http://127.0.0.1:5000/api/file/abc?download');
   });
 });

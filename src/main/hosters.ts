@@ -230,7 +230,7 @@ function sendChallenge(c: ActiveChallenge) {
 
 /** Lay the page window over the panel's frame, in screen coordinates. */
 function placePage(c: ActiveChallenge) {
-  if (!c.frame || c.page.isDestroyed() || c.main.isDestroyed()) return;
+  if (QUIET || !c.frame || c.page.isDestroyed() || c.main.isDestroyed()) return;
   if (c.main.isMinimized() || !c.main.isVisible()) {
     c.page.hide();
     return;
@@ -257,9 +257,9 @@ function placePage(c: ActiveChallenge) {
 }
 
 function openChallenge(page: BrowserWindow, info: HostChallenge, skip: () => void): ActiveChallenge {
-  showWindow();
+  if (!QUIET) showWindow();
   const main = mainWindow()!;
-  page.setParentWindow(main);
+  if (!QUIET) page.setParentWindow(main);
   const c: ActiveChallenge = { info, page, main, frame: null, skip, unfollow: () => undefined };
   const follow = () => placePage(c);
   const events = ['move', 'resize', 'restore', 'minimize', 'show', 'hide', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const;
@@ -268,7 +268,7 @@ function openChallenge(page: BrowserWindow, info: HostChallenge, skip: () => voi
     if (!main.isDestroyed()) for (const e of events) main.off(e as 'move', follow);
   };
   sendChallenge(c);
-  if (!main.isFocused() && Notification.isSupported()) {
+  if (!QUIET && !main.isFocused() && Notification.isSupported()) {
     const body = info.reason === 'captcha'
       ? `${info.host} wants a ${info.check ?? 'human check'} before “${info.label}” can download. Open Lumina to solve it.`
       : `“${info.label}” needs a click on ${info.host}. Open Lumina to continue.`;
@@ -283,7 +283,7 @@ function closeChallenge(c: ActiveChallenge) {
   c.unfollow();
   if (!c.main.isDestroyed()) {
     c.main.webContents.send('hosts:challenge-done', { id: c.info.id });
-    c.main.focus();
+    if (!QUIET) c.main.focus();
   }
   if (!c.page.isDestroyed()) {
     c.page.hide();
@@ -295,6 +295,8 @@ function closeChallenge(c: ActiveChallenge) {
 /** When "skip all" was last pressed for a site. A file asked for before that moment is dismissed with it; one asked for after is a fresh try. */
 const skippedAllAt = new Map<string, number>();
 const SKIPPED = 'Skipped: the download page needed a quick check. Retry to open it again.';
+/** A self-test (development only) must never show a window, take focus or raise a notification: someone may be working in front of the screen. */
+const QUIET = !app.isPackaged && !!process.env.LUMINA_SELFTEST;
 /** A page whose script never answers (an endless loop, a huge page) is treated as a page that gave nothing this time. */
 const SCRIPT_LIMIT_MS = 10_000;
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
@@ -600,6 +602,16 @@ export async function resolveHostedLink(pageUrl: string, opts: ResolveOptions): 
     }
 
     const item = caught as CaughtDownload;
+    // A check solved by the person usually ends with the file starting at once (Cloudflare reloads the link and serves it), so the page never
+    // shows "check gone, still on the page" for the branch above to notice. The proof of it is in the jar all the same: keep it for the
+    // rest of the site's files, or each one asks again.
+    if (handedOverAt && !ownClearance && !wc.isDestroyed()) {
+      const kept = clearances.remember(site, await capturedCookies(s), Date.now());
+      if (kept) {
+        ownClearance = true;
+        log.info(`Remembering the solved check on ${site} for this site's other files (${kept} cookies, kept in memory only)`);
+      }
+    }
     // The click that started the download ends the loop before the next look at the page, so read it once more here.
     if (handedOverAt && !wc.isDestroyed()) {
       try {

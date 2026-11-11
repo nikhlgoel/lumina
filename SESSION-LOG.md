@@ -5,6 +5,49 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-11 (59) - the owner's first live test: Pixeldrain, FileDitch, names, the Library, and tests that showed on screen
+
+The owner tried the installed 1.2.1 build on their hoster page and sent screenshots. What they showed, what was found, what changed.
+
+* **Pixeldrain "7 of 7 failed: the server sent a web page instead of the file" was a Lumina bug, not throttling.** The log's byte counts
+  (4372, 4373, 4416) equal Pixeldrain's own *share page* (`pixeldrain.com/u/<id>`, measured: 4372/4373/4416 bytes of HTML). The probe found the
+  direct address (`/api/file/<id>?download`) but all three queueing paths (batch picker, single link, result screen) passed the pasted
+  share link to `jobs:add`, so aria2 saved the web page. Pixeldrain "support" had therefore never worked end to end. Fixed at the one place
+  they share (`core/hosts.ts queueUrlFor`, used by `jobs:add`). Proven in the real app with a stand-in (share page 4372 bytes, API address serves
+  the file): 4 of 4 download whole; the control queued the old way fails with exactly the owner's message. **My earlier line "Pixeldrain: best
+  bet" was wrong; it was broken for everyone.** I first took the web page for throttling and wrote code for that; the byte counts disproved it
+  before it shipped, and that reclassification was removed.
+* **Pixeldrain also drops connections** (measured: 16 parallel 1-byte requests, 9 got no answer; 48, 14 got none and 14 were refused with a 403 JSON).
+  Lumina opened ~96. New per-host budget (`core/hostBudget.ts`, `jobs/budgets.ts`): Pixeldrain gets one file at a time and 4 connections each;
+  any other host keeps the owner's settings until a reset/handshake/429-type failure, then is held to the same strict budget for 20 minutes.
+  The numbers are from one machine and one afternoon: **a starting point, not a tuned value.** "3 links could not be queued": a reset probe fell
+  through to yt-dlp and said "doesn't recognise media"; now the probe retries three times, a gone file (404/410) still says so, and anything
+  else is queued anyway (the download retries by itself).
+* **The batch screen showed links as names.** The extension now sends each link's text with the batch (`names`, optional both ways, validated
+  and cleaned by the bridge), `planBatch(links, names)` uses a name only if it looks like a file name, and the parts group into ordered archive sets.
+* **FileDitch**: its direct file links answer `403` with `Cf-Mitigated: challenge` (a Cloudflare managed challenge; a Referer does not help). Lumina
+  treated them as plain files and failed. Now a direct link answered with a bot check goes through the quick check (`isBotCheckResponse`).
+  The real-app test then found **a bug in my solve-once work**: when the file starts right after the check (what Cloudflare does) the proof was
+  never remembered, so every part asked again (4 asks for 4 files). Fixed (proof is remembered once the download is caught), re-tested.
+* **Gofile**: the bundled yt-dlp 2026.10.26 has **no Gofile extractor** (1755 extractors listed, none). Links ended as "unsupported". `gofile.io`
+  added to the page-host list so it goes through the download-page flow. **Not tested on the real site** (a live test would have Gofile create a
+  guest account; not done by me). Unproven.
+* **Cookies/headers on redirects** (a security-review finding): the page reader and the direct probe sent every cookie and header the extension
+  collected to wherever a redirect led. New `core/safeFetch.ts`: per-hop cookies only, no credentials across origins, and a public address
+  may not redirect Lumina to a private one. Tested against real local servers.
+* **Library: the owner's added music folder showed nothing.** `C:\Users\datan\Desktop\Music` (40 FLAC) gave **0 items** in the real scanner. Cause
+  (measured): Windows lists those files as *symbolic links* in `readdir` while a stat says they are ordinary files (reparse points of a
+  cloud/redirected folder); the walk kept only entries listed as files. Fixed with `core/walkEntry.ts` (looks through a link), used in the
+  library scan (with a visited-folder guard against link loops), its Files tab and the USB copy code. Same folder after the fix: 41 items and its
+  playlist. Not fixed: the code editor's and installer's walkers have the same pattern (not music).
+* **Logo and name**: photographed the real sidebar offscreen. The brand row is vertically centred with the window buttons already; its edges did
+  not line up with the nav column (logo 4 px left of the nav icons, collapse button 6 px left of the nav pills). Aligned both. **That is the only
+  thing I could verify as off; if the owner meant something else, they need to say what.**
+* **My tests were showing on the owner's screen** (the live page window, the "needs a quick check" notification, focus). All of that is now off
+  in any self-test (`QUIET` in `hosters.ts`); the 14-check host test no longer opens a window by default.
+* **Not proven:** Pixeldrain, FileDitch and Gofile live (everything above for them is stand-ins plus measurements); the budget numbers; that the
+  extension's page names reach the batch screen in the real extension (unit-tested at each hop, not driven end to end in a browser).
+
 ## 2026-11-10 (58) - AGENTS.md rules 1 and 2 loosened by the owner
 
 * **What changed (uncommitted edit to `AGENTS.md`, made by the owner):** rule 1 now also allows "developing a way around [a challenge]

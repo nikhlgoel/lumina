@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fileNameFromUrl, planBatch, prettyTitle, splitVolume } from '@core/batch';
+import { fileNameFromUrl, nameFromText, planBatch, prettyTitle, splitVolume } from '@core/batch';
 import { checkHeader, parseChecksumManifest } from '@core/verify';
 
 const host = 'https://files.example.net';
@@ -81,5 +81,47 @@ describe('download verification', () => {
     expect(sums.get('ubuntu.iso')?.algo).toBe('sha256');
     expect(parseChecksumManifest('x.txt', `SHA1 (dir/f.bin) = ${'b'.repeat(40)}`).get('f.bin')?.algo).toBe('sha1');
     expect(parseChecksumManifest('set.sfv', 'My File.rar 0A1B2C3D').get('my file.rar')).toEqual({ algo: 'crc32', hash: '0a1b2c3d' });
+  });
+});
+
+describe('links named by the page they were picked on', () => {
+  const pd = (id: string) => `https://pixeldrain.com/u/${id}`;
+  const names = { [pd('aaa')]: 'ICARUS.Build.1-OFME.part01.rar', [pd('bbb')]: 'ICARUS.Build.1-OFME.part02.rar', [pd('ccc')]: 'ICARUS.Build.1-OFME.part03.rar' };
+
+  it('reads as files, not as addresses, and the parts become one archive set in order', () => {
+    const plan = planBatch([pd('ccc'), pd('aaa'), pd('bbb')], names);
+    const set = plan.groups.find((g) => g.kind === 'archive-set');
+    expect(plan.groups).toHaveLength(1);
+    expect(set?.items.map((i) => i.filename)).toEqual(['ICARUS.Build.1-OFME.part01.rar', 'ICARUS.Build.1-OFME.part02.rar', 'ICARUS.Build.1-OFME.part03.rar']);
+    expect(set?.missingParts).toEqual([]);
+  });
+
+  it('notices a missing part from the names', () => {
+    const plan = planBatch([pd('aaa'), pd('ccc')], names);
+    expect(plan.groups[0]?.missingParts).toEqual([2]);
+  });
+
+  it('leaves a link as it was when its page text is not a file name', () => {
+    const plan = planBatch([pd('aaa')], { [pd('aaa')]: 'Download' });
+    expect(plan.groups[0]?.items[0]?.filename).toBe('');
+  });
+
+  it('prefers the name in the address when it has one', () => {
+    const url = 'https://cdn.example.com/files/Real.Name.zip';
+    expect(planBatch([url], { [url]: 'Something.else.rar' }).groups[0]?.items[0]?.filename).toBe('Real.Name.zip');
+  });
+
+  it('only takes text that is a file name', () => {
+    expect(nameFromText('Game.part01.rar')).toBe('Game.part01.rar');
+    expect(nameFromText('  Game  v1.2.zip ')).toBe('Game v1.2.zip');
+    expect(nameFromText('Download')).toBe('');
+    expect(nameFromText('Mirror 1')).toBe('');
+    expect(nameFromText('Click here to download')).toBe('');
+    expect(nameFromText('')).toBe('');
+    expect(nameFromText(undefined)).toBe('');
+    // A page's wording is not trusted as a path: separators and drive colons become spaces.
+    const bs = String.fromCharCode(92);
+    expect(nameFromText(`C:${bs}temp${bs}evil.rar`)).toBe('C temp evil.rar');
+    expect(nameFromText('a/b/evil.rar')).toBe('a b evil.rar');
   });
 });

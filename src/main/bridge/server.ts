@@ -52,6 +52,8 @@ const linkText = z.string().min(1).max(16_384).refine((u) => /^(https?:\/\/|magn
 const MAX_BATCH = 500;
 const batchSchema = z.object({
   urls: z.array(linkText).min(1).max(MAX_BATCH),
+  /** The name each link has on its page, in the same order as `urls`. Optional: an older extension sends none. */
+  names: z.array(z.string().max(300)).max(MAX_BATCH).optional(),
   request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
 });
 const pairSchema = z.object({ browser: z.string().min(1).max(60) });
@@ -129,7 +131,7 @@ export interface BridgeHandlers {
   /** Resolve once Lumina has really taken over (or refused). The signal aborts if the extension gives up waiting. */
   onCapture: (capture: CaptureRequest, signal: AbortSignal) => Promise<CaptureResult>;
   /** Several links picked together on a page. Resolves once Lumina has them in front of the person. */
-  onCaptureBatch: (urls: string[], request: RequestInfo, signal: AbortSignal) => Promise<CaptureResult & { count: number }>;
+  onCaptureBatch: (urls: string[], request: RequestInfo, signal: AbortSignal, names: Record<string, string>) => Promise<CaptureResult & { count: number }>;
   /** A site's sign-in, handed over by the person from their own browser. `signedIn` is false when the cookies held no live session. */
   onAccountCookies: (site: LoginSite, cookies: CapturedCookie[]) => Promise<{ saved: number; signedIn: boolean }>;
   onPaired: () => void;
@@ -297,7 +299,13 @@ class BridgeServer {
         if (!res.writableFinished) abort.abort();
       });
       const urls = [...new Set(body.data.urls.map((u) => u.trim()))];
-      const result = await h.onCaptureBatch(urls, sanitizeRequest(body.data.request as RequestInfo, true), abort.signal);
+      // Names go with their address; control characters and long text are cut, since this is a web page's wording.
+      const names: Record<string, string> = {};
+      body.data.urls.forEach((u, i) => {
+        const n = (body.data.names?.[i] ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+        if (n && !names[u.trim()]) names[u.trim()] = n;
+      });
+      const result = await h.onCaptureBatch(urls, sanitizeRequest(body.data.request as RequestInfo, true), abort.signal, names);
       if (abort.signal.aborted) return;
       return this.json(res, result.accepted ? 202 : 200, result, origin);
     }

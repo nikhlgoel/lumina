@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { MediaInfo, PlaylistEntry, RequestInfo } from '../shared/types';
 import { classifyUrl, cleanUrl, isMusicSite, siteName } from '../core/url';
-import { directApiUrl, isLinkFromPage, isPageHost } from '../core/hosts';
+import { app } from 'electron';
+import { directApiUrl, isBotCheckResponse, isLinkFromPage, isPageHost } from '../core/hosts';
+import { fetchFollowing } from '../core/safeFetch';
 import { fileNameFromUrl } from '../core/batch';
 import { rewriteShareLink } from '../core/pageFiles';
 import { parseStreams, parseSubtitles, type RawFormat } from '../core/streams';
@@ -51,16 +53,13 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
       : { ...base(url, 'BitTorrent'), sourceKind: 'torrent', title: decodeURIComponent(path.basename(new URL(url).pathname)), torrent: { name: '', files: [], infoHash: null }, request };
   }
   if (parseSpotifyUrl(url)) return inspectSpotify(url);
-  const api = directApiUrl(url);
-  if (api) {
-    const direct = await inspectDirect(api, request).catch(() => null);
-    if (direct) return { ...direct, url: api };
-  }
+  const api = directApiUrl(url, !app.isPackaged ? process.env.LUMINA_SELFTEST_DIRECT_API_HOST : undefined);
+  if (api) return { ...(await probeApiLink(api, url, request)), url: api };
   // File hosts: the link is a download page; the real file is fetched when the download starts.
   if (isPageHost(url) && isLinkFromPage(request)) return inspectHosted(url);
   if (kind === 'direct') {
     let unreachable: LinkUnreachable | null = null;
-    const direct = await inspectDirect(url, request).catch((err) => {
+    const direct = await inspectDirect(url, request, false, true).catch((err) => {
       log.debug('Direct probe failed', err);
       if (err instanceof LinkUnreachable) unreachable = err;
       return null;
@@ -84,6 +83,31 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
   }
   const info = await inspectWithYtdlp(url, request, !browserCookiesUnreadable());
   return kind === 'stream' ? { ...info, stream: { protocol: /\.mpd/i.test(url) ? 'dash' : 'hls', encrypted: false }, request } : info;
+}
+
+/**
+ * Read a share link that has a direct address (Pixeldrain). Such hosts drop or refuse a client that asks for many things at once, and a batch
+ * asks for ten: with 10 links, 3 were reported as "Lumina doesn't recognise media on this page", because a reset probe fell through to a
+ * generic reader that cannot know the host. So: a file that is gone says so at once; anything else is asked again a little later, and if the
+ * host still does not answer the link is queued anyway (the download retries by itself) rather than refused.
+ */
+async function probeApiLink(api: string, shared: string, request?: RequestInfo): Promise<MediaInfo> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const info = await inspectDirect(api, request);
+      if (info) return info;
+    } catch (err) {
+      if (err instanceof LinkGone) throw err;
+      log.debug('Direct address did not answer yet', { api, attempt, err: String(err) });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1) + Math.random() * 500));
+  }
+  log.info('The host did not answer the probe; queueing the link and leaving the retries to the download', { api });
+  return {
+    ...base(api, siteName(shared)), sourceKind: 'direct', title: fileNameFromUrl(shared) || 'File',
+    direct: { filename: fileNameFromUrl(shared), sizeBytes: null, resumable: true },
+    notes: ['The host did not answer just now, so the size is not known yet. Lumina will try the download anyway.'],
+  };
 }
 
 function inspectHosted(url: string): MediaInfo {
@@ -119,6 +143,8 @@ async function inspectTorrentFile(file: string): Promise<MediaInfo> {
 
 /** The link was reached (or not) and the answer is final: the file is not there, or the server could not be asked. Not a web page. */
 class LinkUnreachable extends Error {}
+/** The server answered, and the file is gone (404, 410): asking again will not change that. */
+class LinkGone extends LinkUnreachable {}
 
 const MEDIA_OR_FILE =/^(video|audio|application\/(octet-stream|zip|x-|pdf|vnd|gzip|java-archive)|image\/(?!svg))/i;
 
@@ -127,15 +153,15 @@ const MEDIA_OR_FILE =/^(video|audio|application\/(octet-stream|zip|x-|pdf|vnd|gz
  * with the same headers the browser used, if the link came from the extension.
  */
 /** `anyFile`: the link is already known to be a file's own address (a rewritten share link), so any answer that is not a web page is the file. */
-async function inspectDirect(url: string, request?: RequestInfo, anyFile = false): Promise<MediaInfo | null> {
+async function inspectDirect(url: string, request?: RequestInfo, anyFile = false, hostedOnBotCheck = false): Promise<MediaInfo | null> {
+  // Cookies are not put in the headers here: the fetch works out, for each address a redirect leads to, only the cookies that belong to it.
   const headers: Record<string, string> = { 'User-Agent': settings.get().network.userAgent || BROWSER_UA, Range: 'bytes=0-0', ...(request?.headers ?? {}) };
   if (request?.pageUrl && !headers.Referer) headers.Referer = request.pageUrl;
-  if (request?.cookies.length) headers.Cookie = request.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 
   const controller = new AbortController();
   let res: Response;
   try {
-    res = await fetch(url, { method: 'GET', redirect: 'follow', headers, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
+    res = (await fetchFollowing(url, { headers, cookies: request?.cookies, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) })).res;
   } catch (err) {
     // Not an answer of any kind: the server did not respond in time, the name does not resolve, the connection was reset.
     // Node nests the real code: ECONNREFUSED sits on the cause, or on each attempt inside an AggregateError (IPv4 and IPv6 tried).
@@ -145,7 +171,12 @@ async function inspectDirect(url: string, request?: RequestInfo, anyFile = false
   }
   controller.abort(); // we only need the headers
   // A file that is not there is not a download page either; say so now instead of trying to click through it.
-  if (res.status === 404 || res.status === 410) throw new LinkUnreachable(httpStatusMessage(res.status) ?? 'The file wasn’t found on the server.');
+  if (res.status === 404 || res.status === 410) throw new LinkGone(httpStatusMessage(res.status) ?? 'The file wasn’t found on the server.');
+  // A file link that is answered with a bot check is not broken: a person passes the check in Lumina's own page and the file is fetched after,
+  // the way a file host's download page is. It used to end as a plain "refused (403)".
+  if (hostedOnBotCheck && isBotCheckResponse(res.status, (n) => res.headers.get(n))) {
+    return { ...inspectHosted(url), notes: ['This site asks you to pass a quick check first. Lumina opens it in a small window for you, then downloads the file.'] };
+  }
   if (!res.ok && res.status !== 206) return null;
   const type = res.headers.get('content-type') ?? '';
   if (/text\/html|application\/(json|xhtml)/i.test(type)) return null;

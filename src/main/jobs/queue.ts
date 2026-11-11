@@ -13,6 +13,8 @@ import { finishedSummary } from '../../core/jobDisplay';
 import { findActiveDuplicate } from '../../core/jobDedupe';
 import { fetchValidators } from '../resumeProbe';
 import { moveTorrentEntries } from './moveTorrent';
+import { hostOfUrl, looksLikeThrottle } from '../../core/hostBudget';
+import { hostBudgets } from './budgets';
 
 const log = logger('queue');
 
@@ -152,6 +154,10 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
 
   /** Network hiccups and throttling usually clear up; retry those a few times with growing delays. */
   private maybeAutoRetry(job: Job) {
+    // A host that drops or refuses a client with too much open is told about before anything else, retry setting or not: it narrows what
+    // that host is given from now on.
+    const site = job.engine === 'aria2' ? hostOfUrl(job.url) : null;
+    if (site && looksLikeThrottle(job.error?.message)) hostBudgets.noteTrouble(site, Date.now());
     if (!settings.get().downloads.autoRetryFailed || job.engine === 'convert' || job.engine === 'subtitles' || job.engine === 'extract') return;
     const attempts = job.engineState.autoRetries ?? 0;
     const kind = classifyFailure(job.error?.message, job.error?.detail);
@@ -370,6 +376,14 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   schedule() {
     const limit = settings.get().downloads.concurrency;
     const all = [...this.jobs.values()];
+    // How many downloads each host already has running, so a host that cannot take many at once is not given them (core/hostBudget).
+    const now = Date.now();
+    const wanted = { files: limit, connections: Number.MAX_SAFE_INTEGER }; // only the file count is used here; aria2 applies the connections
+    const onHost = new Map<string, number>();
+    for (const j of all) {
+      const h = j.engine === 'aria2' && ACTIVE.includes(j.status) ? hostOfUrl(j.url) : null;
+      if (h) onHost.set(h, (onHost.get(h) ?? 0) + 1);
+    }
     // Browser hand-offs (often many small files) have their own pool so they never stall the main queue.
     let running = all.filter((j) => ACTIVE.includes(j.status) && j.origin !== 'browser' && j.engine !== 'subtitles' && j.engine !== 'convert' && j.engine !== 'extract').length;
     let browserRunning = all.filter((j) => ACTIVE.includes(j.status) && j.origin === 'browser').length;
@@ -388,14 +402,18 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
         if (!busy) this.start(job);
         continue;
       }
+      const site = job.engine === 'aria2' ? hostOfUrl(job.url) : null;
+      if (site && (onHost.get(site) ?? 0) >= hostBudgets.budget(site, wanted, now).files) continue;
       if (job.origin === 'browser') {
         if (browserRunning >= BROWSER_POOL) continue;
         browserRunning++;
+        if (site) onHost.set(site, (onHost.get(site) ?? 0) + 1);
         this.start(job);
         continue;
       }
       if (running >= limit) continue;
       running++;
+      if (site) onHost.set(site, (onHost.get(site) ?? 0) + 1);
       this.start(job);
     }
   }

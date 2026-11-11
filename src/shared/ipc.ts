@@ -511,7 +511,7 @@ export interface EventPayloads {
   'app:mode': { mode: 'downloader' | 'player' };
   'app:open-url': { url: string; request?: RequestInfo; source?: 'extension' | 'clipboard' | 'system' };
   /** Several links the person picked on a page, to be planned together (archive parts, optional extras, checksums). */
-  'app:open-links': { urls: string[]; request?: RequestInfo; source?: 'extension' };
+  'app:open-links': { urls: string[]; request?: RequestInfo; names?: Record<string, string>; source?: 'extension' };
   'app:clipboard-link': { url: string };
   'app:navigate': { view: 'download' | 'queue' | 'library' | 'settings'; section?: string };
   'player:command': PlayerCommand;

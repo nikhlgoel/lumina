@@ -9,7 +9,17 @@ export const PAGE_HOSTS = [
   '1fichier.com', 'turbobit.net', 'hitfile.net', 'uploadhaven.com', 'buzzheavier.com', 'bzzhr.co', 'qiwi.gg', 'fuckingfast.co',
   'filecrypt.cc', 'filedot.to', 'megaup.net', 'upload.ee', 'dailyuploads.net', 'workupload.com', 'sendspace.com', 'uploady.io',
   'up-4ever.net', 'file-upload.org', 'dbree.me', 'anonfiles.me', 'bayfiles.com', 'uploadev.org', 'vikingfile.com', 'akirabox.com',
+  // yt-dlp has no extractor for it (checked in the bundled 2026.10.26: 1755 extractors, none), so its pages go through the download-page flow.
+  'gofile.io',
 ];
+
+/**
+ * Did the server answer with a bot check (a Cloudflare challenge page) instead of the file? Such a link is not broken: a person passes the
+ * check in Lumina's own page, and the file is fetched after. Says nothing about a plain 403, which can mean a real refusal.
+ */
+export function isBotCheckResponse(status: number, header: (name: string) => string | null): boolean {
+  return (status === 403 || status === 503 || status === 429) && /challenge/i.test(header('cf-mitigated') ?? '');
+}
 
 function hostOf(url: string): string | null {
   try {
@@ -34,15 +44,28 @@ export function isPageHost(url: string): boolean {
 export const isLinkFromPage = (request?: { fromLink?: boolean } | null): boolean => !request || request.fromLink === true;
 
 /** Hosts with a public direct-file API: rewrite the share link to the file itself, no page needed. */
-export function directApiUrl(url: string): string | null {
+export function directApiUrl(url: string, devHost?: string): string | null {
   const host = hostOf(url);
   if (!host) return null;
   const path = new URL(url).pathname;
-  if (host === 'pixeldrain.com' || host === 'pixeldra.in') {
+  // `devHost` stands in for Pixeldrain in the self-tests (a local server); it is never set in a packaged build.
+  const standIn = Boolean(devHost) && host === devHost?.toLowerCase();
+  if (host === 'pixeldrain.com' || host === 'pixeldra.in' || standIn) {
     const id = path.match(/^\/(?:u|api\/file)\/([A-Za-z0-9]+)/)?.[1];
-    return id ? `https://pixeldrain.com/api/file/${id}?download` : null;
+    return id ? `${standIn ? new URL(url).origin : 'https://pixeldrain.com'}/api/file/${id}?download` : null;
   }
   return null;
+}
+
+/**
+ * The address a download is queued under. A direct file is read at one address and its page is at another (a Pixeldrain share link is a web
+ * page; the file is at its API address), and the probe returns the one that is the file. Queued under the pasted link, every Pixeldrain
+ * download saved the share page (4 KB of HTML) and failed with "the server sent a web page instead of the file". Only a direct file is
+ * redirected this way: for everything else the address the person gave is the one to keep.
+ */
+export function queueUrlFor(info: { sourceKind: string; url?: string; direct?: { hosted?: boolean } }, pasted: string): string {
+  if (info.sourceKind !== 'direct' || info.direct?.hosted || !info.url || !/^https?:\/\//i.test(info.url)) return pasted;
+  return info.url;
 }
 
 /** "example.co.uk" style registrable domain, close enough to tell a host's own pages from ad redirects. */

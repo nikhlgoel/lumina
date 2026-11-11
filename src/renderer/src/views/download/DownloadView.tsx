@@ -144,7 +144,7 @@ export function DownloadView() {
     if (!batch) return;
     request.current++;
     setInput('');
-    setPhase({ kind: 'batch', plan: planBatch(batch.urls), request: batch.request });
+    setPhase({ kind: 'batch', plan: planBatch(batch.urls, batch.names), request: batch.request });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingBatch]);
 

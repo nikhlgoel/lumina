@@ -16,7 +16,7 @@ vi.mock('../src/main/log', () => ({ logger: () => ({ info: () => undefined, warn
 type Bridge = (typeof import('../src/main/bridge/server'))['bridge'];
 let bridge: Bridge;
 let token = '';
-const batches: { urls: string[]; request: { cookies: { name: string }[]; fromLink?: boolean; pageUrl?: string } }[] = [];
+const batches: { urls: string[]; names: Record<string, string>; request: { cookies: { name: string }[]; fromLink?: boolean; pageUrl?: string } }[] = [];
 const captures: { kind: string; request: { cookies: { name: string }[]; fromLink?: boolean } }[] = [];
 const logins: { site: string; names: string[] }[] = [];
 
@@ -35,7 +35,7 @@ beforeAll(async () => {
   bridge.start({
     window: () => null,
     onCapture: async (c) => { captures.push(c as never); return { accepted: true }; },
-    onCaptureBatch: async (urls, request) => { batches.push({ urls, request: request as never }); return { accepted: true, count: urls.length }; },
+    onCaptureBatch: async (urls, request, _signal, names) => { batches.push({ urls, names, request: request as never }); return { accepted: true, count: urls.length }; },
     onAccountCookies: async (site, cookies) => {
       logins.push({ site, names: cookies.map((c) => c.name) });
       return { saved: cookies.length, signedIn: cookies.some((c) => c.name === 'SID') };
@@ -178,5 +178,27 @@ describe('the extension bridge', () => {
       body: JSON.stringify({ urls: ['https://example.org/a.zip'], request: { headers: {}, cookies: [] } }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('the names a page gives its links', () => {
+  it('arrive with their addresses, cleaned, and an older extension that sends none still works', async () => {
+    const before = batches.length;
+    const named = await call('/v1/capture-batch', {
+      method: 'POST',
+      body: { urls: ['https://pixeldrain.com/u/aaa', 'https://pixeldrain.com/u/bbb', 'https://pixeldrain.com/u/aaa'], names: ['Game.part01.rar', '  Game.part02.rar  ', 'ignored second name'], request: { headers: {}, cookies: [] } },
+    });
+    expect(named.status).toBe(202);
+    expect(batches[before]?.urls).toEqual(['https://pixeldrain.com/u/aaa', 'https://pixeldrain.com/u/bbb']);
+    expect(batches[before]?.names).toEqual({ 'https://pixeldrain.com/u/aaa': 'Game.part01.rar', 'https://pixeldrain.com/u/bbb': 'Game.part02.rar' });
+
+    const unnamed = await call('/v1/capture-batch', { method: 'POST', body: { urls: ['https://a.example/x', 'https://a.example/y'], request: { headers: {}, cookies: [] } } });
+    expect(unnamed.status).toBe(202);
+    expect(batches[before + 1]?.names).toEqual({});
+  });
+
+  it('refuses a name that is far too long instead of passing it on', async () => {
+    const r = await call('/v1/capture-batch', { method: 'POST', body: { urls: ['https://a.example/x'], names: ['x'.repeat(5000)], request: { headers: {}, cookies: [] } } });
+    expect(r.status).toBe(400);
   });
 });

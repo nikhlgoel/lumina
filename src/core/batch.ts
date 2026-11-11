@@ -107,7 +107,17 @@ function missing(parts: number[], firstPart: number): number[] {
   return gaps;
 }
 
-export function planBatch(links: string[]): BatchPlan {
+/** A name a web page gave a link, if it is a file name; otherwise ''. Link text like "Download" or "Mirror 1" is not one. */
+export function nameFromText(text: string | undefined): string {
+  const name = (text ?? '').replace(/[\\/:*?"<>|]/g, ' ').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return name.length <= 200 && /^[^\s].*\.[A-Za-z0-9]{1,6}$/.test(name) && !/\s{2,}/.test(name) ? name : '';
+}
+
+/**
+ * Plan a pasted or picked list of links. `names` is the name each link has on the page it was picked on: used for links whose address
+ * says nothing (a share link such as `pixeldrain.com/u/Ab12Cd34`), so the list reads as files and their parts group into sets.
+ */
+export function planBatch(links: string[], names: Record<string, string> = {}): BatchPlan {
   const groups = new Map<string, BatchGroup>();
   const order: string[] = [];
   let unnamed = 0;
@@ -126,7 +136,7 @@ export function planBatch(links: string[]): BatchPlan {
   for (const url of links) {
     if (seen.has(url)) continue;
     seen.add(url);
-    const filename = fileNameFromUrl(url);
+    const filename = fileNameFromUrl(url) || nameFromText(names[url]);
     if (!filename) unnamed++;
     const optional = OPTIONAL.test(filename);
     const vol = filename ? splitVolume(filename) : null;

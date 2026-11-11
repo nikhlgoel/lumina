@@ -208,7 +208,9 @@ async function renderLinks(tab) {
   send.onclick = async () => {
     send.disabled = true;
     send.textContent = 'Sending…';
-    const r = await chrome.runtime.sendMessage({ type: 'send-links', urls: [...chosen], tabId: tab.id }).catch(() => null);
+    // The name each link has on the page ("Game.part01.rar"), so Lumina can show and group files that are named by their address alone.
+    const names = Object.fromEntries(links.filter((l) => chosen.has(l.url) && l.text).map((l) => [l.url, l.text]));
+    const r = await chrome.runtime.sendMessage({ type: 'send-links', urls: [...chosen], names, tabId: tab.id }).catch(() => null);
     if (r?.accepted) {
       send.textContent = 'Sent to Lumina ✓';
       setTimeout(() => window.close(), 900);

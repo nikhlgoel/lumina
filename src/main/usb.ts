@@ -23,6 +23,7 @@ import { factsOf, probe } from './media/probe';
 import { convertAudio, transcodeTvSafe } from './media/ffmpeg';
 import { TV_PROFILE, isTvSafe } from '../core/tvSafe';
 import { afterScan, backoffMs, describeSpawnFailure, initialDriveScan, parseFsutilDrives, shouldScan } from '../core/driveWatch';
+import { kindOfEntry } from './fsEntry';
 
 const execFileAsync = promisify(execFile);
 const log = logger('usb');
@@ -234,8 +235,9 @@ function existingOnDrive(root: string): Record<string, number> {
     }
     for (const e of entries) {
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full, depth + 1);
-      else if (e.isFile()) {
+      const kind = kindOfEntry(dir, e);
+      if (kind === 'dir') walk(full, depth + 1);
+      else if (kind === 'file') {
         try {
           out[path.relative(root, full).split(path.sep).join('/')] = fs.statSync(full).size;
         } catch {
@@ -420,8 +422,9 @@ function writeDrivePlaylists(root: string) {
       }
       for (const e of entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
         const full = path.join(d, e.name);
-        if (e.isDirectory()) walk(full, depth + 1);
-        else if (e.isFile() && mediaKindOf(full)) found.push(path.relative(base, full).split(path.sep).join('/'));
+        const kind = kindOfEntry(d, e);
+        if (kind === 'dir') walk(full, depth + 1);
+        else if (kind === 'file' && mediaKindOf(full)) found.push(path.relative(base, full).split(path.sep).join('/'));
       }
     };
     walk(dir, 0);
@@ -450,8 +453,9 @@ export function scanDriveForImport(root: string): { path: string; name: string; 
     }
     for (const e of entries) {
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full, depth + 1);
-      else if (e.isFile() && mediaKindOf(full)) {
+      const kind = kindOfEntry(dir, e);
+      if (kind === 'dir') walk(full, depth + 1);
+      else if (kind === 'file' && mediaKindOf(full)) {
         try {
           found.push({ path: full, name: e.name, sizeBytes: fs.statSync(full).size });
         } catch {

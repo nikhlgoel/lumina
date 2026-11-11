@@ -15,6 +15,7 @@ import { database, transaction } from './db';
 import { settings } from './settings';
 import { probe } from './media/probe';
 import { logger } from './log';
+import { kindOfEntry } from './fsEntry';
 
 const log = logger('library');
 const SKIP_DIRS = new Set(['node_modules', '$recycle.bin', 'system volume information', '.git', '.cache', 'appdata', '.trash']);
@@ -150,11 +151,12 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
       for (const e of entries) {
         if (out.length >= limit) return;
         const full = path.join(dir, e.name);
-        if (e.isDirectory()) {
+        const kind = kindOfEntry(dir, e);
+        if (kind === 'dir') {
           if (!SKIP_DIRS.has(e.name.toLowerCase())) walk(full, depth + 1);
           continue;
         }
-        if (!e.isFile()) continue;
+        if (kind !== 'file') continue;
         // Music and video have their own tabs; part-files and later archive volumes are noise.
         if (mediaKindOf(full) || isDownloaderArtifact(e.name) || isTrailingVolume(e.name)) continue;
         try {
@@ -387,8 +389,17 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
       .run(path.resolve(p), positionSec, Date.now());
   }
 
-  private walk(dir: string, root: string, depth: number, media: { file: string; kind: MediaKind; root: string }[], playlists: string[], folders: Map<string, { audio: string[]; video: string[] }>) {
+  private walk(dir: string, root: string, depth: number, media: { file: string; kind: MediaKind; root: string }[], playlists: string[], folders: Map<string, { audio: string[]; video: string[] }>, visited = new Set<string>()) {
     if (depth > MAX_DEPTH) return;
+    // A folder reached through a link may lead back up the tree: each real folder is walked once.
+    let real = dir;
+    try {
+      real = fs.realpathSync(dir);
+    } catch {
+      // keep the name as given
+    }
+    if (visited.has(real.toLowerCase())) return;
+    visited.add(real.toLowerCase());
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -398,11 +409,12 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
     for (const e of entries) {
       if (e.name.startsWith('.')) continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name.toLowerCase())) this.walk(full, root, depth + 1, media, playlists, folders);
+      const type = kindOfEntry(dir, e);
+      if (type === 'dir') {
+        if (!SKIP_DIRS.has(e.name.toLowerCase())) this.walk(full, root, depth + 1, media, playlists, folders, visited);
         continue;
       }
-      if (!e.isFile()) continue;
+      if (type !== 'file') continue;
       const ext = path.extname(e.name).toLowerCase();
       if (PLAYLIST_EXT.has(ext)) {
         playlists.push(full);

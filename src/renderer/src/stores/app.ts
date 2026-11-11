@@ -25,6 +25,8 @@ export interface PendingLink {
 export interface PendingBatch {
   urls: string[];
   request?: RequestInfo;
+  /** The name each link has on the page it was picked on, for links whose address says nothing. */
+  names?: Record<string, string>;
 }
 
 interface AppState {
@@ -91,8 +93,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().setMode('downloader');
       get().setView('download');
     });
-    on('app:open-links', ({ urls, request }) => {
-      set({ pendingBatch: { urls, request }, clipboardLink: null });
+    on('app:open-links', ({ urls, request, names }) => {
+      set({ pendingBatch: { urls, request, names }, clipboardLink: null });
       get().setMode('downloader');
       get().setView('download');
     });

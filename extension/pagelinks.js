@@ -130,7 +130,14 @@
         if (!raw) continue;
         try { candidates.push({ href: new URL(raw, location.href).href, text: labelFor(el, el.textContent) }); } catch { /* not an address */ }
       }
-      for (const el of document.querySelectorAll('[data-links]')) candidates.push(...fromJsonList(el.getAttribute('data-links'), location.href));
+      // Hoster pages keep a list of links per host as JSON in a data attribute; the name varies, so look at them all.
+      let seen = 0;
+      for (const el of document.querySelectorAll('*')) {
+        if (++seen > 20000) break;
+        for (const attr of el.attributes) {
+          if (attr.name.startsWith('data-') && attr.value.charCodeAt(0) === 91 && attr.value.length > 20 && attr.value.length < 400000) candidates.push(...fromJsonList(attr.value, location.href));
+        }
+      }
     }
     if (selectionOnly && sel && !sel.isCollapsed) for (const u of textLinks(sel.toString())) candidates.push({ href: u, text: '' });
     return pick(candidates, { chosen: selectionOnly });

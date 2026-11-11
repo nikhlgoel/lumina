@@ -198,7 +198,7 @@ export function Sidebar() {
       {/* Brand — divided from the pages below so the app mark reads as a header, not a nav item. */}
       {/* The collapse toggle lives up here beside the brand, where people look for it — it used to sit
           at the very bottom of the sidebar, under the library stats, and was easy to miss. */}
-      <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center border-b border-line', collapsed ? 'justify-center px-0' : 'gap-2 px-4', isMac && !collapsed && 'pl-[84px]')}>
+      <div className={cn('drag flex h-[var(--titlebar)] shrink-0 items-center border-b border-line', collapsed ? 'justify-center px-0' : 'gap-2 pl-5 pr-2', isMac && !collapsed && 'pl-[84px]')}>
         {!collapsed && !isMac && <Brand collapsed={false} />}
         <button
           onClick={toggleCollapsed}

@@ -29,6 +29,8 @@ import { logger } from '../log';
 import { verifyDownload } from './verify';
 import { resolveHostedLink } from '../hosters';
 import type { Runner } from './queue';
+import { hostOfUrl } from '../../core/hostBudget';
+import { hostBudgets } from './budgets';
 
 const log = logger('aria2');
 
@@ -829,6 +831,18 @@ export const aria2Runner: Runner = (ctx) => {
       url = resolved.url;
       req = resolved.request;
       if (!job.source.direct.filename && resolved.filename) opts.out = uniqueName(dir, resolved.filename.replace(/[\\/:*?"<>|]/g, '_'));
+    }
+
+    // A host that drops a client with too many connections open is given fewer, for the host the link names and for the one the file is on.
+    {
+      const wanted = { files: 1, connections: settings.get().network.connectionsPerServer };
+      const now = Date.now();
+      const n = Math.min(hostBudgets.budget(hostOfUrl(job.url), wanted, now).connections, hostBudgets.budget(hostOfUrl(url), wanted, now).connections);
+      if (n < wanted.connections) {
+        opts['max-connection-per-server'] = String(n);
+        opts.split = String(n);
+        log.info(`Limiting connections to ${n} for ${hostOfUrl(url) ?? 'this host'}`);
+      }
     }
 
     // Same request the browser made: headers, referer and cookies from the extension or the download page.

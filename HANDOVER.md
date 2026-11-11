@@ -36,6 +36,15 @@ all passing · `vite build` · extension e2e 38/38 in real headless Chrome · be
 download. **Not proven:** the range-refusal retry end to end (the fatal case did not reproduce locally), yt-dlp with a real private video,
 Firefox, any real file host. (The note here that reusing a solved check was forbidden by rule 1 is superseded: the owner loosened rules 1
 and 2 in AGENTS.md, and session 58 built it.) Nothing was committed or released.
+**Also 2026-11-11 (session 59): the owner's first live test** (SESSION-LOG 59). Found and fixed: every Pixeldrain download saved the share
+page (the queue got the pasted link, not the file address; `core/hosts.ts queueUrlFor`); Pixeldrain drops clients with many connections
+(`core/hostBudget.ts`: one file, four connections); FileDitch's file links sit behind a Cloudflare check (now routed through the quick check, and
+a bug where the solved check was not remembered when the file started at once); Gofile has no yt-dlp extractor (now a page host); the browser's
+link names now reach the batch screen; a music folder of Windows link-type files was invisible to the Library (`core/walkEntry.ts`); redirects no
+longer carry cookies to other sites (`core/safeFetch.ts`); the sidebar brand row is aligned; self-tests never show windows or notifications.
+Installed on the owner's laptop (same version 1.2.1; installed `app.asar` hash equals the tested build's). **Not proven live:** Pixeldrain,
+FileDitch, Gofile downloads (stand-ins and measurements only), the budget numbers, the extension's names through a real browser, and what the
+owner meant by the logo placement beyond the alignment fixed. Commit 6bc4348 and a324882 are local, **not pushed**; this round is uncommitted.
 **Also 2026-11-10 (session 58): rules loosened; hoster pages' hidden mirrors; solve once, reuse for the site** (SESSION-LOG 58). The owner's
 own link was read (200, no check): the page keeps 5 hosts' lists in `data-links` JSON, which the extension and `extractFileLinks` now read
 (`core/pageFiles.ts embeddedLinkLists`, `extension/pagelinks.js fromJsonList`; entries the page flags `is_dangerous` are skipped). A check the

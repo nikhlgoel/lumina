@@ -146,14 +146,14 @@ async function linksIn(tabId, selectionOnly) {
  * confirms once. A Lumina older than the batch request gets them one at a time, as before.
  * Resolves { accepted, count, reason }.
  */
-async function sendLinks(urls, tab) {
+async function sendLinks(urls, tab, names = {}) {
   const pageUrl = tab?.url;
   const pageTitle = tab?.title;
   if (urls.length === 1) {
     const r = await capture({ url: urls[0], kind: 'link', pageUrl, pageTitle, headers: recent.get(urls[0])?.headers });
     return { accepted: r.accepted, count: r.accepted ? 1 : 0, reason: r.reason };
   }
-  const batch = await captureBatch({ urls, pageUrl, pageTitle });
+  const batch = await captureBatch({ urls, names, pageUrl, pageTitle });
   if (!batch.unsupported) return batch;
   let sent = 0;
   for (const url of urls) {
@@ -178,7 +178,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       flag(selectionOnly ? 'No download links in the selection.' : 'No download links found on this page.');
       return;
     }
-    const r = await sendLinks(links.map((l) => l.url), tab);
+    const r = await sendLinks(links.map((l) => l.url), tab, Object.fromEntries(links.filter((l) => l.text).map((l) => [l.url, l.text])));
     flag(r.accepted ? `Sent ${r.count} link${r.count === 1 ? '' : 's'} to Lumina.` : (r.reason || 'Lumina isn’t connected. Open Lumina, then try again.'));
     return;
   }
@@ -318,7 +318,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       return false;
     }
     const tab = msg.tabId ? chrome.tabs.get(msg.tabId) : Promise.resolve(sender.tab);
-    tab.then((t) => sendLinks(urls, t)).then(reply, () => reply({ accepted: false, count: 0, reason: 'Couldn’t send the links' }));
+    const names = msg.names && typeof msg.names === 'object' ? msg.names : {};
+    tab.then((t) => sendLinks(urls, t, names)).then(reply, () => reply({ accepted: false, count: 0, reason: 'Couldn’t send the links' }));
     return true;
   }
   // How many links are highlighted now: the right-click item says so.

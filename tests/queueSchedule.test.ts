@@ -32,6 +32,11 @@ beforeAll(async () => {
   state.base = fs.mkdtempSync(path.join(os.tmpdir(), 'lumina-queue-'));
   vi.spyOn(Date, 'now').mockImplementation(() => (clock += 5)); // distinct creation times, so the order is the order added
   ({ queue } = await import('../src/main/jobs/queue'));
+  queue.register('aria2', (ctx) => {
+    const url = ctx.job().url;
+    starts.set(url, (starts.get(url) ?? 0) + 1);
+    return { stop: () => undefined };
+  });
   queue.register('ytdlp', (ctx) => {
     const url = ctx.job().url;
     starts.set(url, (starts.get(url) ?? 0) + 1);
@@ -94,5 +99,37 @@ describe('the same download sent twice', () => {
     queue.cancel(first.id);
     const third = queue.add(input('https://x.test/twice'));
     expect(third.id).not.toBe(first.id);
+  });
+});
+
+describe('hosts that cannot take many downloads at once', () => {
+  const aria = (url: string) => ({ ...input(url), engine: 'aria2' as const });
+
+  it('start one file at a time from Pixeldrain, however many are queued and however much room there is', () => {
+    state.concurrency = 0;
+    const urls = ['a', 'b', 'c', 'd'].map((n) => `https://pixeldrain.com/api/file/${n}?download`);
+    for (const u of urls) queue.add(aria(u));
+    state.concurrency = 50;
+    queue.schedule();
+    expect(urls.filter((u) => starts.get(u) === 1)).toEqual([urls[0]]);
+    expect(queue.list().filter((j) => j.url.startsWith('https://pixeldrain.com') && j.status === 'queued')).toHaveLength(3);
+  });
+
+  it('start the next one from that host as soon as the one running is over', () => {
+    const running = queue.list().find((j) => j.url.startsWith('https://pixeldrain.com') && j.status === 'running');
+    expect(running).toBeDefined();
+    queue.cancel(running!.id);
+    queue.schedule();
+    const nowRunning = queue.list().filter((j) => j.url.startsWith('https://pixeldrain.com') && j.status === 'running');
+    expect(nowRunning).toHaveLength(1);
+  });
+
+  it('leave every other host on the person’s own limit', () => {
+    state.concurrency = 0;
+    const urls = ['a', 'b', 'c'].map((n) => `https://files.example.org/${n}.bin`);
+    for (const u of urls) queue.add(aria(u));
+    state.concurrency = 80;
+    queue.schedule();
+    expect(urls.every((u) => starts.get(u) === 1)).toBe(true);
   });
 });

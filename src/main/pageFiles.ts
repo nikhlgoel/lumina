@@ -1,6 +1,6 @@
 import type { RequestInfo } from '../shared/types';
 import { extractFileLinks, githubAssets, githubReleaseApi, githubReleaseRef, isDirectoryIndex, type PageFile } from '../core/pageFiles';
-import { cookieHeaderFor } from '../core/cookies';
+import { fetchFollowing } from '../core/safeFetch';
 import { settings } from './settings';
 import { logger } from './log';
 
@@ -20,35 +20,17 @@ export interface PageFilesResult {
 /** Headers worth passing on when reading a page. Not `authorization` or the like: the link may point at a host that is not the one they belong to. */
 const PASS_ON = new Set(['user-agent', 'accept-language', 'referer']);
 
-/** What to send to `url`: the cookies that belong to that address only, never the whole jar the extension collected for a different site. */
-const headersFor = (url: string, request?: RequestInfo, accept = 'text/html,application/xhtml+xml'): Record<string, string> => {
+/** What to send first: the safe headers. Cookies are worked out per address by the fetch itself, so none are put here. */
+const headersFor = (request?: RequestInfo, accept = 'text/html,application/xhtml+xml'): Record<string, string> => {
   const h: Record<string, string> = { 'User-Agent': settings.get().network.userAgent || BROWSER_UA, Accept: accept };
   for (const [k, v] of Object.entries(request?.headers ?? {})) if (PASS_ON.has(k.toLowerCase()) && !/[\r\n]/.test(v)) h[k] = v;
   if (request?.pageUrl && !Object.keys(h).some((k) => k.toLowerCase() === 'referer')) h.Referer = request.pageUrl;
-  const cookie = request?.cookies?.length ? cookieHeaderFor(url, request.cookies) : '';
-  if (cookie) h.Cookie = cookie;
   return h;
 };
 
-const MAX_HOPS = 5;
-
-/** A GET that follows redirects itself, so each hop gets only its own cookies (a redirect to another site must not carry this site's). */
-async function getFollowing(start: string, request: RequestInfo | undefined, accept?: string): Promise<{ res: Response; finalUrl: string }> {
-  let current = start;
-  for (let hop = 0; ; hop++) {
-    const res = await fetch(current, { redirect: 'manual', headers: headersFor(current, request, accept), signal: AbortSignal.timeout(15_000) });
-    const where = res.headers.get('location');
-    if (res.status >= 300 && res.status < 400 && where) {
-      void res.body?.cancel();
-      if (hop >= MAX_HOPS) throw new Error('Too many redirects');
-      const next = new URL(where, current);
-      if (!/^https?:$/.test(next.protocol)) throw new Error('Redirect to a non-web address');
-      current = next.toString();
-      continue;
-    }
-    return { res, finalUrl: current };
-  }
-}
+/** A GET that follows redirects itself, so each hop gets only its own cookies and never a private address from a public one. */
+const getFollowing = (start: string, request: RequestInfo | undefined, accept?: string) =>
+  fetchFollowing(start, { headers: headersFor(request, accept), cookies: request?.cookies, signal: AbortSignal.timeout(15_000) });
 
 /** The text of a page, or null when it is not a web page or is too big. Reads at most MAX_PAGE_BYTES. */
 async function readPage(url: string, request?: RequestInfo): Promise<{ html: string; finalUrl: string } | null> {

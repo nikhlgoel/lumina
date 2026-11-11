@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { queueUrlFor } from '../core/hosts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -218,7 +219,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'jobs:add': ({ url, info, options }: { url: string; info: MediaInfo; options: DownloadOptions }) => {
     if (!info || typeof info !== 'object' || typeof info.sourceKind !== 'string') throw new Error('Inspect the link before downloading.');
     const format = applyFormatPreferences(options.format, settings.get().formats);
-    return queue.addFromInfo(url, info, { ...options, format }, options.targetDir || outputDirFor(info, options.contentType));
+    return queue.addFromInfo(queueUrlFor(info, url), info, { ...options, format }, options.targetDir || outputDirFor(info, options.contentType));
   },
   'jobs:pause': ({ id }: { id: string }) => queue.pause(id),
   'jobs:resume': ({ id }: { id: string }) => queue.resume(id),
