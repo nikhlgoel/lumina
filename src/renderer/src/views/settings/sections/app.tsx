@@ -174,6 +174,14 @@ export function PlayerSection({ s, set }: SectionProps) {
           <Switch label="Keyboard hints" checked={p.showKeyboardHints} onChange={(v) => set({ player: { showKeyboardHints: v } })} />
         </Row>
       </Group>
+      <Group title="Sound" description="How music and video sound. The player’s Sound button has the same switches, plus the equalizer and the output device.">
+        <Row id="bestSound" label="Best sound" description="Clear and a little louder than usual, without distortion: loudness matched a little above streaming level, a gentle clarity curve, and a limiter so nothing clips. Your own equalizer choice replaces the curve.">
+          <Switch label="Best sound" checked={p.bestSound} onChange={(v) => set({ player: { bestSound: v } })} />
+        </Row>
+        <Row id="normalize" label="Match the volume of every track" description="Quiet songs come up and loud ones come down, so you do not reach for the volume between tracks.">
+          <Switch label="Match the volume of every track" checked={p.normalizeLoudness} onChange={(v) => set({ player: { normalizeLoudness: v } })} />
+        </Row>
+      </Group>
       <Group title="Playback">
         <Row id="openOnPlay" label="Open the full player when playing from the library" description="Off keeps you in the library with the mini player at the bottom.">
           <Switch label="Open player on play" checked={p.openPlayerOnPlay} onChange={(v) => set({ player: { openPlayerOnPlay: v } })} />

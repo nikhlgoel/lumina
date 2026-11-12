@@ -85,7 +85,10 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
           database().prepare('DELETE FROM jobs WHERE id = ?').run(job.id);
           continue;
         }
-        if (ACTIVE.includes(job.status)) {
+        // A job that was waiting for the network, or for the timer of a retry, has no timer after a restart: it would say "waiting" for ever.
+        const waitedOnATimer = job.status === 'failed' && (job.progress?.activity === 'waiting' || /^Retrying in /.test(job.progress?.stage ?? ''));
+        if (waitedOnATimer) job.error = null;
+        if (ACTIVE.includes(job.status) || waitedOnATimer) {
           job.status = resume ? 'queued' : 'paused';
           job.progress = { ...job.progress, speedBps: null, etaSec: null, stage: resume ? 'Waiting to resume' : 'Paused when Lumina closed' };
         }
@@ -125,6 +128,9 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     };
     this.jobs.set(job.id, job);
     this.save(job, true);
+    // Tell the window about the job now. Without this a job that has to wait its turn is invisible until it starts: twelve links sent at
+    // once showed as "3 files" because only the three that began downloading had ever been announced.
+    this.emit('updated', job);
     // Browser hand-offs must start immediately: the browser is paused, waiting for an answer.
     if (opts.startNow) this.start(job);
     else this.schedule();
@@ -192,7 +198,8 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     const w = this.netWaiters.get(job.id) ?? { since: Date.now(), attempt: 0, timer: null };
     if (waitedTooLong(w.since, Date.now())) {
       this.netWaiters.delete(job.id);
-      this.set(job, { error: { message: 'Gave up waiting for the network after 6 hours. Press Retry to resume.', detail: job.error?.detail } });
+      this.set(job, { error: { message: 'Gave up waiting for the network after 6 hours. Press Retry to resume.', detail: job.error?.detail }, progress: { ...job.progress, activity: null, stage: 'Failed' } });
+      this.announce('failed', this.jobs.get(job.id)!);
       return;
     }
     const delay = nextProbeDelayMs(w.attempt++);
@@ -240,7 +247,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   pause(id: string) {
     const job = this.jobs.get(id);
     if (!job) return;
-    if (ACTIVE.includes(job.status)) this.handles.get(id)?.stop('pause');
+    if (ACTIVE.includes(job.status)) void Promise.resolve(this.handles.get(id)?.stop('pause')).catch((err) => log.warn('Pausing a download failed to stop its engine', { job: job.title, err: String(err) }));
     if (job.status === 'queued' || ACTIVE.includes(job.status)) {
       this.handles.delete(id);
       this.set(job, { status: 'paused', progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Paused' } });
@@ -298,7 +305,12 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
 
   cancel(id: string) {
     const job = this.jobs.get(id);
-    if (!job || FINISHED.includes(job.status) || this.cancelling.has(id)) return;
+    // A download waiting for the network, or for the timer of a retry, is "failed" underneath but is going to start again by itself: cancelling it
+    // is the way to say it should not. Ignoring it left it on the batch row for ever, looking like a failure.
+    const waiting = job?.status === 'failed' && (this.netWaiters.has(id) || this.retryTimers.has(id));
+    if (!job || (FINISHED.includes(job.status) && !waiting) || this.cancelling.has(id)) return;
+    clearTimeout(this.retryTimers.get(id));
+    this.retryTimers.delete(id);
     const stopping = this.handles.get(id)?.stop('cancel');
     this.handles.delete(id);
     this.clearNetWait(id);
@@ -306,8 +318,8 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     const finish = () => {
       this.cancelling.delete(id);
       const current = this.jobs.get(id);
-      if (current && !FINISHED.includes(current.status)) {
-        this.set(current, { status: 'cancelled', progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Cancelled' } });
+      if (current && (!FINISHED.includes(current.status) || waiting)) {
+        this.set(current, { status: 'cancelled', error: null, progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Cancelled', activity: null } });
       }
       this.schedule();
     };
@@ -322,10 +334,25 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
   }
 
   private cancelling = new Set<string>();
+  /** The run each job is on now (see isCurrent in start). */
+  private runs = new Map<string, symbol>();
+
+  /**
+   * Tell the listeners a job finished or failed. A listener that throws (a notification, the library, the release assembler) must not stop the
+   * queue: the throw used to skip the `schedule()` after it, so nothing waiting ever started, and reached the engine's poll as if the engine had broken.
+   */
+  private announce(event: 'completed' | 'failed', job: Job) {
+    try {
+      this.emit(event, job);
+    } catch (err) {
+      log.error(`A listener for "${event}" threw for ${job.title}`, err);
+    }
+  }
 
   retry(id: string) {
     const job = this.jobs.get(id);
-    if (!job || !['failed', 'cancelled'].includes(job.status)) return;
+    // A finished playlist that lost items can be retried too: it fetches just those (engineState.failedItems).
+    if (!job || !(['failed', 'cancelled'].includes(job.status) || (job.status === 'completed' && (job.engineState.failedItems?.length ?? 0) > 0))) return;
     clearTimeout(this.retryTimers.get(id));
     this.retryTimers.delete(id);
     this.clearNetWait(id);
@@ -341,6 +368,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
     this.retryTimers.delete(id);
     this.clearNetWait(id);
     this.jobs.delete(id);
+    this.runs.delete(id);
     database().prepare('DELETE FROM jobs WHERE id = ?').run(id);
     this.emit('removed', id);
   }
@@ -441,13 +469,17 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
         status: 'failed', error: { message: 'Lumina can’t write to its working folder. Check that the disk has room, then press Retry.', detail: reason },
         progress: { ...job.progress, speedBps: null, etaSec: null, stage: 'Failed' },
       });
-      this.emit('failed', this.jobs.get(job.id)!);
+      this.announce('failed', this.jobs.get(job.id)!);
       return;
     }
     this.set(job, { status: 'running', error: null, progress: { ...job.progress, stage: 'Starting' } });
 
     // A job being cancelled still has its old status for a moment; nothing the old run says may count.
-    const isCurrent = () => !this.cancelling.has(job.id) && (this.jobs.get(job.id)?.status === 'running' || this.jobs.get(job.id)?.status === 'processing');
+    // Each run has its own identity: pause, then Resume, starts a second run, and the first one may still be winding down. What it says late
+    // (progress, "finished", "failed") must not land on the job the second run is now doing.
+    const run = Symbol(job.id);
+    this.runs.set(job.id, run);
+    const isCurrent = () => this.runs.get(job.id) === run && !this.cancelling.has(job.id) && (this.jobs.get(job.id)?.status === 'running' || this.jobs.get(job.id)?.status === 'processing');
     const ctx: RunnerContext = {
       workDir,
       job: () => this.jobs.get(job.id) ?? job,
@@ -478,7 +510,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
           status: 'completed', source, summary: finishedSummary(sizeOnDisk(current.outputPaths), tookMs),
           progress: { ...current.progress, percent: 100, speedBps: null, etaSec: 0, stage: 'Done', activity: null, connections: null },
         });
-        this.emit('completed', this.jobs.get(job.id)!);
+        this.announce('completed', this.jobs.get(job.id)!);
         this.schedule();
       },
       fail: (rawMessage, rawDetail) => {
@@ -493,7 +525,7 @@ class JobQueue extends EventEmitter<{ updated: [Job]; removed: [string]; complet
         this.set(current, { status: 'failed', error: { message, detail }, progress: { ...current.progress, speedBps: null, etaSec: null, stage: 'Failed' } });
         // Decide on a retry first, so the failure listener can tell a job that will start again by itself.
         this.maybeAutoRetry(this.jobs.get(job.id)!);
-        this.emit('failed', this.jobs.get(job.id)!);
+        this.announce('failed', this.jobs.get(job.id)!);
         this.schedule();
       },
     };

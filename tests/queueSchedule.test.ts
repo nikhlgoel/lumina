@@ -102,6 +102,19 @@ describe('the same download sent twice', () => {
   });
 });
 
+describe('telling the window about a new download', () => {
+  it('announces a job the moment it is added, even one that has to wait its turn (a batch of 12 once showed as 3)', () => {
+    state.concurrency = 0;
+    const seen: string[] = [];
+    const listener = (job: { id: string }) => seen.push(job.id);
+    queue.on('updated', listener);
+    const added = ['p1', 'p2', 'p3'].map((n) => queue.add(input(`https://x.test/announce-${n}`)));
+    queue.off('updated', listener);
+    expect(added.every((j) => j.status === 'queued')).toBe(true);
+    expect(seen).toEqual(added.map((j) => j.id));
+  });
+});
+
 describe('hosts that cannot take many downloads at once', () => {
   const aria = (url: string) => ({ ...input(url), engine: 'aria2' as const });
 

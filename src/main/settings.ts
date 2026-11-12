@@ -29,9 +29,16 @@ class SettingsStore extends EventEmitter<{ changed: [Settings] }> {
       // A byte-order mark (Notepad and PowerShell add one when saving "UTF-8") made JSON.parse fail, and the whole file was then
       // thrown away for defaults without a word. Skip it.
       const raw = fs.existsSync(settingsFile()) ? JSON.parse(fs.readFileSync(settingsFile(), 'utf8').replace(/^﻿/, '')) : {};
-      this.current = withOsDefaults(settingsSchema.parse(raw));
+      // A file that holds `null`, a number or a list is not settings either.
+      this.current = withOsDefaults(settingsSchema.parse(raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}));
     } catch (err) {
       log.warn('Settings file unreadable; using defaults', err);
+      // The next change saves over the file; keep what was there so it can be repaired by hand rather than lost.
+      try {
+        if (fs.existsSync(settingsFile())) fs.copyFileSync(settingsFile(), `${settingsFile()}.unreadable`);
+      } catch (copyErr) {
+        log.warn('Could not keep a copy of the unreadable settings file', copyErr);
+      }
       this.current = withOsDefaults(settingsSchema.parse({}));
     }
     return this.current;

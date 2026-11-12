@@ -44,11 +44,11 @@ const ALL_SECTIONS: SectionDef[] = [
     ['editorThemeAuto', 'Editor theme', 'code editor terminal colours colors syntax highlighting vs code vscode theme import vsix monaco xterm'],
   ] },
   { id: 'player', label: 'Player', icon: <Music2 />, group: 'App', component: PlayerSection, index: [
-    ['effects', 'Background motion', 'aurora vinyl pocket theme'], ['hints', 'Keyboard hints'], ['openOnPlay', 'Open the full player when playing'],
+    ['bestSound', 'Best sound', 'audio quality clear louder loudness equalizer limiter clarity'], ['normalize', 'Match the volume of every track', 'loudness normalize lufs'], ['effects', 'Background motion', 'aurora vinyl pocket theme'], ['hints', 'Keyboard hints'], ['openOnPlay', 'Open the full player when playing'],
     ['resume', 'Continue long videos where you left off', 'resume position'], ['autoLyrics', 'Open lyrics automatically'], ['lyricsSize', 'Lyrics size'],
   ] },
   { id: 'downloads', label: 'Downloads', icon: <Download />, group: 'Downloading', component: DownloadsSection, index: [
-    ['presetMusic', 'Default music format', 'quality mp3 flac'], ['presetVideo', 'Default video format', 'quality 4k 1080p'], ['concurrency', 'Downloads at the same time', 'parallel simultaneous'],
+    ['presetMusic', 'Default music format', 'quality mp3 flac'], ['presetSeries', 'Default series format', 'tv show episodes quality'], ['networks', 'Network connections to use', 'wifi ethernet adapter bind lines'], ['sponsorCategories', 'Which sponsor segments to skip', 'sponsorblock intro outro'], ['presetVideo', 'Default video format', 'quality 4k 1080p'], ['concurrency', 'Downloads at the same time', 'parallel simultaneous'],
     ['fragments', 'Parallel pieces per video', 'speed fragments'], ['connections', 'Connections per file', 'speed aria2'], ['accelerate', 'Faster downloads (multi-connection)', 'speed aria2 slow kb'], ['speedLimit', 'Speed limit', 'bandwidth throttle'],
     ['speedSchedule', 'Only limit during these hours', 'schedule'], ['retries', 'Retries on network errors'], ['autoRetry', 'Try failed downloads again later'],
     ['preventSleep', 'Keep the computer awake'], ['filename', 'File name', 'template naming'], ['musicLayout', 'Organize music', 'artist album folders'],
@@ -64,20 +64,20 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: 'subtitles', label: 'Subtitles', icon: <Captions />, group: 'Downloading', component: SubtitlesSection, index: [
     ['localAi', 'On-device AI', 'whisper model ram memory gpu offline speech'],
     ['aiModels', 'Models on this PC', 'whisper disk space remove ram'],
-    ['subFont', 'Subtitle font'], ['subSize', 'Subtitle size'], ['subColor', 'Subtitle text color'], ['subBackground', 'Subtitle readability', 'outline box shadow'],
+    ['subFont', 'Subtitle font'], ['subOpacity', 'Subtitle background strength', 'box opacity'], ['subBold', 'Bold subtitles'], ['subSize', 'Subtitle size'], ['subColor', 'Subtitle text color'], ['subBackground', 'Subtitle readability', 'outline box shadow'],
     ['subPosition', 'Subtitle position'], ['subDefault', 'English subtitles for every video', 'captions'], ['subAuto', 'Auto-generated captions'],
     ['subOutput', 'Save subtitles as', 'burn embed srt'], ['whisperModel', 'Speech model', 'whisper generate'], ['whisperGpu', 'Use the graphics card for subtitles'],
   ] },
   { id: 'torrents', label: 'Torrents', icon: <Magnet />, group: 'Downloading', component: TorrentsSection, index: [
-    ['maxPeers', 'Peers per torrent'], ['uploadLimit', 'Upload limit'], ['trackers', 'Public tracker list'], ['dht', 'DHT'],
-    ['seedRatio', 'Keep sharing until ratio', 'seed'], ['seedMinutes', 'Seeding time'], ['torrentPort', 'Torrent listening port'], ['encryption', 'Only connect with encryption'],
+    ['maxPeers', 'Connections per torrent', 'peers'], ['uploadLimit', 'Upload limit'], ['trackers', 'Public tracker list'], ['dht', 'DHT'],
+    ['seedRatio', 'After a download finishes', 'seed sharing ratio upload'], ['seedMinutes', 'Seeding time'], ['torrentPort', 'Torrent listening port'], ['encryption', 'Only connect with encryption'],
   ] },
   { id: 'storage', label: 'Storage & library', icon: <HardDrive />, group: 'Places', component: StorageSection, index: [
-    ['musicDir', 'Music folder', 'location path'], ['videoDir', 'Videos folder'], ['otherDir', 'Files and torrents folder'], ['tempDir', 'Work-in-progress folder', 'temp'],
+    ['musicDir', 'Music folder', 'location path'], ['seriesDir', 'Series folder', 'tv shows episodes location'], ['videoDir', 'Videos folder'], ['otherDir', 'Files and torrents folder'], ['tempDir', 'Work-in-progress folder', 'temp'],
     ['addLibrary', 'Add a library folder'], ['watch', 'Watch folders for changes'], ['minAudio', 'Hide short sounds'],
   ] },
   { id: 'portable', label: 'Portable drive', icon: <Usb />, group: 'Places', component: PortableSection, index: [
-    ['usbPrepare', 'Set up this drive', 'usb pendrive stick memory card luminamedia folders structure'],
+    ['usbPrepare', 'Set up this drive', 'usb pendrive stick memory card luminamedia folders structure'], ['usbPortableApp', 'Portable copy of Lumina', 'run from usb stick app'], ['usbTvCompatibility', 'TV compatibility for exported videos', 'convert safe tv playback'],
     ['usbExport', 'Copy library to the drive', 'export backup car stereo tv'],
     ['usbImport', 'Bring the drive’s media into this PC', 'import sync'],
     ['usbRouting', 'Send new downloads here while it’s plugged in', 'route storage'],
@@ -89,7 +89,7 @@ const ALL_SECTIONS: SectionDef[] = [
     ['fw-aria2c', 'Allow torrents through Windows Firewall', 'network access permission peers block denied re-grant'],
   ] },
   { id: 'extension', label: 'Browser extension', icon: <Puzzle />, group: 'Connections', component: ExtensionSection, index: [
-    ['extEnabled', 'Allow the extension to connect', 'chrome edge firefox'], ['extCapture', 'Take over browser downloads', 'catch integrate'],
+    ['extEnabled', 'Allow the extension to connect', 'chrome edge firefox'], ['extMode', 'When the browser starts a download', 'ask always take over'], ['extSaveDir', 'Save browser downloads to', 'folder location'], ['extSkipTypes', 'File types to leave to the browser', 'skip exe zip'], ['extSkipSites', 'Sites to leave to the browser', 'skip exclude'], ['extFirefox', 'Install the extension in Firefox', 'add-on'], ['extCapture', 'Take over browser downloads', 'catch integrate'],
     ['extMinSize', 'Leave small files to the browser'], ['extPort', 'Extension port'], ['extChrome', 'Install the extension'],
   ] },
   { id: 'network', label: 'Network', icon: <Globe />, group: 'Connections', component: NetworkSection, index: [
@@ -100,7 +100,7 @@ const ALL_SECTIONS: SectionDef[] = [
     ['dlnaName', 'Name shown on the TV'], ['dlnaPort', 'Port'], ['dlnaAddress', 'Address'],
   ] },
   { id: 'sync', label: 'Sync', icon: <RefreshCw />, group: 'Connections', component: SyncSection, index: [
-    ['createChain', 'Start a sync chain', 'devices phone android luminabr brave chain'], ['joinChain', 'Join a sync chain', 'recovery code pair'],
+    ['createChain', 'Start a sync chain', 'devices phone android luminabr brave chain'], ['deviceLabel', 'This device’s name', 'sync label'], ['leaveChain', 'Leave the chain', 'sync disconnect reset'], ['joinChain', 'Join a sync chain', 'recovery code pair'],
     ['recoveryCode', 'Recovery code', 'seed encrypt e2e'], ['syncFolder', 'Sync folder', 'usb shared cloud'],
     ['syncBookmarks', 'Sync bookmarks'], ['syncNow', 'Sync now'],
   ] },
@@ -114,6 +114,8 @@ const ALL_SECTIONS: SectionDef[] = [
   ] },
   { id: 'privacy', label: 'Privacy', icon: <Shield />, group: 'System', component: PrivacySection, index: [
     ['keepHistory', 'Keep a list of finished downloads', 'history'], ['historyDays', 'Forget finished downloads after'],
+    ['showBrowser', 'Show the browser in the sidebar', 'browser sidebar navigation hide show'], ['shieldsEnabled', 'Block ads and trackers', 'shield browser adblock filter'], ['shieldList-easylist', 'Ad filter list'], ['shieldList-easyprivacy', 'Tracker filter list'], ['shieldList-malware', 'Malware and phishing filter list'], ['shieldList-annoyances', 'Pop-up and cookie banner filter list'],
+    ['hideAdSpace', 'Hide the empty space where ads were', 'cosmetic filter'], ['httpsUpgrade', 'Use secure connections', 'https upgrade'], ['shieldRefresh', 'Update the filter lists', 'refresh easylist'],
     ['artworkCache', 'Clear artwork cache'], ['lyricsCache', 'Clear saved lyrics'],
   ] },
   { id: 'advanced', label: 'Tools & updates', icon: <Wrench />, group: 'System', component: AdvancedSection, index: [

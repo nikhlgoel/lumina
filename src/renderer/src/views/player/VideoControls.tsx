@@ -17,15 +17,16 @@ import { SeekBar } from './Dock';
  * which suit a song and sit on top of a film. This one is a thin bar — seek line, then transport on
  * the left and settings on the right — that PlayerView fades away while the picture plays.
  */
-export function VideoControls({ fullscreen, onFullscreen, queueOpen, onQueue, settingsOpen, onSettings, statsOpen, onStats }: {
+export function VideoControls({ fullscreen, onFullscreen, queueOpen, onQueue, settingsOpen, onSettings, statsOpen, onStats, soundOpen, onSound }: {
   fullscreen: boolean; onFullscreen: () => void;
+  /** The Sound panel is open. Held by the player, which keeps the controls on screen while it is. */
+  soundOpen: boolean; onSound: (open: boolean) => void;
   queueOpen: boolean; onQueue: () => void;
   settingsOpen: boolean; onSettings: (open: boolean) => void;
   statsOpen: boolean; onStats: (on: boolean) => void;
 }) {
   const p = usePlayer();
   const item = p.current();
-  const [soundOpen, setSoundOpen] = useState(false);
   if (!item) return null;
   const many = p.queue.length > 1;
 
@@ -55,8 +56,8 @@ export function VideoControls({ fullscreen, onFullscreen, queueOpen, onQueue, se
         <div className="flex items-center gap-1">
           <button onClick={p.toggleSubtitles} aria-label="English subtitles" aria-pressed={p.subtitles} title="Subtitles (C)" className="p-btn grid size-10 place-items-center rounded-xl"><Captions className="size-5" /></button>
           <div className="relative">
-            <button onClick={() => setSoundOpen((v) => !v)} aria-label="Sound and equalizer" aria-haspopup="dialog" aria-expanded={soundOpen} title="Sound & equalizer" className="p-btn grid size-10 place-items-center rounded-xl"><SlidersHorizontal className="size-5" /></button>
-            {soundOpen && <AudioPanel onClose={() => setSoundOpen(false)} />}
+            <button onClick={() => onSound(!soundOpen)} aria-label="Sound and equalizer" aria-haspopup="dialog" aria-expanded={soundOpen} title="Sound & equalizer" className="p-btn grid size-10 place-items-center rounded-xl"><SlidersHorizontal className="size-5" /></button>
+            {soundOpen && <AudioPanel lift onClose={() => onSound(false)} />}
           </div>
           <div className="relative" data-video-menu>
             <button onClick={() => onSettings(!settingsOpen)} aria-label="Settings" aria-haspopup="menu" aria-expanded={settingsOpen} title="Settings" className="p-btn grid size-10 place-items-center rounded-xl">
@@ -85,7 +86,7 @@ function SettingsMenu({ item, statsOpen, onStats, onClose }: { item: PlayableIte
   const size = formatResolution(item.tech?.width ?? media.videoWidth, item.tech?.height ?? media.videoHeight);
 
   return (
-    <div role="menu" aria-label="Video settings" className="p-menu absolute right-0 bottom-12 z-20 w-[300px] rounded-2xl p-1.5 animate-rise" style={{ transformOrigin: 'bottom right' }}>
+    <div role="menu" aria-label="Video settings" className="p-menu absolute right-0 bottom-[4.75rem] z-20 w-[300px] rounded-2xl p-1.5 animate-rise" style={{ transformOrigin: 'bottom right' }}>
       {page === 'main' ? (
         <>
           <button role="menuitem" className={row} onClick={() => setPage('speed')}>

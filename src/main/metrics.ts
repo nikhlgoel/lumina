@@ -28,6 +28,8 @@ const STEPS: Step[] = [
   { name: 'library', script: goto('Library'), settleMs: 6_000 },
   { name: 'queue', script: goto('Queue'), settleMs: 4_000 },
   { name: 'settings', script: openSettings('Connected tools'), settleMs: 4_000 },
+  // The browser is not in the sidebar unless asked for.
+  { name: 'show-browser', script: "window.lumina.invoke('settings:update', { browser: { showInSidebar: true } })", settleMs: 800 },
   { name: 'browser', script: goto('Browser'), settleMs: 6_000 },
   { name: 'code-editor', script: `${goto('Code')}; setTimeout(() => [...document.querySelectorAll('[aria-label="Primary sidebar"] button')].find((b) => b.textContent.trim() === 'README.md')?.click(), 1500)`, settleMs: 7_000 },
   { name: 'code-terminal', script: "(() => { if (!document.querySelector('.xterm')) document.querySelector('[aria-label=\"Show panel (Ctrl+J)\"]')?.click(); })()", settleMs: 6_000 },

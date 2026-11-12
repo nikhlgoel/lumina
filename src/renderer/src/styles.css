@@ -29,6 +29,8 @@
   --success: #1f8a5b;
   --warning: #b86e00;
   --danger: #c2412d;
+  /* A download the person stopped: neither a success nor a failure, so neither green nor red. */
+  --cancelled: #5b6b82;
   --shadow-sm: 0 1px 0 rgb(40 32 20 / 0.04), 0 1px 2px rgb(40 32 20 / 0.06);
   --shadow-md: 0 1px 0 rgb(40 32 20 / 0.04), 0 8px 24px -8px rgb(40 32 20 / 0.16);
   --shadow-lg: 0 24px 60px -20px rgb(40 32 20 / 0.28), 0 0 0 1px rgb(40 32 20 / 0.06);
@@ -36,7 +38,7 @@
   --accent-ink: #ffffff;
   --accent-soft: rgb(217 100 30 / 0.12);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --titlebar: 44px;
+  --titlebar: 52px;
 }
 
 :root[data-accent="iris"] { --accent: #5b5bd6; --accent-soft: rgb(91 91 214 / 0.13); }
@@ -62,6 +64,7 @@
   --success: #45c08a;
   --warning: #e8a33d;
   --danger: #f0735a;
+  --cancelled: #9db0cc;
   --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);
   --shadow-md: 0 10px 30px -12px rgb(0 0 0 / 0.6);
   --shadow-lg: 0 30px 70px -24px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 244 225 / 0.07);
@@ -98,6 +101,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-cancelled: var(--cancelled);
 
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);

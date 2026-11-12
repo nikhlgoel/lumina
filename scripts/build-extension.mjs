@@ -29,6 +29,7 @@ build('chromium', (m) => m);
 build('firefox', (m) => ({
   ...m,
   background: { scripts: ['background.js'], type: 'module' },
-  browser_specific_settings: { gecko: { id: 'downloader@lumina.app', strict_min_version: '121.0' } },
+  // Firefox asks every extension to say what data it collects. This one sends nothing anywhere but the Lumina app on the same computer.
+  browser_specific_settings: { gecko: { id: 'downloader@lumina.app', strict_min_version: '121.0', data_collection_permissions: { required: ['none'] } } },
   minimum_chrome_version: undefined,
 }));

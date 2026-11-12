@@ -47,6 +47,11 @@ export async function runSelftest(): Promise<void> {
   const statuses = await tools.probeAll();
   for (const s of statuses) out(`tool ${s.name}: ${s.ok ? `${s.version} (${s.source})` : `MISSING ${s.error}`}`);
 
+  if (process.env.LUMINA_SELFTEST_STREAM) {
+    const { runStreamSelftest } = await import('./selftestHosts');
+    await runStreamSelftest(dir);
+    return;
+  }
   if (process.env.LUMINA_SELFTEST_LIBRARY) {
     // Scans the folder named by LUMINA_LIB_ROOT as the library would (in this scratch profile only) and reports what it found.
     const root = process.env.LUMINA_LIB_ROOT ?? '';
@@ -79,6 +84,36 @@ export async function runSelftest(): Promise<void> {
   if (process.env.LUMINA_SELFTEST_HOSTS) {
     const { runHostsSelftest } = await import('./selftestHosts');
     await runHostsSelftest(dir);
+    return;
+  }
+
+  if (process.env.LUMINA_SELFTEST_SEARCH) {
+    const { runSearchSelftest } = await import('./selftestSearch');
+    await runSearchSelftest();
+    return;
+  }
+
+  if (process.env.LUMINA_SELFTEST_TRASH) {
+    const { runTrashSelftest } = await import('./selftestTrash');
+    await runTrashSelftest();
+    return;
+  }
+
+  if (process.env.LUMINA_SELFTEST_TORRENT) {
+    const { runTorrentSelftest } = await import('./selftestTorrent');
+    await runTorrentSelftest(dir);
+    return;
+  }
+
+  if (process.env.LUMINA_SELFTEST_EXISTING) {
+    const { runExistingSelftest } = await import('./selftestExisting');
+    await runExistingSelftest(dir);
+    return;
+  }
+
+  if (process.env.LUMINA_SELFTEST_CANCEL) {
+    const { runCancelSelftest } = await import('./selftestCancel');
+    await runCancelSelftest(dir);
     return;
   }
 

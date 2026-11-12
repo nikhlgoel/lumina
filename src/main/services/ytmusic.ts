@@ -1,4 +1,5 @@
 import { wordSimilarity } from '../../core/lyrics';
+import { biggerArt } from '../../core/searchResults';
 import { logger } from '../log';
 
 const log = logger('ytmusic');
@@ -19,11 +20,16 @@ export interface SongResult {
   artists: string;
   album: string | null;
   durationSec: number | null;
+  /** The album picture at a size worth showing big, when the answer had one. */
+  thumbnail?: string | null;
 }
 
 interface Run { text?: string }
 interface FlexColumn { musicResponsiveListItemFlexColumnRenderer?: { text?: { runs?: Run[] } } }
-interface ListItem { musicResponsiveListItemRenderer?: { playlistItemData?: { videoId?: string }; flexColumns?: FlexColumn[] } }
+interface Thumb { url?: string; width?: number }
+interface ListItem { musicResponsiveListItemRenderer?: { playlistItemData?: { videoId?: string }; flexColumns?: FlexColumn[]; thumbnail?: { musicThumbnailRenderer?: { thumbnail?: { thumbnails?: Thumb[] } } } } }
+
+export { biggerArt };
 
 const toSeconds = (t: string) => t.split(':').reduce((s, part) => s * 60 + Number(part), 0);
 
@@ -48,8 +54,10 @@ export async function searchSongs(query: string): Promise<SongResult[]> {
       if (!videoId || !cols[0]) continue;
       const parts = (cols[1] ?? '').split(' • ').map((p) => p.trim());
       const duration = parts.find((p) => /^\d{1,2}(:\d{2}){1,2}$/.test(p));
+      const thumbs = (r?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ?? []).filter((t) => t.url);
       results.push({
         videoId,
+        thumbnail: biggerArt(thumbs.sort((a, b) => (a.width ?? 0) - (b.width ?? 0)).at(-1)?.url),
         title: cols[0],
         artists: parts[0] ?? '',
         album: parts.length >= 3 ? parts[1] ?? null : null,
@@ -106,4 +114,23 @@ export async function matchTracks(tracks: TrackQuery[], onProgress: (done: numbe
   };
   await Promise.all(Array.from({ length: 4 }, worker));
   return { urls, unmatched };
+}
+
+/** YouTube Music's own filters (the `params` of a search): albums, curated playlists and playlists people made. */
+const ALBUMS_FILTER = 'EgWKAQIYAWoMEA4QChADEAQQCRAF';
+const FEATURED_PLAYLISTS_FILTER = 'EgeKAQQoADgBagwQDhAKEAMQBBAJEAU=';
+const COMMUNITY_PLAYLISTS_FILTER = 'EgeKAQQoAEABagwQDhAKEAMQBBAJEAU=';
+
+export const MUSIC_FILTERS = { albums: ALBUMS_FILTER, featured: FEATURED_PLAYLISTS_FILTER, community: COMMUNITY_PLAYLISTS_FILTER } as const;
+
+/** The raw answer to a filtered YouTube Music search (read into results by core/searchResults). Throws when YouTube Music cannot be reached. */
+export async function searchMusicRaw(query: string, params: string): Promise<unknown> {
+  const res = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://music.youtube.com', 'User-Agent': UA },
+    body: JSON.stringify({ context: { client: { clientName: 'WEB_REMIX', clientVersion: '1.20260901.01.00', hl: 'en', gl: 'US' } }, query, params }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!res.ok) throw new Error(`YouTube Music search failed (${res.status})`);
+  return res.json();
 }

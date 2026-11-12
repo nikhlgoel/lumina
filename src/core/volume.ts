@@ -59,8 +59,9 @@ export interface LimiterSettings {
  * While boosting it is a brick wall just under full scale: a hard ratio, no knee, and an attack
  * fast enough to catch a transient. The release is slow enough not to pump audibly on music.
  */
-export function limiterSettings(boostGain: number): LimiterSettings {
-  if (boostGain <= 1) return { threshold: 0, ratio: 1, knee: 0, attack: 0.003, release: 0.25 };
+export function limiterSettings(boostGain: number, protect = false): LimiterSettings {
+  // `protect`: something above has added gain (loudness matching, the clarity curve) even though the volume is not boosted: the same wall applies.
+  if (boostGain <= 1 && !protect) return { threshold: 0, ratio: 1, knee: 0, attack: 0.003, release: 0.25 };
   return { threshold: -1.5, ratio: 20, knee: 0, attack: 0.003, release: 0.25 };
 }
 
@@ -79,3 +80,29 @@ export const volumeLabel = (volume: number): string => `${volumePercent(volume)}
  */
 export const nextVolume = (current: number, delta: number): number =>
   Math.round(clampVolume(current + delta) * 100) / 100;
+
+// The last stage of the signal path: a soft ceiling after the limiter.
+//
+// The limiter is a compressor with a hard ratio, not a true brick wall: measured on loud, bass-heavy music under a boost it let peaks through up to 1.02
+// (+0.16 dB over full scale), which the output clips. Whatever it lets through lands on this curve: untouched up to 0.93, bent smoothly (the slope stays 1 at the knee) to 0.974 at full scale,
+// and anything beyond held there, so nothing that leaves the player can be over. Below the knee it is the identity, so it changes nothing the limiter did not
+// already have to catch.
+
+export const CEILING_KNEE = 0.93;
+export const CEILING = 0.979;
+
+/** One point of the ceiling curve: the input in, the output out. Odd-symmetric, monotonic, and never beyond +/-CEILING (about 0.979). */
+export function softCeiling(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  const a = Math.abs(x);
+  if (a <= CEILING_KNEE) return x;
+  const room = CEILING - CEILING_KNEE;
+  return Math.sign(x) * (CEILING_KNEE + room * Math.tanh((a - CEILING_KNEE) / room));
+}
+
+/** The ceiling as a Web Audio WaveShaper curve: inputs from -1 to 1 across `points` samples (inputs beyond that take the end values). */
+export function ceilingCurve(points = 2049): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(new ArrayBuffer(points * 4));
+  for (let i = 0; i < points; i++) curve[i] = softCeiling((i / (points - 1)) * 2 - 1);
+  return curve;
+}

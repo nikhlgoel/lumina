@@ -4,3 +4,6 @@ allowBuilds:
   electron-winstaller: false
 minimumReleaseAgeExclude:
   - electron@44.4.1
+# monaco-editor pins an old dompurify with published sanitiser bypasses (one critical); the editor only shows the person's own code, but there is no reason to keep it.
+overrides:
+  dompurify: ^3.4.17

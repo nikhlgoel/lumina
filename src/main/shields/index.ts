@@ -88,6 +88,12 @@ function rebuild(): void {
   publish();
 }
 
+/** The person changed a browser-shield setting (which lists, on or off): use it now, and fetch a list that has never been downloaded. */
+export function shieldSettingsChanged(): void {
+  rebuild();
+  void refreshShieldLists(false);
+}
+
 export async function refreshShieldLists(force = false): Promise<void> {
   const s = settings.get().browser;
   if (!s.shieldsEnabled) return;

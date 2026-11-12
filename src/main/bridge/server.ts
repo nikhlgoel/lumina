@@ -2,7 +2,7 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { z } from 'zod';
-import type { CapturedCookie, RequestInfo } from '../../shared/types';
+import type { CapturedCookie, EpisodeBatch, RequestInfo } from '../../shared/types';
 import { requestInfoSchema } from '../../shared/ipc';
 import { isLoginSite, type LoginSite } from '../../core/accountCookies';
 import { withoutChallengeCookies } from '../../core/challengeCookies';
@@ -54,6 +54,21 @@ const batchSchema = z.object({
   urls: z.array(linkText).min(1).max(MAX_BATCH),
   /** The name each link has on its page, in the same order as `urls`. Optional: an older extension sends none. */
   names: z.array(z.string().max(300)).max(MAX_BATCH).optional(),
+  request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
+});
+/** The episodes of a series, each with the address of its video and what the browser asked for it with. */
+const MAX_EPISODES = 300;
+const episodeSchema = z.object({
+  show: z.string().max(300).catch(''),
+  items: z.array(z.object({
+    number: z.number().int().min(0).max(9999),
+    season: z.number().int().min(0).max(999).catch(1),
+    title: z.string().max(300).catch(''),
+    url: z.string().min(1).max(16_384).refine((u) => /^https?:\/\//i.test(u), 'Only http(s) addresses'),
+    kind: z.enum(['stream', 'media', 'link', 'page']).catch('link'),
+    pageUrl: z.string().max(8192).optional(),
+    headers: z.record(z.string().max(64), z.string().max(4096)).catch({}),
+  })).min(1).max(MAX_EPISODES),
   request: requestInfoSchema.catch({ headers: {}, cookies: [] }),
 });
 const pairSchema = z.object({ browser: z.string().min(1).max(60) });
@@ -132,6 +147,8 @@ export interface BridgeHandlers {
   onCapture: (capture: CaptureRequest, signal: AbortSignal) => Promise<CaptureResult>;
   /** Several links picked together on a page. Resolves once Lumina has them in front of the person. */
   onCaptureBatch: (urls: string[], request: RequestInfo, signal: AbortSignal, names: Record<string, string>) => Promise<CaptureResult & { count: number }>;
+  /** The episodes of a series, picked in the extension. Resolves once Lumina has them in front of the person. */
+  onCaptureEpisodes: (batch: EpisodeBatch, signal: AbortSignal) => Promise<CaptureResult & { count: number }>;
   /** A site's sign-in, handed over by the person from their own browser. `signedIn` is false when the cookies held no live session. */
   onAccountCookies: (site: LoginSite, cookies: CapturedCookie[]) => Promise<{ saved: number; signedIn: boolean }>;
   onPaired: () => void;
@@ -236,7 +253,7 @@ class BridgeServer {
     if (req.method === 'GET' && url.pathname === '/v1/hello') {
       const s = settings.get().extension;
       return this.json(res, 200, {
-        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired), batch: true, accounts: true,
+        app: 'Lumina', version: app.getVersion(), paired: Boolean(paired), batch: true, episodes: true, accounts: true,
         captureDownloads: s.captureDownloads, minCaptureSizeMb: s.minCaptureSizeMb,
         skipExtensions: s.skipExtensions, skipSites: s.skipSites,
       }, origin);
@@ -306,6 +323,25 @@ class BridgeServer {
         if (n && !names[u.trim()]) names[u.trim()] = n;
       });
       const result = await h.onCaptureBatch(urls, sanitizeRequest(body.data.request as RequestInfo, true), abort.signal, names);
+      if (abort.signal.aborted) return;
+      return this.json(res, result.accepted ? 202 : 200, result, origin);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/capture-episodes') {
+      const body = episodeSchema.safeParse(await readJson(req));
+      if (!body.success) return this.json(res, 400, { error: body.error.issues[0]?.message ?? 'Invalid request' }, origin);
+      const abort = new AbortController();
+      res.on('close', () => {
+        if (!res.writableFinished) abort.abort();
+      });
+      // A web page's wording: control characters and long text are cut. Headers are limited to the few a video host is asked with.
+      const clean = (t: string, n: number) => t.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+      const items = body.data.items.map((i) => ({
+        ...i,
+        title: clean(i.title, 200),
+        headers: Object.fromEntries(Object.entries(i.headers).filter(([k]) => /^(referer|origin|user-agent|accept-language)$/i.test(k))),
+      }));
+      const result = await h.onCaptureEpisodes({ show: clean(body.data.show, 200) || 'Series', items, request: sanitizeRequest(body.data.request as RequestInfo, true) }, abort.signal);
       if (abort.signal.aborted) return;
       return this.json(res, result.accepted ? 202 : 200, result, origin);
     }

@@ -24,6 +24,17 @@
       <span class="page-hint">Works for YouTube, SoundCloud, Vimeo and 1,800+ sites</span>
     </button>
 
+    <div id="episodes-box" hidden>
+      <h2 id="episodes-title">Episodes</h2>
+      <p id="episodes-hint" class="empty"></p>
+      <div class="links-tools">
+        <label class="check"><input type="checkbox" id="eps-all" /><span id="eps-count"></span></label>
+        <button id="eps-check" class="secondary small">Find the ones with a video</button>
+      </div>
+      <ul id="episodes"></ul>
+      <button id="eps-send" class="primary" disabled>Check the episodes first</button>
+    </div>
+
     <h2>Found on this page</h2>
     <ul id="media"></ul>
     <p id="empty" class="empty" hidden>Nothing yet. Start playing the video or song, and it will show up here.</p>

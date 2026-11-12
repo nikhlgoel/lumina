@@ -159,6 +159,17 @@ export function loadLists(enabled: readonly string[]): LoadedLists {
 const isStale = (name: string, meta: Record<string, ListMeta>) =>
   !meta[name] || Date.now() - meta[name]!.fetchedAt > MAX_AGE_MS;
 
+async function fetchList(url: string): Promise<Response> {
+  const signal = AbortSignal.timeout(45_000);
+  try {
+    const { net } = await import('electron');
+    if (typeof net?.fetch === 'function') return await net.fetch(url, { signal });
+  } catch {
+    // not running inside Electron (a test), or the network stack is not ready: the plain fetch below
+  }
+  return fetch(url, { signal });
+}
+
 /**
  * Fetch any enabled list that is missing or stale.
  *
@@ -172,7 +183,9 @@ export async function refreshLists(enabled: readonly string[], force = false): P
     if (!enabled.includes(source.name)) continue;
     if (!force && !isStale(source.name, meta) && fs.existsSync(listFile(source.name))) continue;
     try {
-      const res = await fetch(source.url, { signal: AbortSignal.timeout(45_000) });
+      // Electron's own network stack (Chromium's), not Node's: Node's HTTP client throws `assert(!this.paused)` out of a socket handler when a
+      // response ends while the event loop is busy (seen in the log, uncaught), and these are big files fetched while the browser starts.
+      const res = await fetchList(source.url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       // A truncated response or an error page would otherwise replace a good list with nothing.

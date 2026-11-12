@@ -67,6 +67,14 @@ export function StorageSection({ s, set }: SectionProps) {
   );
 }
 
+/** The filter lists the browser can use (names as in main/shields/lists.ts), with what each one blocks. */
+const SHIELD_LISTS: [name: string, label: string, what: string][] = [
+  ['easylist', 'Ads', 'Banners, video ads and sponsored boxes.'],
+  ['easyprivacy', 'Trackers', 'Analytics and tracking scripts and pixels.'],
+  ['malware', 'Malware and phishing', 'Sites known to spread malware or steal logins.'],
+  ['annoyances', 'Pop-ups and cookie banners', 'Newsletter pop-ups, cookie notices and similar interruptions.'],
+];
+
 export function PrivacySection({ s, set }: SectionProps) {
   const toast = useApp((x) => x.toast);
   const [sizes, setSizes] = useState<{ artworkBytes: number; lyricsEntries: number } | null>(null);
@@ -83,6 +91,37 @@ export function PrivacySection({ s, set }: SectionProps) {
           <Row id="historyDays" label="Forget finished downloads after" description="0 keeps them until you clear the list.">
             <NumberInput value={s.privacy.historyDays} min={0} suffix="days" onCommit={(v) => set({ privacy: { historyDays: v } })} />
           </Row>
+        )}
+      </Group>
+
+      <Group title="Lumina’s browser" description="An optional browser inside Lumina that hands any download it starts to Lumina, and blocks what the filter lists name before the request leaves your computer. Nothing is sent anywhere to do this.">
+        <Row id="showBrowser" label="Show it in the sidebar" description="Off by default: downloads and the checks some sites ask for have windows of their own, and the Lumina browser extension covers browsing in your own browser. The Code tab’s preview opens this browser either way.">
+          <Switch label="Show the browser in the sidebar" checked={s.browser.showInSidebar} onChange={(v) => set({ browser: { showInSidebar: v } })} />
+        </Row>
+        <Row id="shieldsEnabled" label="Block ads and trackers" description="The shield button in the browser shows what was blocked on each page, and can be switched off for one site.">
+          <Switch label="Block ads and trackers" checked={s.browser.shieldsEnabled} onChange={(v) => set({ browser: { shieldsEnabled: v } })} />
+        </Row>
+        {s.browser.shieldsEnabled && (
+          <>
+            {SHIELD_LISTS.map(([name, label, what]) => (
+              <Row key={name} id={`shieldList-${name}`} label={label} description={what}>
+                <Switch
+                  label={label}
+                  checked={s.browser.shieldLists.includes(name)}
+                  onChange={(on) => set({ browser: { shieldLists: on ? [...s.browser.shieldLists, name] : s.browser.shieldLists.filter((n) => n !== name) } })}
+                />
+              </Row>
+            ))}
+            <Row id="hideAdSpace" label="Hide the empty space where ads were" description="Turn this off if a page ever loses a part it should show; the blocking stays.">
+              <Switch label="Hide the empty space where ads were" checked={s.browser.hideAdSpace} onChange={(v) => set({ browser: { hideAdSpace: v } })} />
+            </Row>
+            <Row id="httpsUpgrade" label="Use secure connections when a site offers them" description="Tries https:// first for sites typed or linked without it.">
+              <Switch label="Use secure connections" checked={s.browser.httpsUpgrade} onChange={(v) => set({ browser: { httpsUpgrade: v } })} />
+            </Row>
+            <Row id="shieldRefresh" label="Update the filter lists" description="Lists are refreshed by themselves about once a week.">
+              <Button size="sm" onClick={() => { void call('browser:shields-refresh').catch(() => undefined); toast('Updating the filter lists…'); }}>Update now</Button>
+            </Row>
+          </>
         )}
       </Group>
 

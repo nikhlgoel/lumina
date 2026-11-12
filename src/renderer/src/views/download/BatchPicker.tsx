@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
-import { ChevronRight, FileArchive, FileCheck2, File as FileIcon, FolderOpen, Layers, PackagePlus, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronRight, CircleCheck, FileArchive, FileCheck2, File as FileIcon, FolderOpen, Layers, PackagePlus, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { MediaInfo, RequestInfo } from '@shared/types';
 import { releaseTagFor, type BatchGroup, type BatchPlan } from '@core/batch';
 import { safeFileName } from '@core/format';
+import { stampedBatchTitle, type ExistingMode } from '@core/existingFiles';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
-import { Badge, Button, ProgressBar, Switch } from '@/components/ui';
+import { Badge, Button, ProgressBar, Segmented, Switch } from '@/components/ui';
 import { Checkbox } from './PlaylistPicker';
 import { quickOptions } from './quickOptions';
 
@@ -44,7 +45,8 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
   const setView = useApp((s) => s.setView);
   const [selected, setSelected] = useState(() => new Set(plan.groups.filter((g) => g.defaultSelected).map((g) => g.key)));
   const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const [ownFolder, setOwnFolder] = useState(plan.groups.length > 1);
+  // Several files go in a folder of their own, whatever their shape: twelve parts of one archive are as much a batch as twelve different files.
+  const [ownFolder, setOwnFolder] = useState(plan.groups.reduce((n, g) => n + g.items.length, 0) > 1);
   const hasArchives = plan.groups.some((g) => g.items.some((i) => i.part !== null));
   const [unpack, setUnpack] = useState(hasArchives);
   const [deleteArchives, setDeleteArchives] = useState(true);
@@ -58,7 +60,31 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
   const optionalCount = plan.groups.filter((g) => g.kind === 'optional').length;
   const mainParts = plan.groups.filter((g) => g.kind === 'archive-set').reduce((n, g) => n + g.items.length, 0);
   const brokenSets = chosen.filter((g) => g.missingParts.length > 0);
-  const targetDir = ownFolder ? joinPath(baseDir, safeFileName(plan.title, 'Batch download')) : baseDir;
+  // A batch whose links do not name their files has no title worth a folder name ("Batch download" for every one of them): the day and time do.
+  const [folderTitle] = useState(() => safeFileName(plan.title === 'Batch download' ? stampedBatchTitle(new Date()) : plan.title, 'Batch download'));
+  // What the disk says: which folder this batch goes into (its own, never another batch's), and which of its files are already complete there.
+  const [folder, setFolder] = useState<{ dir: string; sameBatch: boolean; existing: { filename: string; size: number }[] } | null>(null);
+  const [existingMode, setExistingMode] = useState<ExistingMode>('skip');
+  const chosenNames = chosen.flatMap((g) => g.items.map((i) => i.filename).filter(Boolean));
+  const chosenKey = chosenNames.join('\n');
+  const [folderFailed, setFolderFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    // What was worked out for the last choices no longer applies: until the disk has answered for these, there is no folder to go to (and the
+    // Download button waits), so a click cannot queue the batch into the folder of the previous choice.
+    setFolder(null);
+    setFolderFailed(false);
+    const timer = setTimeout(() => {
+      void call('batch:folder', { base: baseDir, title: folderTitle, filenames: chosenNames, flat: !ownFolder })
+        .then((r) => { if (current) setFolder(r); })
+        .catch(() => { if (current) setFolderFailed(true); });
+    }, 150);
+    return () => { current = false; clearTimeout(timer); };
+    // chosenNames is read through chosenKey, which changes exactly when it does
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseDir, ownFolder, folderTitle, chosenKey]);
+  const targetDir = folder?.dir ?? (ownFolder ? joinPath(baseDir, folderTitle) : baseDir);
+  const existing = folder?.existing ?? [];
   const started = running || results.size > 0;
   const failed = [...results.entries()].filter((e): e is [string, Extract<ItemState, { state: 'failed' }>] => e[1].state === 'failed');
 
@@ -112,9 +138,9 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
     for (const [i, { item, group }] of items.entries()) {
       const info = infos[i];
       if (!info) continue;
-      const release = releaseTagFor(group, item, { id: releaseId, title: plan.title, dir: targetDir, unpack: unpack && hasArchives, deleteArchives: unpack && deleteArchives });
+      const release = releaseTagFor(group, item, { id: releaseId, title: plan.title === 'Batch download' ? folderTitle : plan.title, dir: targetDir, unpack: unpack && hasArchives, deleteArchives: unpack && deleteArchives });
       try {
-        await call('jobs:add', { url: item.url, info, options: { ...quickOptions(info, settings), targetDir, release } });
+        await call('jobs:add', { url: item.url, info, options: { ...quickOptions(info, settings), targetDir, release, ...(existing.length ? { existingFiles: existingMode, existingNames: existing.map((e) => e.filename) } : {}) } });
         next.set(item.url, { state: 'added' });
       } catch (err) {
         next.set(item.url, { state: 'failed', message: errorMessage(err) });
@@ -166,7 +192,6 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
                   onClick={() => toggle(g.key)}
                   disabled={started}
                   aria-pressed={on}
-                  aria-label={`${on ? 'Skip' : 'Include'} ${g.label}`}
                   className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default"
                 >
                   <Checkbox state={on ? 'on' : 'off'} />
@@ -221,6 +246,33 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
         </p>
       )}
 
+      {existing.length > 0 && !started && (
+        <div className="mx-5 mb-3 rounded-lg border border-line bg-sunken px-3 py-2.5">
+          <p className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+            <CircleCheck className="size-4 shrink-0 text-success" />
+            {existing.length === 1 ? '1 file has' : `${existing.length} files have`} the same name as one already in this folder
+          </p>
+          <p className="mt-0.5 truncate text-xs text-ink-3" title={existing.map((e) => e.filename).join('\n')} data-selectable>
+            {existing.slice(0, 3).map((e) => e.filename).join(', ')}{existing.length > 3 ? ` and ${existing.length - 3} more` : ''}
+          </p>
+          <Segmented
+            className="mt-2.5"
+            label="What to do with files already here"
+            value={existingMode}
+            onChange={setExistingMode}
+            options={[
+              { value: 'skip', label: `Skip them · download ${Math.max(0, fileCount - existing.length)}` },
+              { value: 'replace', label: `Download all ${fileCount} again and replace` },
+            ]}
+          />
+          <p className="mt-1.5 text-xs text-ink-3">
+            {existingMode === 'skip'
+              ? 'A file is skipped only if it is the same size as the one being downloaded; a different one is kept and the new one saved beside it.'
+              : 'The old copies go to the Recycle Bin first, so you can still get them back.'}
+          </p>
+        </div>
+      )}
+
       {failed.length > 0 && !running && (
         <div className="mx-5 mb-3 rounded-lg border border-danger/25 bg-danger/8 px-3 py-2">
           <p className="text-[13px] font-semibold text-danger">{failed.length} link{failed.length === 1 ? '' : 's'} couldn’t be queued</p>
@@ -246,6 +298,11 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
           <span className="truncate [direction:rtl]" data-selectable><bdi>{targetDir}</bdi></span>
         </button>
       </div>
+      {ownFolder && folder && !started && (folder.sameBatch || /\(\d+\)$/.test(folder.dir)) && (
+        <p className="-mt-1 px-5 pb-2.5 text-xs text-ink-3">
+          {folder.sameBatch ? 'This folder already holds files from this batch.' : 'A folder with that name already holds something else, so this batch gets its own.'}
+        </p>
+      )}
 
       {hasArchives && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-5 py-3 text-[13px] text-ink-2">
@@ -268,8 +325,10 @@ export function BatchPicker({ plan, request, onDone, onCancel }: { plan: BatchPl
         </p>
         <Button variant="ghost" onClick={started && !running ? onDone : onCancel} disabled={running}>{started && !running ? 'Close' : 'Cancel'}</Button>
         {!started && (
-          <Button variant="primary" size="lg" onClick={() => void start()} disabled={fileCount === 0}>
-            Download {fileCount} file{fileCount === 1 ? '' : 's'}
+          <Button variant="primary" size="lg" onClick={() => void start()} disabled={fileCount === 0 || (!folder && !folderFailed)}>
+            {existing.length > 0 && existingMode === 'skip'
+              ? `Download ${Math.max(0, fileCount - existing.length)} new file${fileCount - existing.length === 1 ? '' : 's'}`
+              : `Download ${fileCount} file${fileCount === 1 ? '' : 's'}`}
           </Button>
         )}
         {started && !running && failed.length > 0 && (

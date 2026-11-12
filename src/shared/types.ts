@@ -164,6 +164,10 @@ export interface ReleaseTag {
   deleteArchives: boolean;
 }
 export interface DownloadOptions {
+  /** A file of the same name already in the folder: "skip" it when it is the same file, or "replace" it (the old one goes to the Recycle Bin). Not set keeps both. */
+  existingFiles?: 'skip' | 'replace';
+  /** The names that were already in the folder when the batch was planned; skip and replace apply to these only, never to a file that appeared since. */
+  existingNames?: string[];
   contentType: ContentType;
   format: FormatChoice;
   englishSubtitles: boolean;
@@ -174,6 +178,8 @@ export interface DownloadOptions {
   /** 1-based playlist indices; empty = all. */
   playlistItems: number[];
   series?: { show: string; season: number };
+  /** The file's own name, without its extension, for a download whose address says nothing (an episode's stream). Not used for playlists. */
+  fileName?: string;
   targetDir?: string;
   release?: ReleaseTag;
 }
@@ -205,7 +211,7 @@ export interface JobProgress {
    * block ('writing'), it is re-announcing or restarting ('reconnecting'), or the connection dropped and the job is
    * waiting for it ('waiting'). null or absent while it is moving data normally.
    */
-  activity?: 'writing' | 'reconnecting' | 'waiting' | null;
+  activity?: 'writing' | 'reconnecting' | 'waiting' | 'limited' | null;
 }
 
 export interface CompatReport {
@@ -240,6 +246,8 @@ export interface Job {
   /** Engine bookkeeping that survives restarts (e.g. items already finished). */
   engineState: {
     finishedItems: number; autoRetries?: number; cookieFallback?: boolean;
+    /** Playlist positions that failed in a way a retry can recover; the Retry button on the finished job fetches just these. */
+    failedItems?: number[];
     /** What the server said about the file when the download began; compared again before a resume. */
     validators?: { etag: string | null; lastModified: string | null; size: number | null };
     /** Time spent actually downloading or processing so far, across pauses and retries (not time spent queued or paused). */
@@ -473,6 +481,8 @@ export interface PlayableItem {
   src: string;
   artworkUrl: string | null;
   path: string | null;
+  /** A track of an album or playlist whose stream is not worked out yet: the player resolves this link when its turn comes (`src` is empty until then). */
+  lazyUrl?: string;
   /** A link being played without a download that ffmpeg converts as it goes, so the player starts in that mode. */
   pipe?: boolean;
   /** Where to continue from (saved position), in seconds. */
@@ -515,7 +525,8 @@ export type { TreeEntry };
 export interface SearchHit {
   /** Where it came from — drives the section it's shown in and its default download format. */
   source: 'ytmusic' | 'youtube';
-  kind: 'audio' | 'video';
+  /** A song or a video, or a collection of songs: an album or a playlist (opened to pick from, or played from the first track on). */
+  kind: 'audio' | 'video' | 'album' | 'playlist';
   /** The URL to inspect/download (music.youtube.com for songs → audio defaults; youtube.com for videos). */
   url: string;
   title: string;
@@ -523,6 +534,28 @@ export interface SearchHit {
   subtitle: string;
   durationSec: number | null;
   thumbnail: string | null;
+  /** "5.8M views" (or "1,204 watching" for a live stream), already short enough to show. */
+  views?: string | null;
+  /** "8 months ago", as the source words it. */
+  published?: string | null;
+  /** The channel is verified. */
+  verified?: boolean;
+  /** The album a song is from. */
+  album?: string | null;
+  /** For an album or a playlist: how many songs it says it has, when it says. */
+  trackCount?: number | null;
+  /** For an album: its year, and what sort it is ("Album", "Single", "EP"). */
+  year?: string | null;
+  albumType?: string | null;
+}
+
+/** One source's answer to a search: shown as soon as it arrives, without waiting for the other source. */
+export interface SearchPart {
+  hits: SearchHit[];
+  /** The source could not be reached (as opposed to having nothing): the view offers a retry. */
+  failed: boolean;
+  /** Asking for more may give more: the number returned reached the number asked for. */
+  more: boolean;
 }
 
 export interface SearchResults {
@@ -657,4 +690,25 @@ export interface ShieldStatus {
   ruleCount: number;
   /** The most recent things blocked, newest first. */
   recent: { url: string; rule: string }[];
+}
+
+/** One episode of a series, sent from the browser with the address of its video. */
+export interface EpisodeItem {
+  number: number;
+  season: number;
+  title: string;
+  /** The video itself: a stream's playlist or a file. */
+  url: string;
+  kind: 'stream' | 'media' | 'link' | 'page';
+  /** The episode's own page: what the video was found on. */
+  pageUrl?: string;
+  /** What the browser asked for the video with (usually the page as Referer). */
+  headers: Record<string, string>;
+}
+
+/** The episodes of a series the person picked in the extension, to be confirmed and queued together. */
+export interface EpisodeBatch {
+  show: string;
+  items: EpisodeItem[];
+  request: RequestInfo;
 }

@@ -2,13 +2,15 @@ import { app, dialog, Notification, powerMonitor, shell } from 'electron';
 // MUST be the first Lumina import: it redirects userData before any module reads a path.
 import './portableMode';
 import fs from 'node:fs';
-import type { RequestInfo } from '../shared/types';
+import type { EpisodeBatch, RequestInfo } from '../shared/types';
 import { settings } from './settings';
 import { setVerboseLogging, logger } from './log';
 import { installCrashGuard } from './crashGuard';
 import { tools } from './tools';
 import { database, closeDatabase } from './db';
 import { queue } from './jobs/queue';
+import { shieldSettingsChanged } from './shields';
+import { batchStateOf, batchSummary } from '../core/batchState';
 import { ytdlpRunner } from './jobs/ytdlp';
 import { aria2, aria2Runner, restartOnlyKey } from './jobs/aria2';
 import { convertRunner, subtitlesRunner } from './jobs/cpu';
@@ -71,6 +73,15 @@ function openLink(url: string, source: 'extension' | 'clipboard' | 'system', req
 function openLinks(urls: string[], request: RequestInfo, names: Record<string, string> = {}) {
   showWindow('downloader');
   const send = () => broadcast('app:open-links', { urls, request, names, source: 'extension' });
+  const wc = mainWindow()?.webContents;
+  if (wc?.isLoading()) wc.once('did-finish-load', send);
+  else send();
+}
+
+/** Bring Lumina forward with the episodes of a series picked in the browser extension, to be confirmed and queued together. */
+function openEpisodes(batch: EpisodeBatch) {
+  showWindow('downloader');
+  const send = () => broadcast('app:open-episodes', batch);
   const wc = mainWindow()?.webContents;
   if (wc?.isLoading()) wc.once('did-finish-load', send);
   else send();
@@ -213,6 +224,11 @@ if (!app.requestSingleInstanceLock()) {
         openLinks(urls, request, names);
         return { accepted: true, count: urls.length };
       },
+      onCaptureEpisodes: async (batch) => {
+        log.info(`Series from browser: "${batch.show}", ${batch.items.length} episodes from ${batch.request.pageUrl?.slice(0, 120) ?? 'a page'}`);
+        openEpisodes(batch);
+        return { accepted: true, count: batch.items.length };
+      },
       onAccountCookies: async (site, cookies) => {
         const result = await importBrowserCookies(site, cookies);
         if (result.signedIn) broadcast('accounts:changed', await listAccounts());
@@ -247,10 +263,15 @@ if (!app.requestSingleInstanceLock()) {
       const cur = settings.get();
       const target = job.outputPaths[0] ?? job.outputDir;
       const quietBrowserFile = job.origin === 'browser' && (job.progress.totalBytes ?? 0) < 25 * 1024 * 1024;
-      if (cur.downloads.afterDownload === 'reveal' && target && job.origin !== 'browser') shell.showItemInFolder(target);
+      // A batch speaks once, when its last file ends, not once per file (core/batchState).
+      const batch = batchStateOf(job, queue.list());
+      const summary = batch ? batchSummary(batch) : null;
+      const moreToCome = batch !== null && summary === null;
+      const shown = batch ? job.outputDir ?? target : target;
+      if (cur.downloads.afterDownload === 'reveal' && shown && job.origin !== 'browser' && !moreToCome) shell.showItemInFolder(shown);
       const w = mainWindow();
-      if (cur.general.notifyOnComplete && !quietBrowserFile && (!w || !w.isVisible() || !w.isFocused())) {
-        notify('Download complete', job.title, () => (target ? shell.showItemInFolder(target) : showWindow('downloader')));
+      if (cur.general.notifyOnComplete && !quietBrowserFile && !moreToCome && (!w || !w.isVisible() || !w.isFocused())) {
+        notify(summary ? 'Batch finished' : 'Download complete', summary && batch ? `${batch.title} · ${summary.text}` : job.title, () => (shown ? shell.showItemInFolder(shown) : showWindow('downloader')));
       }
     });
     // After sleep the network usually takes a moment to come back; a job that was waiting for it asks
@@ -262,8 +283,12 @@ if (!app.requestSingleInstanceLock()) {
     queue.on('failed', (job) => {
       const w = mainWindow();
       // A job that will start again by itself (waiting for the network, a short retry) did not really fail.
+      const batch = batchStateOf(job, queue.list());
+      const summary = batch ? batchSummary(batch) : null;
+      // One file of a batch failing says nothing yet; the batch says how it came out when its last file ends.
+      if (batch && !summary) return;
       if (settings.get().general.notifyOnFail && !queue.willRetry(job.id) && (!w || !w.isVisible() || !w.isFocused())) {
-        notify('Download failed', `${job.title}: ${job.error?.message ?? 'unknown error'}`, () => {
+        notify(summary ? 'Batch finished' : 'Download failed', summary && batch ? `${batch.title} · ${summary.text}` : `${job.title}: ${job.error?.message ?? 'unknown error'}`, () => {
           showWindow('downloader');
           broadcast('app:navigate', { view: 'queue' });
         });
@@ -278,6 +303,7 @@ if (!app.requestSingleInstanceLock()) {
         applyGlobalShortcut((url) => (url ? openLink(url, 'clipboard') : showWindow('downloader')));
       }
       if (next.extension.enabled !== previous.extension.enabled || next.extension.port !== previous.extension.port) startBridge();
+      if (JSON.stringify(next.browser) !== JSON.stringify(previous.browser)) shieldSettingsChanged();
       if (next.library.watchFolders !== previous.library.watchFolders || next.storage.libraryRoots.join() !== previous.storage.libraryRoots.join()) {
         void library.scan().then(() => library.watch());
       }

@@ -153,3 +153,55 @@ describe('the status chips (mockup case 4)', () => {
     expect(rowChip(job('processing', { activity: 'writing' }))?.label).toBe('Writing to disk');
   });
 });
+
+describe('the labelled facts of a finished download', () => {
+  it('say what each number is: size downloaded, time taken, average speed', () => {
+    const d = rowDetail(job('completed', {}, 'ytdlp', { bytes: 13.5 * GB, tookMs: 2_089_340 }), 100, false);
+    expect(d.stats?.map((s) => [s.kind, s.text])).toEqual([['size', '13.5 GB downloaded'], ['time', 'took 34 min 49 s'], ['speed', '6.6 MB/s average']]);
+    // The full sentences are for the tooltip and a screen reader.
+    expect(d.stats?.map((s) => s.label)).toEqual(['Total size of the files that downloaded: 13.5 GB', 'Time spent downloading: 34 min 49 s', 'Average download speed: 6.6 MB/s']);
+  });
+
+  it('say how many items of a playlist made it, first, since that is what a partly failed one is judged by', () => {
+    const j = { ...job('completed', {}, 'ytdlp', { bytes: 13.5 * GB, tookMs: 2_089_340 }), progress: { ...job('completed').progress, item: { index: 332, count: 438, title: '' } }, engineState: { finishedItems: 331 } };
+    expect(rowDetail(j, 100, false).stats?.[0]).toMatchObject({ kind: 'items', text: '331 of 438 items' });
+  });
+
+  it('leave out what is not known and say nothing for a single file’s item count', () => {
+    expect(rowDetail(job('completed', {}, 'ytdlp', { bytes: null, tookMs: 45_000 }), 100, false).stats?.map((s) => s.kind)).toEqual(['time']);
+    expect(rowDetail(job('completed', {}, 'aria2', null), 100, false).stats).toEqual([]);
+  });
+
+  it('are only for a finished download', () => {
+    expect(rowDetail(job('running', { downloadedBytes: 5 * MB, totalBytes: 10 * MB }), 50, false).stats).toBeUndefined();
+  });
+});
+
+describe('telling a finished playlist that lost some items from one that did not', () => {
+  it('reads the sentence the runner writes about failures and recoveries', async () => {
+    const { isPartialSummary } = await import('@core/jobDisplay');
+    expect(isPartialSummary('105 of 438 could not be downloaded: 50 unavailable.')).toBe(true);
+    expect(isPartialSummary('All 10 downloaded (3 items needed a second try). 12 items were recovered on a second try.')).toBe(true);
+    expect(isPartialSummary('Nothing new: everything in this playlist is already in the folder.')).toBe(false);
+    expect(isPartialSummary(null)).toBe(false);
+  });
+});
+
+describe('splitting a long summary for display', () => {
+  it('keeps the first sentence as the headline and the rest apart', async () => {
+    const { splitSummary } = await import('@core/jobDisplay');
+    expect(splitSummary('105 of 438 could not be downloaded: 50 unavailable. Press Retry later.')).toEqual({ headline: '105 of 438 could not be downloaded: 50 unavailable.', rest: 'Press Retry later.' });
+    expect(splitSummary('Done.')).toEqual({ headline: 'Done.', rest: '' });
+    expect(splitSummary('no full stop')).toEqual({ headline: 'no full stop', rest: '' });
+  });
+});
+
+describe('the chip for a host that is limiting the speed', () => {
+  it('says so, in the calm warning colour, while a download is running', () => {
+    expect(rowChip({ status: 'running', progress: progress({ activity: 'limited', connections: 4 }) })).toEqual({ label: 'Host is limiting speed', tone: 'warning' });
+  });
+  it('outranks the plain count of connections, and a reconnect outranks it', () => {
+    expect(rowChip({ status: 'running', progress: progress({ activity: 'limited', connections: 16 }) })?.label).toBe('Host is limiting speed');
+    expect(rowChip({ status: 'running', progress: progress({ activity: 'reconnecting', connections: 16 }) })?.label).toBe('Reconnecting');
+  });
+});

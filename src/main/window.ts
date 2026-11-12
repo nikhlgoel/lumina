@@ -32,7 +32,7 @@ function appIsDark(): boolean {
 
 function overlayColors(m: AppMode) {
   const dark = m === 'player' || appIsDark();
-  return { color: '#00000000', symbolColor: dark ? '#E9E4DC' : '#2A251F', height: 44 };
+  return { color: '#00000000', symbolColor: dark ? '#E9E4DC' : '#2A251F', height: 52 }; // the same as --titlebar in styles.css
 }
 
 export function refreshWindowChrome() {

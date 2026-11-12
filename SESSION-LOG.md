@@ -5,6 +5,254 @@ Read [HANDOVER.md](HANDOVER.md) first for the rules and full project state. **Up
 
 ---
 
+## 2026-11-12 (68) - another round, with different methods: lint for promises, cycles, hostile pages, IPC fuzz, axe, a soak, the Browser question
+
+- **Methods not used before, and what each found.** Type-aware lint (`no-floating-promises`, `no-misused-promises`): the clipboard watcher had no `catch` (a locked Windows clipboard threw every 1.2 s; test
+  fails without the fix, passes with it); `queue.pause` ignored a possibly asynchronous `stop`; the rest were false alarms (`poll` is inside a try/catch; `stop` catches inside). `madge`: one circular
+  dependency (player store <-> audio module), removed by moving the media element to `lib/mediaElement.ts`. `knip`: two unused files, both known (an Excluded-view stand-in for the build variants, parked DHCP
+  work). `web-ext lint` on the Firefox build: 0 errors; the data-collection declaration was missing (added). `pnpm audit --prod`: 11 findings (1 critical, 2 high), see the previous entry.
+  Hostile pages for the extension (`tests/e2e/extension-episodes-e2e.mjs`, 39/39): 100,000 links, garbage and 100 KB addresses, JSON bombs with `__proto__` keys, sandboxed frames, a closed shadow root, no title or a
+  20,000-character one, a page that mutates every 5 ms, 5,000-deep nesting, RTL/emoji/NUL in labels: all answered in 20 ms to 2 s with no error. One honest limit surfaced: an episode list after 100,000 other links was
+  not found (the read is capped at 3,000 links); a second, cheap pass over the rest for links that share the page's path (only where the page's own address counts episodes) finds it in 1.5 s.
+  IPC fuzz in the real app (`LUMINA_PROBE_FUZZ`, `captureFuzz.ts`): 36 read-only channels x 28 hostile payloads = 1008 calls; all settled, main alive, `Object.prototype` clean, the six path-taking channels refused
+  `C:/Windows/win.ini` and `../../..`, no unhandled error in the log. (The preload throws at once for a value nested over 1000 deep; the harness first treated that as a crash of its own.)
+  axe-core (`LUMINA_AXE`, `captureAxe.ts`, not a dependency): see CHANGELOG for what it found; every audited screen now reports nothing. A finding that was an axe quirk, not a defect: linking a row's description with
+  `aria-describedby` made the "visible label" best-practice rule fail the same fields, so only the name link was kept. Renderer soak (`LUMINA_PROBE_LEAK`, `captureLeak.ts`): 120 laps over every screen and settings
+  page: DOM size constant, no console errors, process memory 178 -> 177 MB after a one-time +75 MB for the first visit to each screen (performance.memory is coarsened by Chromium and was useless; the OS working set is read
+  from the main process).
+- **Also found by reading.** The global Ctrl+4 / Ctrl+5 handler mapped to `browser` and `ide` unconditionally, so in a build without either the shortcut landed on an empty pane (the sidebar's own comment says that must
+  not happen). Now one rule for the sidebar and the keys (`core/nav.ts`, tested over every combination).
+- **The Browser question (decided).** The quick check and the page driver (what answers site challenges) use their own throwaway session and window per check (`pageSession` in `hosters.ts`, a random partition, no cache),
+  not the sidebar Browser, which has a persistent `persist:browser` profile and is created lazily. So nothing in downloading or parsing depends on it. It is kept as an option (`browser.showInSidebar`, default off:
+  Settings > Privacy > Lumina's browser) because the Code tab's preview opens it, it can still be the place for a person who has no extension, and its shields and bookmark sync are built and tested; hiding it costs nothing
+  in the background (nothing is created until it is opened). DECISIONS D1 still holds: the person solves a check themselves, in the quick check window, the extension, or (optionally) this browser. The Code item was left alone.
+- **Release gate.** Steps 4d (fuzz + soak, `scripts/check-robust.mjs`). New `.github/workflows/ci.yml` (types, tests, build, extension packages; `pnpm audit` allowed to fail) - not yet run on GitHub. `pnpm install
+  --frozen-lockfile` verified locally. The Firefox minimum stays 121 (declaring a data-collection key earns two informational notes from Mozilla's linter about older versions; the key is ignored by them).
+- **Not done.** Screen-reader behaviour by ear. A real run of ci.yml. The DHCP server (needs a cable and a TV). The Code sidebar item.
+
+## 2026-11-12 (67) - release audit: the gate, bugs found by reading, dependency vulnerabilities, version 1.2.2
+
+- **The gate.** `scripts/release-check.sh` run end to end on the working tree: types, 1816 unit tests, build, driver 41/41, hosts 14/14, gate 17/17, stream 4/4, cancel 7/7, existing 16/16, torrent 10/10,
+  extension e2e 42/42, episodes e2e 25/25, equalizer sound 16/16, property tests (5000 runs each). Two new steps added to it: 4b (sound) and 4c (a series through the real app).
+- **Found by reading, fixed, each with a test.** (1) The series picker made the series folder on every plan call, so typing a name left empty folders ("The R", "The Rep"): planning no longer creates anything
+  (`seriesFolder`, `tests/seriesFolder.test.ts`). (2) The popup asked every page for an episode list, and the row scan used `innerText` on up to every element: on a 36,000-element page that is slow; now
+  bounded (3000 links, 4000 rows, `textContent`), and the row scan runs only on a page whose own address counts episodes (e2e: answered in 1.2 s). (3) On a single-page site a stream seen for episode 3
+  was attributed to episode 5 after the page moved on without a reload: only what was detected on the very page is trusted (e2e scenario). (4) Two checks running on different tabs overwrote one keep-alive
+  timer and leaked it: one timer, counted.
+- **Never run in the real app before, now run.** The tray's equalizer submenu (exported, `tests/trayEqualizer.test.ts`: groups, the checked item, a saved preset by id, the edited entry). An old settings file with a
+  five-band curve and a junk saved preset (loaded, all settings pages and main screens walked: 25 steps, no errors; the file keeps the junk entry, which is ignored on use). The series delivered over the
+  real HTTP bridge (paired, accepted 202, refused 401 without the token), then picked and downloaded (`scripts/check-series.mjs`). Loudness matching with the new chain, in real playback with a library track:
+  a quiet noise track comes up +10.6 dB and returns when switched off (a first run showed +0.0 because the player drops the path of a resolved stream, which is how real streaming tracks are: no path, no
+  matching; the test now plays a library file).
+- **Dependencies.** `pnpm audit --prod` reported 11 (1 critical, 2 high): `dompurify` via monaco (forced to ^3.4.17 in `pnpm-workspace.yaml`), `music-metadata` 11.15 -> 11.16.1, `zod` 4.6.5 -> 4.6.7. Now none.
+  After it: 112 files / 1825 tests, build, the library self-test with a tagged mp3, an mp4 and corrupt files (good ones read, corrupt ones fail in 4 ms), the IDE screens, search 14/14 live.
+- **Release.** Version 1.2.2 (a patch release: the owner asked that the last number move, since this round is bug hunting and patches; it was first labelled 1.3.0 and changed back before publishing), CHANGELOG heading dated 2026-11-12 with "New and improved" first, `extension/manifest.json` 1.2.2, BUGS B3 closed, HANDOVER section 0
+  updated. Dev-only hooks checked: all behind `!app.isPackaged`.
+- **Not done by this script, for the owner.** Install the Standard installer on a second account or a clean machine and open it; the soak (use the candidate for a few days, then read the log for WARN/ERROR);
+  winget (token, first manual submission, `WINGET_TOKEN`); try the series feature on the real site and report what it misses.
+
+## 2026-11-12 (66) - the equalizer: ten bands, real shelves, headroom, 16 presets, saved presets, a glass panel
+
+- **Why.** The owner did not want to use the old one. From the code: five peaking bands (so "treble +6" was a bump at 12 kHz), one anonymous Custom slot, no picture of the curve, native controls that
+  did not match the player, and the limiter ignored the equalizer (`needsLimiter` looked only at best sound, loudness gain and volume boost), so a bass boost on a loud track clipped with Best sound off.
+  Design approved from two mockups (the second made translucent and more tactile); "the background based on what is really behind it, and not too big" came with the approval.
+- **Engine (`core/equalizer.ts`).** Bands 31 62 125 250 500 1k 2k 4k 8k 12k (low shelf, eight peaking at Q 1.41, high shelf). The top shelf is at 12 kHz, not 16: with the corner at 16k a treble boost had a dip at
+  12k (5.6 / 2.2 / 3.4 dB at 8/12/16k, found by the offline measurement). `responseDb` is the Web Audio biquad maths; the same function draws the panel's curve, finds the headroom and moves a dot
+  (`gainForTarget`, solved by bisection: a shelf gives about half its gain at its corner, which a first version assumed away). `headroomDb`: boosts up to 2 dB are left to the limiter, above that 60% of the extra
+  is taken off. `fromFiveBands` re-fits old curves. Saved presets: `player.eqPresets` (ids `u-xxxxxx`, at most 24), `player.eqBase` (what Reset goes back to); `sanitizeUserPresets` on every read.
+- **Graph (`lib/audio.ts`, `core/volume.ts`).** Chain: loudness gain, headroom, ten filters, boost, limiter, soft ceiling (`softCeiling`, identity to 0.93, bends to 0.974). First ceiling had 2x oversampling and
+  the measurement showed it overshooting (1.026 on a jazz preset): ringing at the clipped edge; `none` fixes it. The limiter node adds 0.85 dB make-up gain whenever it is engaged (measured offline, and the live
+  output's constant offset matched it: 0.95 vs 0.85), so a boosting preset is that much louder than flat. Left as it is (best sound has always had it); worth knowing.
+- **Panel (`AudioPanel.tsx`, `EqGraph.tsx`, `.p-glass` in player.css).** Glass: `backdrop-filter` over the real player, tinted `rgb(14 12 22 / .42)`, so the cover's colours (music) and the picture (video) show through.
+  Body scrolls inside `max-height: calc(100vh - 120px)`; the "More" list is a 128 px fading scroll. Dragging a dot turns the equalizer on. Curve writes are throttled to about ten a second (each is a file write and a tray
+  rebuild). In the video player the open panel keeps the controls from auto-hiding (`soundOpen` lifted to PlayerView).
+- **Measured (`LUMINA_PROBE_AUDIO`, `captureAudio.ts` + `captureAudioPanel.ts`; run by `scripts/release-check.sh` step 4b).** Offline, the real chain on sines: all 16 presets at 11 frequencies within 0.001 dB of the
+  maths; flat passes at 0.000 dB; the equalizer alone would take a hot 62 Hz sine to 2.24, with headroom, limiter and ceiling it is 0.973; loud bass-heavy noise stays under 1.0 for every preset. Live, pink noise
+  played through the real player: each preset's output spectrum has the preset's shape to within 0.3 dB in eight octave bands (after the 0.9 dB make-up offset). Panel: a real mouse drag moved the 250 Hz band to
+  +8.5 dB and the settings held it; arrow keys, Shift+arrow, Save as, delete; the panel fits a 900x600 window; in the video player it fits and keeps the controls.
+- **Not verified.** How it sounds to a person (nothing can listen here; the measurements say the curve is what it says). Real music through the live path (pink noise was used so the spectrum is known). Bluetooth
+  and other output devices. A headphone-specific preset was left out on purpose: it would be a guess.
+
+## 2026-11-12 (65) - a whole series from the browser: episode list, "which have a video", one series in Lumina
+
+- **Why it works the way it does.** A series page lists every episode, including ones with nothing behind them yet, and a video's address is usually not in the page's HTML: it is requested by
+  the player once it runs. The browser itself sees that request (the same record the popup's "found on this page" list is made from), so the extension opens each episode in a background tab and
+  reads that record. Doing it in the app instead would need the app to run every site's player.
+- **Extension.** `extension/episodes.js` (reads the list: addresses grouped by shape, the part that counts up by episode; also rows that are not links, with the address built from the page's own
+  `?e=3`), `extension/probe.js` (pure decisions with the browser passed in: which detected request is the episode, adverts left out, nudging the player, a few tabs at a time),
+  background wiring (the check lives in the worker and in session storage so the popup can be closed meanwhile; keep-alive while it runs; a tab opened by a probe tab is closed),
+  popup section, `captureEpisodes` in `lib.js`. New bridge request `POST /v1/capture-episodes` (`hello` says `episodes: true`).
+- **App.** `app:open-episodes`, `EpisodePicker.tsx` (series name, season folders, "New only", already-downloaded episodes left unticked), `series:folder` (made if missing, lists what is there),
+  `DownloadOptions.fileName` (used by `outputTemplate`; a direct file gets its name through `info.direct.filename`), `core/episodes.ts` (names and folders).
+- **Verified.** 14 + 12 + 10 + 6 unit tests (finder, probe against a fake browser, naming, bridge); `tests/e2e/extension-episodes-e2e.mjs` 25/25 in real headless Chrome with the real extension against a
+  replica site (12 listed, 6 with a video: 3 play by themselves, 2 need a click, 1 is in an iframe; the 6 empty ones are reported as empty; no probe tab left open; the one being watched is not opened
+  twice; rows without links; a page with no list). Real app: `LUMINA_PROBE_EPISODES` capture steps (`captureEpisodes.ts`) send three episodes (two HLS, one mp4) from a local server that answers 403
+  without the right Referer; all three downloaded under `Series/The Replica Show/Season 01/` with the right names, H.264 + AAC, so the headers do travel with the episodes.
+- **A real bug the screenshot caught:** the current episode read "Episode 3 - vidy", because a server button links to the same address as that episode's row and the first label on the page won.
+  The label that reads like an episode is kept now (test added).
+- **Not verified.** The real streamex.hn page: its pages did not load in the browser pane used here (it redirected to a search page), so nothing was tested on it, and no episode was downloaded from it.
+  Its list, player and any ad pages may differ from the replica. Real pop-up ads from a probe tab (the guard that closes them is simple, but headless Chrome blocks pop-ups, so it was not exercised).
+  Players whose play button matches none of the selectors in `nudgePlayer`. The picker's look was not shown to the owner first (see the memory note about approving UI).
+
+## 2026-11-12 (64) - torrent settings: choices instead of numbers, and two labels that were untrue
+
+- **Measured, not assumed.** Against the bundled aria2 1.37.0, a finished torrent with no peers: `--seed-time=0` prints "Seeding is over" at once, whatever `--seed-ratio` is
+  (ratio 1.5 / time 0 and ratio 0 / time 0 both stop); `--seed-time=1` keeps seeding with ratio 1.5 or 0. So the old screen's "0 means no time limit" was untrue and a ratio
+  with no time was silently ignored. Also from aria2's own help: `bt-max-peers` default 55, 0 = unlimited; `bt-require-crypto` refuses the plain handshake.
+- **`core/torrentPrefs.ts`** (12 tests, one property): peer presets (Balanced 60 / Fast 120 / Maximum 250; stored value kept, shown as Custom if none), sharing presets
+  (Stop / A little 1:1 or 2 h / Fair share 2:1 or a day / Keep sharing up to a week; a ratio with time 0 is shown as the Stop it really is), `describeSeeding`, and tracker-list
+  checks (`sanitizeTrackers`: schemes udp/http/https/ws/wss only, no credentials, no loopback / private / link-local / `.local` / single-label hosts, 200 characters, 60 entries).
+  Used when the list is downloaded (also capped at 256 KB) and when it is read back from `trackers.txt`.
+- **`LUMINA_SELFTEST_TORRENT`** (`selftestTorrent.ts`, 10/10 in the real app): the presets reach aria2 and apply without a restart; the tracker list handed to the engine has nothing local; a
+  finished torrent is not seeded under Stop, and is under A little / Keep sharing. Added to `scripts/release-check.sh`.
+- **Honesty edits.** Listening port (forward it on the router; takes effect at the next engine start), encryption (what it does and does not hide), proxy (web downloads; torrent peers are not
+  guaranteed to use it, so use a VPN to hide an address). Not verified: whether aria2 sends BitTorrent peer traffic through `all-proxy` (the manual does not say; a web search found nothing
+  authoritative), hence the careful wording.
+- **Security read of the torrent and bridge paths** (no change needed): the bridge checks Host (DNS rebinding), accepts only extension origins, hashes tokens and compares them in constant time, pairing needs a
+  dialog in packaged builds. Noted, not changed: the aria2 RPC secret is on aria2's command line (readable by other processes of the same user, who could already read Lumina's own files);
+  the extension origin check accepts any extension origin, so a different extension could ask to pair, and the person would see the dialog.
+
+## 2026-11-12 (63) - cancel menu and status, own folders, files already on disk, playlist delete, winget
+
+- **Cancel.** Real-app test (`LUMINA_SELFTEST_CANCEL`, slow local server, 7 checks): cancelling a running download, one or all, ends Cancelled and never passes
+  through "failed". The real hole was a download waiting for the network: "failed" underneath, and `cancel()` ignores finished jobs, so it could not be
+  cancelled. Fixed in `queue.cancel` and `groupActionTargets`. New `components/Menu.tsx` (`PopoverMenu`, `ContextMenu`); the pop-up is drawn in a portal because
+  the card's rounded, clipped corners cut it off (seen in a screenshot). Cancelled colour token `--cancelled`.
+- **Folders and files already there.** `core/existingFiles.ts` (decision + folder choice, 12 tests + properties), `main/batchFolder.ts`, IPC `batch:folder`,
+  `DownloadOptions.existingFiles`, `settleExisting` in the aria2 runner. A skipped file is a job that completes at once as "Already on this computer", so the
+  batch counts, the checksum check and the unpack all still work. Real-app test (`LUMINA_SELFTEST_EXISTING`, 11 checks) covers skip, replace, keep-both and the
+  folder choice. `LUMINA_TRASH_TEST=delete|fail` (dev only) stands in for a working or a failing Recycle Bin so a test does not fill the real one. Found by screenshot: a one-group
+  batch defaulted to no own folder; fixed.
+- **Playlist delete.** `core/trashGuard.ts` (7 tests + property), `library.trashPlaylist`, IPC `library:playlist-trash`. Real-app test
+  (`LUMINA_SELFTEST_TRASH`) moved a scratch folder of 3 real MP3s to the real Recycle Bin (it is still there: "Lumina trash test (safe to delete)"), the
+  library dropped it and its songs. Not in `release-check.sh` because it uses the real bin.
+- **winget.** `scripts/winget-manifest.mjs`, `packaging/winget/1.2.1/` (passes `winget validate`), `.github/workflows/winget.yml` (never run), PUBLISHING.md rewritten
+  for it. The Chrome Web Store is paused by the owner (extension stays a developer-mode install).
+- **Review of the new features (independent, read-only) found and I fixed:** replace could permanently delete (now: Recycle Bin or keep both, `LUMINA_TRASH_TEST=delete|fail`
+  stand in for it in tests); replace/skip now apply only to `existingNames` from plan time; unknown size is never "the same"; trashing waits until just before
+  `addToAria`; `uniqueName` reserves names per job so same-named links in one batch do not collide; the picker clears its folder while it re-asks and sends the
+  replace choice only when the notice is showing; nested library roots stay protected in `trashPlaylist`; the playlist dialog no longer undercounts; the popover takes
+  focus. Not fixed: `batchBreakdown` counts network-waiting files as failed; a junction inside the library is not resolved before the trash guard (unverified).
+- **Search.** Measured live first: yt-dlp 3.9 s vs YouTube's web search 0.8 s for 12 videos. `core/searchResults.ts` (parse, counts, TTL cache, dedupe, 18 tests),
+  `main/search.ts` rewritten (independent songs/videos, quick road + yt-dlp fallback, cache, shared in-flight, 13 tests with fakes), IPC `search:songs`/`search:videos`,
+  `SearchPanel` (list/grid, per-section expand, load more, retry). Real-app checks: `LUMINA_SELFTEST_SEARCH` (live, 10 checks, by hand: needs a network) and screenshots
+  of list, expanded, grid, and a click-through of "Load more" (24 cards). A formatting bug found by a property test: 999,999 printed "1000K".
+- Unproven: the quick road reads an undocumented YouTube endpoint and may change shape (the parser returns nothing on a different shape and yt-dlp takes over, tested);
+  the grid on a narrow window; screen-reader use of the new menus.
+- **Whole-app inspection (owner asked).** Method: (1) `settings_audit` over all 142 settings (every one is read somewhere; only the Settings screen mentions none),
+  (2) every Settings row against the Settings search index (15 rows were not findable: added), (3) every backend channel against the screens (nothing important
+  unused), (4) the full capture harness run offscreen (94 screens, hashes compared, console read), (5) a new text scan for leaked placeholders on every Settings
+  page and main screen (`textScan` in `capture.ts`: all clean). **Found and fixed:** dead "Sync bookmarks" switch; browser shield settings with no screen though
+  the browser pointed at Settings (added to Privacy, applied live via `shieldSettingsChanged`); a section of the wrong type in settings.json reset EVERY setting
+  (`section()` now catches per section, an unreadable file is kept as `.unreadable`; 7 tests); an uncaught undici `assert(!this.paused)` while the filter lists
+  downloaded (now `net.fetch`); the disc theme's label art (small cropped square) now fills the label (`DiscLabel`, wide art contained over a blurred copy).
+  **Harness notes:** many identical screenshots in the long walk are steps that need a playing track/video the scratch profile does not have (player, video, DLNA);
+  the `getBoundingClientRect` console error comes from the harness's own IDE steps when no folder is open, not from the app.
+- **Playback quality (owner asked for the best sound by default).** Read the existing path first: loudness matching to -14 LUFS was on, the equalizer off, the limiter only
+  engaged for the volume boost. Added `core/sound.ts` + setting `player.bestSound` (default true, also for old files): target raised to -12 LUFS (`effectiveLoudnessTarget`,
+  used by `player:loudness` in main and by the store when the switch flips), the clarity curve while the person's own equalizer is off (`effectiveEq`, also a selectable
+  profile), and the limiter whenever best sound is on or loudness matching/boost added gain (`needsLimiter`; `limiterSettings(boost, protect)`). `lib/audio.ts` rebuilt around
+  `buildChain` (reusable on an offline context), a graph that keeps itself running (`play` and `statechange` resume it: a graph that is suspended is silence). Measured in
+  the real app with `9000-audio-chain` (offline render of the same chain): limiter holds +6 dB over full scale to 0.987; lifted quiet track peaks 0.945; clarity response matches
+  my RBJ calculation (`eq_solve.mjs`) plus ~0.85 dB that is the DynamicsCompressor's own make-up gain (so everything is ~0.9 dB louder when the limiter is engaged).
+  Not proven: how it sounds (nothing here can listen) or the exclusive output modes of the OS (a web player cannot ask for them; the context follows the device's own rate).
+- **Video player** looked at with a real clip: full-surface picture, controls in the letterbox strip; the pop-ups overlapped the progress bar (lifted). No redesign was made.
+- **Search: albums, playlists, play from results (desktop app only; the Android app was left alone, as asked).** Probed YouTube Music live first (albums 0.86 s, playlists
+  0.6 s; an album's address is its `OLAK5uy_` playlist id). `core/searchResults.ts` `parseMusicCollections`, `queueFromEntries`; `ytmusic.searchMusicRaw` + filters; `search:albums` /
+  `search:playlists`; `SearchPanel` rewritten (four sections, filter pills, round Play button; rows are a `div` with two buttons, no nested buttons). Player: `PlayableItem.lazyUrl`
+  - `loadLazy`/`resolveAt`/`prepareNext` in `stores/player.ts`; `playCollection` in `lib/playLink.ts`. Proven in the real app: live search (`LUMINA_SELFTEST_SEARCH`, 14 checks incl. an
+  album opening as 13 tracks); the UI path (46-48 capture steps); the queue with LOCAL audio served by `python -m http.server 8765` from `scratchpad/audiosrv` (49a-c: track 1 plays, track
+  2 prepared, next plays, missing track skipped with a message, `window.__luminaPlayer` hook). **Not proven:** actual audio from a YouTube album: this machine's scratch profile gets YouTube's
+  "sign in to confirm you are not a bot" check (the app's own message about signing in under Settings > Accounts showed, and the player moved on), so the first real test of an album is the owner's.
+- **Found by that run:** two uncaught `assert(!this.paused)` from undici in the main process: the streaming proxy (`media/protocol.ts` `proxyStream`) read through `fetch`. `net.fetch` was tried
+  and refused (the app blocks loopback/LAN for its own session: ERR_BLOCKED_BY_CLIENT, by design); `media/httpGet.ts` (classic http/https, 8 tests) replaced it: 0 uncaught errors in the same run.
+- Known gaps (not done): custom tool paths (`advanced.customToolPaths`) still have no screen; `downloads.playlistWorkers` has no control; the video-player and
+  DLNA screens were not exercised in this pass (no video in the scratch library).
+- Unproven: a real winget install/pull request; the real Recycle Bin restore round trip (restoring a folder and watching the library find it); skip/replace on a
+  host-hosted (Pixeldrain share) link, where the size may be unknown; the batch picker's notice with real sizes (only names are known before the check).
+
+## 2026-11-12 (62) - twelve links showed as three, the batch row's counts, and a picture for each kind of file
+
+- **Cause found, from the database rather than a theory.** The owner's batch of 12 was fully queued (12 jobs, one release id, all created within 400 ms), yet
+  the row said "3 files". `JobQueue.add()` saved a new job and scheduled it but never emitted `updated`, so the window learned of a job only when it
+  changed state: the three that started were seen, the nine waiting were not (until a restart). Fixed by emitting on add; test in `queueSchedule.test.ts`.
+- Batch row: total in the badge, "3 done · 1 downloading · 8 waiting" (`batchBreakdown`), "Host is limiting speed" when a running part is limited, and the
+  archive/installer/video/audio/etc. icon from `core/iconKind.ts` (names first, job type as the fallback; a .rar set up as music is still an archive).
+- Mistake made and undone: I wrote `core/fileKind.ts` and its test over the existing Library file-kind module (committed, used by the Files tab); tsc caught
+  it at once and both were restored from HEAD. The new code is `core/iconKind.ts`. Check for an existing file before creating one.
+- Seen on screen with the capture harness (a seeded 12-file batch): badge, breakdown, archive icon, installer icon.
+- Second pass (owner asked for a full check plus small conveniences): batch completion now speaks once (`core/batchState.ts`, used by the tray/notify
+  code in `index.ts` and by the toast code in `stores/jobs.ts`; before, 12 toasts + 12 notifications + 12 Explorer windows with "reveal" on). Found by
+  reading the speed watcher: each file had its own memory, so part02 (which began throttled) could never be called limited; `HostPeaks` now shares the
+  host's recent best across files (30 min). Extension: serialised the per-tab media list writes, one flag timer, caught badge errors.
+- Third pass (a different way of looking, at the owner's request). Researched: property-based testing (fast-check), mutation testing (Stryker), model-based and
+  metamorphic tests, a read-only "silent failure" review. **Property tests** (`tests/invariants.test.ts`, 21 properties, `FUZZ_RUNS=10000` to push harder)
+  found: `formatBytes(0.4)` printed "undefined"; `nameFromText` threw on a link equal to an object property name. A hand-read of `extractLinks` found that
+  brackets cut a link. **Silent-failure review** found the throwing-listener queue stall, the restart-with-waiting-jobs state, cancel-during-setup, the
+  `%` decode, the unprotected `finish()` and the lost-download extension path. **Mutation testing** of the new pure modules: slowdown 74→86%, iconKind
+  45→87%, jobGroups 90→92%, batchState 94%; it showed no test for the host-memory expiry, the 15–40% hysteresis band, `reset()`, the cancelled count or
+  "a completed file counts as 100%": all added. Stryker was installed only for the run and removed again; `fast-check` stays as a dev dependency.
+- Not fixed (listed by the review, recorded in HANDOVER): cancelling a *paused* job leaves its partial file; a sharded playlist whose worker dies silently may
+  finish "Done" with items missing; two `app:open-url` links sent before the window has loaded can overwrite each other; 7-Zip exit code 1 counts as success;
+  `live`/`lastEmit` maps never shrink. A circular import `stores/player` <-> `lib/audio` exists but is harmless (used only inside functions).
+- Not fixed, and cannot be: the host's own speed limit after ~9 GB. Lumina names it; it does not lift it.
+
+## 2026-11-12 (61) - a video that came out as audio, names without a new extension, the speed collapse, the header, review fixes
+
+The owner's second live test (screenshots of a video-site capture, the batch screen, a slowing batch).
+
+* **A 45-minute episode came out as a 360 MB FLAC (audio only).** The job in the database: `contentType: music`, format audio/flac, source HLS stream
+  captured from a video page (`index-s1080p-v1-a1.m3u8`, no cookies). Cause: for a stream whose format list carries no codec details yt-dlp lists neither
+  video nor audio, and `guessContentType` read "no video streams" as music, so the options screen preselected Music and Download made a FLAC. The
+  "Lyrics" tab the owner saw is the *music* player. Fixed: audio only if audio is actually listed; nothing listed = video (`core/presets.ts`, tested).
+  **Proven in the real app** with a local HLS stream generated for the test and named like the capture: the probe lists "0 video / 0 audio streams", is now
+  read as video, downloads, and the file has video and audio (`LUMINA_SELFTEST_STREAM=1`). The video options screen already has the subtitle choices
+  the owner asked about (English switch; separate .srt, inside the video as a track, burned in); they were never shown because it opened on Music.
+  Not run on the owner's site: the page is a streaming site, and only its manifest structure was needed, which the log and job record gave.
+* **The batch screen still listed links as names.** The owner's log says `Batch from browser: 12 links (0 named)`: the extension in their browser is the
+  old one, which sends no names. The app now asks the host itself before showing the list (`links:names`, `main/linkNames.ts`: Pixeldrain's info endpoint,
+  3 at a time, retried once, 8 s overall; anything it cannot answer is left as a link). Resolved first and planned once, because planning twice would change
+  the groups under the person's ticks. Confirmed the endpoint returns `name`. Reloading the extension still helps (names then come from the page).
+* **The speed collapse (25 MB/s, then 1 MB/s at ~9 GB).** What is known: part 1 (5 GB) took 3 min 46 s (~24 MB/s) under the 4-connection budget; Pixeldrain's
+  documentation says a file using too much bandwidth can be rate limited and free users have a transfer limit; the owner's files have moved 45-195 GB each
+  (info endpoint, 29-79 downloads). **Probably the host limiting those files; not proven** (a proof would mean downloading more of the file). Lumina cannot
+  lift a host's limit. It now *says so*: `core/slowdown.ts` flags a collapse from a high speed that stays down (and not a dip, a slow-by-nature download, a
+  pause) and the row shows "Host is limiting speed". Still to do (not built): switching to another mirror of the same file when one host limits it.
+* **Header**: taller strip (44 -> 52 px, window buttons too), larger mark (34 px) and wordmark (24 px). Photographed; the page titles move down 8 px.
+* **Review of the retry code** (an independent reviewer) found real defects, all fixed and tested against the real runner: retried items could drop out
+  of the summary (the pre-pass delete is gone); the summary promised a "Retry" button a finished job did not have (it now has one, fetching only the
+  missing items, remembered as `engineState.failedItems`); an extraction error before its item line was pinned on the previous item (now tied to the
+  next planned item); the progress bar fell back to 0 during a retry pass (now measured against the whole playlist). Not checked: whether `playlist_index`
+  and the entry index can disagree when YouTube hides unavailable entries.
+
+## 2026-11-11 (60) - a playlist that lost 105 of 438 items, the Recent row, the accent-coloured mark, and a new README
+
+* **The owner's 438-song YouTube Music playlist ended with 331 songs and "105 item(s) could not be downloaded: The download engine stopped
+  unexpectedly (code 1)".** Found from the job in the database and the log: 4 workers for 35 minutes (16:26-17:01 UTC), 331 files, `failedItems: 105`.
+  The files on disk are numbered by playlist position, so the missing numbers are the failed items: ~50 scattered singles (10, 53, 57, 59-60 ...) and
+  **the whole tail after position 381**. Checked a few of them with yt-dlp (simulate only): one is genuinely "This video is not available"; the rest
+  are YouTube's **"Sign in to confirm you're not a bot"**, i.e. throttling of a client that has fetched hundreds of songs. (Caveat: my check used a stand-in
+  script runtime and the owner's IP may be flagged right now; the log pattern shows it either way.) The message was wrong: it was the first of the 105 errors,
+  yt-dlp's bundled accelerator failing (`aria2c exited with code 1`), worded as the engine dying. The existing accelerator fallback only fires when
+  *nothing* downloaded, so on a playlist where 331 worked there was no fallback at all and no item was ever tried again.
+* **Fix** (`core/ytdlpFailures.ts`, `main/jobs/ytdlp.ts`): each error is tied to its item (the video id it names, else the item being fetched, never one
+  that already produced its file) and sorted: unavailable (no retry), throttled, accelerator, transient. After the pass the recoverable ones are retried
+  after a rest (90 s, then 5 min), one process, native downloader, one fragment, `--sleep-*` between requests, at most twice, and only while a pass is
+  still saving some. The job then says exactly what is left and why ("50 unavailable (removed, private or blocked), 55 refused while the site was limiting
+  downloads ... press Retry in an hour ... or sign in"). Retry later fetches only the missing ones (the per-folder download memory). **Proven** with the real
+  runner against a scripted yt-dlp (`tests/ytdlpRetry.test.ts`, 5 scenarios incl. cancel during a rest and no extra pass after a fruitless one) and 17 unit
+  tests of the rules. **Not proven:** against real YouTube (it is limiting this IP right now, so a live run today would not show it).
+* **The Recent row**: "13.5 GB · 34 min 49 s · 6.6 M…" was the size of the files that downloaded, the active download time (`tookMs`) and the average
+  speed, squeezed beside a long summary and cut off. Finished rows now show the sentence (wrapping; a warning mark and only the first sentence strong when
+  items failed) and labelled facts with icons that wrap: "331 of 438 items", "13.5 GB downloaded", "took 34 min 49 s", "6.6 MB/s average"
+  (`core/jobDisplay.ts` `stats`, tested; `meta` kept for the old tests). Photographed offscreen.
+* **The logo stayed orange on the blue theme**: the mark's colours were hard-coded. Every shade now derives from `--accent` (`color-mix`), and the About
+  page glow too. Photographed with the blue accent.
+* **README rewritten**: the old one led with Fedora, concept-art mock-ups and ten early planning documents. New one: what it does, real screenshots
+  (`docs/screenshots/`, made-up sample music and jobs, generated tone tracks), two Mermaid diagrams (link to file; inside the app), install and extension
+  steps, the tech stack, build steps, the layout, an honest "where it stands", licences. The old concept images are no longer referenced (files left in place).
+  The Mermaid diagrams render on GitHub; **not previewed here.**
+
 ## 2026-11-11 (59) - the owner's first live test: Pixeldrain, FileDitch, names, the Library, and tests that showed on screen
 
 The owner tried the installed 1.2.1 build on their hoster page and sent screenshots. What they showed, what was found, what changed.

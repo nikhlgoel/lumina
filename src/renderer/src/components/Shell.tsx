@@ -1,5 +1,6 @@
 import { withArtSize } from '@core/artwork';
 import { HAS_BROWSER, HAS_IDE } from '@shared/features';
+import { keyFor, navViews, type NavOptions, type NavView } from '@core/nav';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine, ChevronUp, Code2, CircleCheck, CircleX, Globe, Info, Library, ListTodo, PanelLeftClose, PanelLeftOpen, Pause, Play, Settings, SkipForward, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -13,18 +14,18 @@ import { Artwork } from './Artwork';
 import { IconButton } from './ui';
 
 const mod = window.lumina.platform === 'darwin' ? '⌘' : 'Ctrl+';
-type NavItem = { view: View; label: string; icon: ReactNode; shortcut: string };
-const NAV: NavItem[] = [
-  { view: 'download', label: 'Download', icon: <ArrowDownToLine />, shortcut: `${mod}1` },
-  { view: 'queue', label: 'Queue', icon: <ListTodo />, shortcut: `${mod}2` },
-  { view: 'library', label: 'Library', icon: <Library />, shortcut: `${mod}3` },
-  // Filtered rather than hidden: a build without the editor has no editor to navigate to, and
-  // its keyboard shortcut must not land on an empty pane either. See D21.
-  ...(HAS_BROWSER ? [{ view: 'browser' as const, label: 'Browser', icon: <Globe />, shortcut: `${mod}4` }] : []),
-  ...(HAS_IDE ? [{ view: 'ide' as const, label: 'Code', icon: <Code2 />, shortcut: `${mod}5` }] : []),
-  { view: 'settings', label: 'Settings', icon: <Settings />, shortcut: `${mod},` },
-];
-const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info />, shortcut: '' };
+type NavItem = { view: View; label: string; icon: ReactNode };
+// What each screen looks like in the sidebar. Which of them are offered, and the key beside each, come from core/nav (one rule for the sidebar and the keyboard):
+// a build without the editor has no editor to navigate to, and its shortcut must not land on an empty pane either. See D21.
+const NAV_LOOKS: Record<NavView, Omit<NavItem, 'view'>> = {
+  download: { label: 'Download', icon: <ArrowDownToLine /> },
+  queue: { label: 'Queue', icon: <ListTodo /> },
+  library: { label: 'Library', icon: <Library /> },
+  browser: { label: 'Browser', icon: <Globe /> },
+  ide: { label: 'Code', icon: <Code2 /> },
+  settings: { label: 'Settings', icon: <Settings /> },
+};
+const ABOUT: NavItem = { view: 'about', label: 'About', icon: <Info /> };
 
 const COLLAPSE_KEY = 'lumina.sidebar.collapsed';
 const WIDTH_KEY = 'lumina.sidebar.width';
@@ -146,6 +147,8 @@ export function Sidebar() {
   const setView = useApp((s) => s.setView);
   const tools = useApp((s) => s.tools);
   const showStats = useApp((s) => s.settings?.appearance.showSidebarStats ?? true);
+  const showBrowser = useApp((s) => s.settings?.browser.showInSidebar ?? false);
+  const nav: NavOptions = { hasBrowser: HAS_BROWSER, showBrowser, hasIde: HAS_IDE };
   const { active, waiting, speed } = useQueueSummary();
   const stats = useLibrary((s) => s.stats);
   const isMac = window.lumina.platform === 'darwin';
@@ -159,6 +162,8 @@ export function Sidebar() {
     if (el) setPill({ top: el.offsetTop, height: el.offsetHeight });
   }, [view, collapsed]);
 
+  // The key beside an item, from the same rule that decides which keys exist (core/nav). About has none.
+  const shortcutOf = (item: NavItem) => { const k = item.view === 'about' ? '' : keyFor(item.view as NavView, nav); return k ? `${mod}${k}` : ''; };
   const renderNavItem = (item: NavItem) => {
     const selected = view === item.view;
     const badge = item.view === 'queue' ? active + waiting : 0;
@@ -168,7 +173,7 @@ export function Sidebar() {
         ref={(el) => { refs.current[item.view] = el; }}
         onClick={() => setView(item.view)}
         aria-current={selected ? 'page' : undefined}
-        title={item.shortcut ? `${item.label} (${item.shortcut})` : item.label}
+        title={shortcutOf(item) ? `${item.label} (${shortcutOf(item)})` : item.label}
         className={cn(
           'group relative flex h-9 items-center rounded-lg text-sm font-semibold transition-colors duration-150 active:scale-[0.99] [&_svg]:size-[18px]',
           collapsed ? 'justify-center px-0' : 'gap-3 px-2.5',
@@ -219,7 +224,7 @@ export function Sidebar() {
             style={{ top: pill.top, height: pill.height }}
           />
         )}
-        {NAV.map(renderNavItem)}
+        {navViews(nav).map((v) => renderNavItem({ view: v, ...NAV_LOOKS[v] }))}
 
         {/* About sits at the bottom, set apart from the working pages. */}
         <div className={cn('mt-auto border-t border-line pt-2', collapsed ? '-mx-2.5 px-2.5' : '')}>
@@ -268,16 +273,19 @@ export function Sidebar() {
 
 
 /** The crystal from the app icon, so the window and the taskbar match. */
+/** The app mark. Every shade is worked out from the chosen accent colour, so it follows the theme instead of staying orange beside a blue one. */
+const shade = (accent: number, toward: 'white' | 'black') => `color-mix(in srgb, var(--accent) ${accent}%, ${toward})`;
+
 export function BrandMark({ className }: { className?: string }) {
   return (
     <span className={cn('grid place-items-center', className)}>
       <svg viewBox="0 0 32 32" className="size-full" aria-hidden="true">
-        <polygon points="16,1 29,8.5 16,16 3,8.5" fill="#FFC27F" />
-        <polygon points="3,8.5 16,16 16,31 3,23.5" fill="#E8752F" />
-        <polygon points="29,8.5 29,23.5 16,31 16,16" fill="#A8441A" />
-        <polygon points="16,1.8 28.3,8.9 28.3,23.1 16,30.2 3.7,23.1 3.7,8.9" fill="none" stroke="#FFE9CC" strokeOpacity="0.9" strokeWidth="1.2" strokeLinejoin="round" />
-        <circle cx="16" cy="16" r="6.6" fill="#FFF1DE" />
-        <g fill="#C4531B" stroke="#C4531B" strokeWidth="0.8" strokeLinejoin="round">
+        <polygon points="16,1 29,8.5 16,16 3,8.5" style={{ fill: shade(45, 'white') }} />
+        <polygon points="3,8.5 16,16 16,31 3,23.5" style={{ fill: 'var(--accent)' }} />
+        <polygon points="29,8.5 29,23.5 16,31 16,16" style={{ fill: shade(72, 'black') }} />
+        <polygon points="16,1.8 28.3,8.9 28.3,23.1 16,30.2 3.7,23.1 3.7,8.9" fill="none" style={{ stroke: shade(18, 'white') }} strokeOpacity="0.9" strokeWidth="1.2" strokeLinejoin="round" />
+        <circle cx="16" cy="16" r="6.6" style={{ fill: shade(10, 'white') }} />
+        <g style={{ fill: shade(85, 'black'), stroke: shade(85, 'black') }} strokeWidth="0.8" strokeLinejoin="round">
           <rect x="14.7" y="11.3" width="2.6" height="6.1" rx="1.1" stroke="none" />
           <path d="M12.2 15.9 L19.8 15.9 L16 21.2 Z" />
         </g>
@@ -288,9 +296,9 @@ export function BrandMark({ className }: { className?: string }) {
 
 function Brand({ collapsed }: { collapsed: boolean }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <BrandMark className="size-7 shrink-0" />
-      {!collapsed && <span className="font-serif text-[20px] leading-none tracking-tight">Lumina</span>}
+    <div className="flex items-center gap-3">
+      <BrandMark className="size-[34px] shrink-0" />
+      {!collapsed && <span className="font-serif text-[24px] leading-none tracking-tight">Lumina</span>}
     </div>
   );
 }
@@ -325,24 +333,19 @@ export function MiniBar() {
   const pct = duration ? (time / duration) * 100 : 0;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Open player: ${item.title}`}
-      title="Open player"
-      onClick={(e) => { if (!(e.target as HTMLElement).closest('[data-mini-control]')) open(); }}
-      onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); open(); } }}
-      className="group relative flex h-[68px] shrink-0 cursor-pointer items-center gap-3 border-t border-line bg-panel px-4 transition-colors duration-200 hover:bg-raised animate-rise"
-    >
-      <span className="absolute top-0 left-0 h-px bg-accent transition-[width] duration-500 ease-linear" style={{ width: `${pct}%` }} />
-      <div style={{ viewTransitionName: inPlayer ? undefined : 'now-playing-art' }} className="rounded-md">
+    // A button over the whole bar opens the player; the play and next controls are siblings above it, never inside it (a control inside a button is invalid, and a
+    // screen reader or the keyboard cannot tell which of the two is meant). What is drawn behind the button is for the eyes; the button carries the name.
+    <div className="group relative flex h-[68px] shrink-0 items-center gap-3 border-t border-line bg-panel px-4 transition-colors duration-200 hover:bg-raised animate-rise">
+      <button type="button" onClick={open} aria-label={`Open player: ${item.title}`} title="Open player" className="absolute inset-0 z-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" />
+      <span aria-hidden="true" className="pointer-events-none absolute top-0 left-0 h-px bg-accent transition-[width] duration-500 ease-linear" style={{ width: `${pct}%` }} />
+      <div aria-hidden="true" style={{ viewTransitionName: inPlayer ? undefined : 'now-playing-art' }} className="pointer-events-none relative rounded-md">
         <Artwork src={withArtSize(item.artworkUrl, 44)} seed={item.album ?? item.title} kind={item.kind} className="size-11 shadow-sm transition-transform duration-200 group-hover:scale-[1.04]" rounded="rounded-md" />
       </div>
-      <div className="min-w-0 flex-1">
+      <div aria-hidden="true" className="pointer-events-none relative min-w-0 flex-1">
         <div className="truncate text-sm font-semibold">{item.title}</div>
         <div className="truncate text-[13px] text-ink-3">{item.artist ?? (item.kind === 'video' ? 'Video' : 'Unknown artist')}</div>
       </div>
-      <div data-mini-control className="flex items-center gap-1">
+      <div className="relative z-10 flex items-center gap-1">
         <button
           onClick={toggle}
           aria-label={playing ? 'Pause' : 'Play'}
@@ -352,7 +355,7 @@ export function MiniBar() {
         </button>
         <IconButton label="Next" onClick={next}><SkipForward /></IconButton>
       </div>
-      <ChevronUp className="size-5 text-ink-3 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:text-ink" aria-hidden="true" />
+      <ChevronUp className="pointer-events-none relative size-5 text-ink-3 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:text-ink" aria-hidden="true" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 // Shows a pasted release (a split archive and the unpack job that follows it) as ONE download in the
 // Queue and the Recent strip instead of a row per volume. Pure: takes jobs, returns grouping + rollup,
 // so the Queue UI can render a single progress bar and one set of controls for the whole release.
+import { isWaitingForNetwork } from './jobDisplay';
 import type { Job, JobStatus } from '../shared/types';
 
 export interface JobGroup {
@@ -159,9 +160,28 @@ export function groupActionTargets(members: Job[], action: 'pause' | 'resume' | 
   const match: Record<typeof action, (j: Job) => boolean> = {
     pause: (j) => j.status === 'running' || j.status === 'processing' || j.status === 'queued',
     resume: (j) => j.status === 'paused',
-    cancel: (j) => j.status === 'running' || j.status === 'processing' || j.status === 'queued' || j.status === 'paused',
+    cancel: (j) => j.status === 'running' || j.status === 'processing' || j.status === 'queued' || j.status === 'paused' || isWaitingToRetry(j),
     retry: (j) => j.status === 'failed' || j.status === 'cancelled',
     remove: (j) => j.status === 'completed' || j.status === 'failed' || j.status === 'cancelled',
   };
   return members.filter(match[action]).map((j) => j.id);
 }
+
+/**
+ * How a batch stands, in words: "3 done · 1 downloading · 8 waiting". Only the states that have files appear, in the order a person reads
+ * them; a batch that is all done says so in the row's own status line instead.
+ */
+export function batchBreakdown(c: GroupSummary['counts']): string[] {
+  const parts: string[] = [];
+  if (c.completed) parts.push(`${c.completed} done`);
+  if (c.active) parts.push(`${c.active} downloading`);
+  if (c.queued) parts.push(`${c.queued} waiting`);
+  if (c.paused) parts.push(`${c.paused} paused`);
+  if (c.failed) parts.push(`${c.failed} failed`);
+  if (c.cancelled) parts.push(`${c.cancelled} cancelled`);
+  return parts;
+}
+
+/** Failed underneath, but going to start again by itself (waiting for the network, or for a retry's timer): it can still be cancelled. */
+export const isWaitingToRetry = (j: Pick<Job, 'status' | 'progress'>): boolean =>
+  j.status === 'failed' && (isWaitingForNetwork(j) || /^Retrying in /.test(j.progress.stage ?? ''));

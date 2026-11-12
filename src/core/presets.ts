@@ -35,8 +35,12 @@ export function defaultPresetFor(content: ContentType, configured: Record<Conten
 
 /** Decide music/video/series from the inspected source. */
 export function guessContentType(info: MediaInfo): ContentType {
-  if (info.isMusic || info.videoStreams.length === 0) return 'music';
-  return 'video';
+  if (info.isMusic) return 'music';
+  if (info.videoStreams.length > 0) return 'video';
+  // No picture is listed. If audio is, it really is audio. If NOTHING is listed, the source tells us nothing about its tracks (an HLS playlist
+  // captured from a video page lists no codecs at all) and "no video found" is not "no video": it used to be read as music, and a whole episode
+  // came out as an audio-only FLAC. A source that lists no tracks is a video.
+  return info.audioStreams.length > 0 ? 'music' : 'video';
 }
 
 /** Highest height the source offers, used to disable tiers it cannot reach. */

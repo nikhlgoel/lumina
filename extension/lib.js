@@ -168,6 +168,32 @@ export async function captureBatch({ urls, names = {}, pageUrl, pageTitle }, tim
   }
 }
 
+/**
+ * Send the episodes of a series, each with the address of its own video and the headers that video was asked for with (a stream's host
+ * usually wants the page it was played on as Referer). Lumina shows them as a list to confirm. Resolves { accepted, count, reason, unsupported }.
+ */
+export async function captureEpisodes({ show, items, pageUrl, pageTitle }, timeoutMs = 15_000) {
+  const origins = [...new Set(items.flatMap((i) => [i.url, i.pageUrl]).map((u) => { try { return new URL(u).origin; } catch { return ''; } }).filter(Boolean))].slice(0, 8);
+  const cookies = await cookiesFor(pageUrl, ...origins);
+  const keep = /^(referer|origin|user-agent|accept-language)$/i;
+  const body = {
+    show,
+    items: items.map((i) => ({
+      number: i.number, season: i.season, title: i.title, url: i.url, kind: i.kind, pageUrl: i.pageUrl,
+      headers: Object.fromEntries(Object.entries(i.headers ?? {}).filter(([k, v]) => v && keep.test(k))),
+    })),
+    request: { pageUrl, pageTitle, headers: pageUrl && /^https?:/.test(pageUrl) ? { Referer: pageUrl } : {}, cookies },
+  };
+  try {
+    const r = await request('/v1/capture-episodes', { method: 'POST', timeoutMs, body: fitToBridge(body) });
+    if (r.status === 401) await setConfig({ token: null });
+    if (r.status === 404) return { accepted: false, unsupported: true };
+    return { accepted: Boolean(r.ok && r.data?.accepted !== false), count: r.data?.count ?? items.length, reason: r.data?.reason ?? r.data?.error };
+  } catch (err) {
+    return { accepted: false, reason: err?.name === 'TimeoutError' ? 'Lumina took too long to answer' : 'Lumina isn’t reachable' };
+  }
+}
+
 export const formatBytes = (n) => {
   if (!n) return '';
   const u = ['B', 'KB', 'MB', 'GB'];

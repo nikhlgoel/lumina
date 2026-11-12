@@ -15,8 +15,12 @@ const time = (fallback: string) => z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 const hexColor = (fallback: string) => z.string().regex(/^#[0-9a-fA-F]{6}$/).catch(fallback);
 
 /** An object whose every field has a fallback, so a missing or partial section parses to defaults. */
-const section = <T extends z.ZodRawShape>(shape: T) =>
-  z.object(shape).prefault({} as z.input<z.ZodObject<T>>);
+const section = <T extends z.ZodRawShape>(shape: T) => {
+  const object = z.object(shape);
+  // A section that is not an object at all (a hand edit, `null`, an old file) used to fail the whole file, and every setting with it went back to
+  // its default. Now only that section does.
+  return object.prefault({} as z.input<z.ZodObject<T>>).catch(() => object.parse({}));
+};
 
 /**
  * Every setting has a default, so partial or outdated files always parse.
@@ -182,14 +186,26 @@ export const settingsSchema = z.object({
      * peaking above full scale — up to +5.6 dBFS — which clips on playback and is heard as harsh
      * rather than loud. Normalising pulls those peaks back under the ceiling as a side effect.
      */
+    /**
+     * Best sound: loudness matched a little above streaming level (-12 LUFS), a gentle clarity curve, and a limiter just under full scale so the extra
+     * loudness cannot clip (core/sound.ts). A person's own equalizer choice replaces the curve. On by default.
+     */
+    bestSound: z.boolean().catch(true),
     normalizeLoudness: z.boolean().catch(true),
     /** The level to match, in LUFS. -14 is what the streaming services settled on. */
     loudnessTarget: clampNum(-30, -5, -14),
     eqEnabled: z.boolean().catch(false),
     /** A built-in profile id (see core/equalizer) or 'custom'. */
     eqProfile: z.string().max(40).catch('flat'),
-    /** Custom band gains in dB (one per EQ band); only used when eqProfile === 'custom'. */
-    eqBands: z.array(z.coerce.number().min(-12).max(12)).max(16).catch([0, 0, 0, 0, 0]),
+    /**
+     * Band gains in dB: ten, one per EQ band, only used when eqProfile === 'custom' (a curve the person has edited). A five-band curve saved by an
+     * earlier version is re-fitted to ten when it is read (core/equalizer).
+     */
+    eqBands: z.array(z.coerce.number().min(-12).max(12)).max(16).catch([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    /** The preset an edited curve started from, so "Reset" can go back to it. */
+    eqBase: z.string().max(40).catch('flat'),
+    /** Presets the person saved under their own name (ids start with "u-"); cleaned on use (core/equalizer sanitizeUserPresets). */
+    eqPresets: z.array(z.object({ id: z.string().max(40), name: z.string().max(60), bands: z.array(z.coerce.number()).max(16) })).max(24).catch([]),
   }),
 
   network: section({
@@ -233,6 +249,12 @@ export const settingsSchema = z.object({
 
   /** The in-app browser's shield. See D20. */
   browser: section({
+    /**
+     * Show the browser in the sidebar. Off by default: downloads, the quick check for a site's own page and the page reader all have windows of their own and
+     * do not need it, and the extension covers browsing in the person's own browser. It stays for the ones who want a browser that hands downloads to Lumina,
+     * and is what the code editor's preview opens.
+     */
+    showInSidebar: z.boolean().catch(false),
     shieldsEnabled: z.boolean().catch(true),
     /** Which of the public filter lists to use, by name (see main/shields/lists.ts). */
     shieldLists: z.array(z.string().max(40)).max(20).catch(['easylist', 'easyprivacy', 'malware', 'annoyances']),

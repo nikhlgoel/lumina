@@ -130,7 +130,11 @@ export async function syncNow(): Promise<SyncStatus> {
   if (!folder) throw new Error('Choose a sync folder first — a USB drive or a folder both devices can reach.');
   if (!fs.existsSync(folder)) throw new Error('That sync folder isn’t available. Reconnect the drive or pick another folder.');
 
-  const local = await collect(providers, new Map());
+  // What is synced follows the switches in Settings: with "Sync bookmarks" off, bookmarks neither go out nor come in.
+  const active = settings.get().sync.syncBookmarks ? providers : [];
+  if (!active.length) throw new Error('Nothing is switched on to sync. Turn on “Sync bookmarks” first.');
+
+  const local = await collect(active, new Map());
   const result = syncWithFile(path.join(folder, SYNC_FILE_NAME), seed, local);
   if (result.status !== 'ok') {
     throw new Error(
@@ -139,7 +143,7 @@ export async function syncNow(): Promise<SyncStatus> {
         : `Sync couldn’t complete (${result.error}).`,
     );
   }
-  await distribute(providers, result.store);
+  await distribute(active, result.store);
   lastSyncedAt = Date.now();
   log.info(`sync complete (${result.wrote ? 'wrote' : 'no write'}; ${bookmarks().list().length} bookmarks)`);
   return syncStatus();

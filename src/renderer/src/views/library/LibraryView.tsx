@@ -182,10 +182,7 @@ function MusicList({ items, loaded, searching, view }: { items: LibraryItem[]; l
           const tag = qualityTag(item);
           return (
             <div
-              role="button"
-              tabIndex={0}
               onDoubleClick={() => play(index)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && play(index)}
               className={cn('group grid h-full items-center gap-3 px-3 transition-colors hover:bg-hover', cols, isCurrent && 'bg-accent-soft')}
             >
               <button data-play aria-label={`Play ${item.title}`} className="relative" onClick={(e) => { e.stopPropagation(); play(index); }}>
@@ -286,10 +283,7 @@ function VideoGrid({ items, loaded, searching, view }: { items: LibraryItem[]; l
             const tag = qualityTag(item);
             return (
               <div
-                role="button"
-                tabIndex={0}
                 onDoubleClick={() => openAt(i)}
-                onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && openAt(i)}
                 className="group grid h-full grid-cols-[96px_1fr_auto] items-center gap-3 px-3 transition-colors hover:bg-hover"
               >
                 <button aria-label={`Play ${item.title}`} className="relative overflow-hidden rounded-md" onClick={(e) => { e.stopPropagation(); openAt(i); }}>

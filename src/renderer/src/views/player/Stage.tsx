@@ -66,6 +66,22 @@ function Cover({ src, seed }: { src: string | null; seed: string }) {
   );
 }
 
+/**
+ * The middle of the record: the song's picture fills the whole round label. A square cover is simply cropped to the circle. A wide picture (a video
+ * thumbnail) would lose its sides that way, so it is shown across the full width of the label over a blurred, enlarged copy of itself, which fills the
+ * rest, instead of being cut down to a small square in the middle.
+ */
+function DiscLabel({ src, seed }: { src: string | null; seed: string }) {
+  const [ratio, setRatio] = useState(1);
+  const wide = ratio > 1.15 || ratio < 0.87;
+  return (
+    <div className="p-label">
+      {src && wide && <img src={src} alt="" aria-hidden="true" draggable={false} className="absolute inset-0 size-full scale-150 object-cover opacity-90 blur-xl saturate-150" />}
+      <Artwork src={src} seed={seed} fit={wide ? 'contain' : 'cover'} className="absolute inset-0 size-full" rounded="rounded-none" style={{ background: 'transparent' }} onRatio={setRatio} />
+    </div>
+  );
+}
+
 export function ArtView({ item, theme, off }: { item: PlayableItem; theme: PlayerTheme; off: boolean }) {
   const reduced = document.documentElement.dataset.motion === 'reduced';
   const record = useRecordSpin(usePlayer((s) => s.playing), reduced, theme === 'vinyl');
@@ -84,10 +100,7 @@ export function ArtView({ item, theme, off }: { item: PlayableItem; theme: Playe
       {theme === 'vinyl' && (
         <div className="p-deck">
           <div ref={record} className="p-record">
-            {/* The largest square that fits inside a circle is ~71% of its width. Showing the whole
-                picture there, on a ring of the song's own colour, stops the label from slicing the
-                corners (and any title text in them) off the cover. */}
-            <div className="p-label"><div className="p-label-art"><Artwork src={art} seed={item.album ?? item.title} className="size-full" rounded="rounded-none" /></div></div>
+            <DiscLabel src={art} seed={item.album ?? item.title} />
           </div>
           {/* Painted apart from the record: light on a real LP stays put while the disc turns under it. */}
           <div className="p-sheen" aria-hidden="true" />

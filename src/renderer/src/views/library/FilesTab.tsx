@@ -71,10 +71,7 @@ export function FilesTab({ query }: { query: string }) {
             {group.files.map((f) => (
               <div
                 key={f.path}
-                role="button"
-                tabIndex={0}
                 onDoubleClick={() => open(f)}
-                onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && open(f)}
                 className="group grid grid-cols-[36px_1fr_auto] items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0 transition-colors hover:bg-hover"
               >
                 <span className="grid size-9 place-items-center rounded-md bg-sunken text-ink-3 [&_svg]:size-4">{ICONS[group.kind]}</span>

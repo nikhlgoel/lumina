@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { defaultSettings, mergeSettings, parseExtraArgs, settingsSchema, speedLimitActive } from '@shared/settings';
 import { assForceStyle } from '@core/subtitleStyle';
-import { classifyUrl, cleanUrl, extractLinks, isMusicSite, toInspectTarget, youtubeId, youtubeThumb } from '@core/url';
+import { classifyUrl, cleanUrl, extractLinks, isMusicSite, safeDecode, toInspectTarget, youtubeId, youtubeThumb } from '@core/url';
 import { parseStreams } from '@core/streams';
 import { audioFormatArgs, buildDownloadArgs, outputTemplate, previewTemplate, SQUARE_ARTWORK_PPA, videoFormatArgs, type BuildArgsInput } from '@core/ytdlpArgs';
 import { parseYtdlpLine, friendlyYtdlpError, friendlyAria2Error, isCookieReadError, progressIndeterminate } from '@core/progress';
@@ -377,5 +377,22 @@ describe('progressIndeterminate — the looping bar that reads as "stuck"', () =
 
   it('is off for a nonsense percent rather than animating for ever', () => {
     expect(progressIndeterminate({ percent: Number.NaN, item: { index: 1, count: 2 } })).toBe(false);
+  });
+});
+
+describe('extractLinks and brackets', () => {
+  it('keeps brackets that belong to the link and drops the ones from the sentence around it', () => {
+    expect(extractLinks('get (https://a.test/x.rar) now')).toEqual(['https://a.test/x.rar']);
+    expect(extractLinks('https://a.test/Setup_(x64).exe')).toEqual(['https://a.test/Setup_(x64).exe']);
+    expect(extractLinks('(see https://en.wikipedia.org/wiki/Foo_(bar)).')).toEqual(['https://en.wikipedia.org/wiki/Foo_(bar)']);
+    expect(extractLinks('links: https://a.test/1.zip, https://a.test/2.zip.')).toEqual(['https://a.test/1.zip', 'https://a.test/2.zip']);
+  });
+});
+
+describe('safeDecode', () => {
+  it('decodes escapes and leaves a stray % alone instead of throwing', () => {
+    expect(safeDecode('Game%20One.zip')).toBe('Game One.zip');
+    expect(safeDecode('50%off.zip')).toBe('50%off.zip');
+    expect(safeDecode('100%')).toBe('100%');
   });
 });

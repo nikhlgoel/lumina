@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AudioOutputDevice } from '../shared/ipc';
-import { EQ_PROFILES } from '../core/equalizer';
+import { EQ_GROUP_LABELS, EQ_PROFILES, sanitizeUserPresets, type EqGroup } from '../core/equalizer';
 import { overallPercent } from '../core/jobGroups';
 import {
   downloadItems, idlePlayback, pauseAllOrder, playbackItems, type TrayItem, type TrayPlayback,
@@ -43,23 +43,27 @@ function audioOutputSubmenu(): MenuItemConstructorOptions[] {
   return items;
 }
 
-/** Submenu to switch the equalizer profile (or turn it off) straight from the tray. */
-function equalizerSubmenu(): MenuItemConstructorOptions[] {
+/** Submenu to switch the equalizer preset (or turn it off) straight from the tray: the everyday ones on top, genres and situations below, then the person's own. */
+export function equalizerSubmenu(): MenuItemConstructorOptions[] {
   const p = settings.get().player;
+  const pick = (id: string) => () => settings.update({ player: { eqEnabled: true, eqProfile: id } });
   const items: MenuItemConstructorOptions[] = [
     { label: 'Off', type: 'radio', checked: !p.eqEnabled, click: () => settings.update({ player: { eqEnabled: false } }) },
-    { type: 'separator' },
   ];
-  for (const prof of EQ_PROFILES) {
-    items.push({
-      label: prof.name,
-      type: 'radio',
-      checked: p.eqEnabled && p.eqProfile === prof.id,
-      click: () => settings.update({ player: { eqEnabled: true, eqProfile: prof.id } }),
-    });
+  for (const group of Object.keys(EQ_GROUP_LABELS) as EqGroup[]) {
+    const here = EQ_PROFILES.filter((prof) => prof.group === group);
+    if (group === 'everyday') {
+      items.push({ type: 'separator' }, ...here.map((prof): MenuItemConstructorOptions => ({ label: prof.name, type: 'radio', checked: p.eqEnabled && p.eqProfile === prof.id, click: pick(prof.id) })));
+    } else {
+      items.push({ label: EQ_GROUP_LABELS[group], submenu: here.map((prof): MenuItemConstructorOptions => ({ label: prof.name, type: 'radio', checked: p.eqEnabled && p.eqProfile === prof.id, click: pick(prof.id) })) });
+    }
+  }
+  const mine = sanitizeUserPresets(p.eqPresets);
+  if (mine.length) {
+    items.push({ type: 'separator' }, ...mine.map((prof): MenuItemConstructorOptions => ({ label: prof.name, type: 'radio', checked: p.eqEnabled && p.eqProfile === prof.id, click: pick(prof.id) })));
   }
   if (p.eqEnabled && p.eqProfile === 'custom') {
-    items.push({ type: 'separator' }, { label: 'Custom (set in the player)', type: 'radio', checked: true, enabled: false });
+    items.push({ type: 'separator' }, { label: 'Edited (set in the player)', type: 'radio', checked: true, enabled: false });
   }
   return items;
 }

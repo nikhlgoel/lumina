@@ -53,6 +53,8 @@ export function watchClipboard(onLink: (url: string) => void): () => void {
       last = text;
       const link = extractLinks(text)[0];
       if (link && (link.startsWith('magnet:') || /^https?:\/\/[^/]+\/.+/.test(link))) onLink(link);
+    } catch {
+      // Another program has the clipboard open (Windows allows one at a time), or the link handler failed: look again at the next tick, quietly.
     } finally {
       busy = false;
     }

@@ -276,7 +276,7 @@ export function EmptyState({ icon, title, children, action }: { icon: ReactNode;
   return (
     <div className="mx-auto flex max-w-sm flex-col items-center py-16 text-center">
       <div className="mb-4 grid size-12 place-items-center rounded-2xl border border-line bg-raised text-ink-3 shadow-sm [&_svg]:size-5">{icon}</div>
-      <h3 className="text-[15px] font-semibold">{title}</h3>
+      <h2 className="text-[15px] font-semibold">{title}</h2>
       {children && <p className="mt-1.5 text-sm leading-relaxed text-ink-3">{children}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>

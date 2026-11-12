@@ -19,6 +19,7 @@ let token = '';
 const batches: { urls: string[]; names: Record<string, string>; request: { cookies: { name: string }[]; fromLink?: boolean; pageUrl?: string } }[] = [];
 const captures: { kind: string; request: { cookies: { name: string }[]; fromLink?: boolean } }[] = [];
 const logins: { site: string; names: string[] }[] = [];
+const episodeBatches: { show: string; items: { number: number; season: number; title: string; url: string; kind: string; headers: Record<string, string> }[]; request: { cookies: { name: string }[]; fromLink?: boolean } }[] = [];
 
 const call = (path: string, init: { method?: string; body?: unknown; auth?: boolean } = {}) =>
   fetch(`http://127.0.0.1:${PORT}${path}`, {
@@ -36,6 +37,7 @@ beforeAll(async () => {
     window: () => null,
     onCapture: async (c) => { captures.push(c as never); return { accepted: true }; },
     onCaptureBatch: async (urls, request, _signal, names) => { batches.push({ urls, names, request: request as never }); return { accepted: true, count: urls.length }; },
+    onCaptureEpisodes: async (batch) => { episodeBatches.push(batch as never); return { accepted: true, count: batch.items.length }; },
     onAccountCookies: async (site, cookies) => {
       logins.push({ site, names: cookies.map((c) => c.name) });
       return { saved: cookies.length, signedIn: cookies.some((c) => c.name === 'SID') };
@@ -200,5 +202,50 @@ describe('the names a page gives its links', () => {
   it('refuses a name that is far too long instead of passing it on', async () => {
     const r = await call('/v1/capture-batch', { method: 'POST', body: { urls: ['https://a.example/x'], names: ['x'.repeat(5000)], request: { headers: {}, cookies: [] } } });
     expect(r.status).toBe(400);
+  });
+});
+
+describe('episodes of a series', () => {
+  const item = (n: number, over: Record<string, unknown> = {}) => ({ number: n, season: 1, title: `Ep ${n}`, url: `https://cdn.example/e${n}/master.m3u8`, kind: 'stream', pageUrl: `https://site.example/w?e=${n}`, headers: { Referer: 'https://site.example/' }, ...over });
+  const send = (body: unknown, auth = true) => call('/v1/capture-episodes', { method: 'POST', auth, body });
+
+  it('tells the extension that series are understood', async () => {
+    expect(await (await call('/v1/hello')).json()).toMatchObject({ episodes: true });
+  });
+
+  it('takes the episodes with the video address and headers of each', async () => {
+    const res = await send({ show: 'The Show', items: [item(1), item(2)], request: { pageUrl: 'https://site.example/w?e=1', headers: {}, cookies: jar(['session']) } });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ accepted: true, count: 2 });
+    const got = episodeBatches.at(-1)!;
+    expect(got.show).toBe('The Show');
+    expect(got.items.map((i) => i.url)).toEqual(['https://cdn.example/e1/master.m3u8', 'https://cdn.example/e2/master.m3u8']);
+    expect(got.items[0]!.headers).toEqual({ Referer: 'https://site.example/' });
+    expect(got.request.fromLink).toBe(true);
+  });
+
+  it('keeps only the few headers a video host is asked with, and cleans a title written by a web page', async () => {
+    await send({ show: 'S', items: [item(1, { title: 'A\u0000 \n  B', headers: { Referer: 'https://a/', Cookie: 'secret', Authorization: 'Bearer x', 'X-Evil': '1' } })], request: { headers: {}, cookies: [] } });
+    const got = episodeBatches.at(-1)!.items[0]!;
+    expect(Object.keys(got.headers)).toEqual(['Referer']);
+    expect(got.title).toBe('A B');
+  });
+
+  it('never passes on a bot-check cookie', async () => {
+    await send({ show: 'S', items: [item(1)], request: { headers: {}, cookies: jar(['cf_clearance', 'ok']) } });
+    expect(episodeBatches.at(-1)!.request.cookies.map((c) => c.name)).toEqual(['ok']);
+  });
+
+  it('refuses an address that is not a web address, an empty list, too many, and anyone who has not paired', async () => {
+    expect((await send({ show: 'S', items: [item(1, { url: 'file:///C:/secret.mkv' })], request: { headers: {}, cookies: [] } })).status).toBe(400);
+    expect((await send({ show: 'S', items: [item(1, { url: 'magnet:?xt=urn:btih:abc' })], request: { headers: {}, cookies: [] } })).status).toBe(400);
+    expect((await send({ show: 'S', items: [], request: { headers: {}, cookies: [] } })).status).toBe(400);
+    expect((await send({ show: 'S', items: Array.from({ length: 301 }, (_, i) => item(i)), request: { headers: {}, cookies: [] } })).status).toBe(400);
+    expect((await send({ show: 'S', items: [item(1)], request: { headers: {}, cookies: [] } }, false)).status).toBe(401);
+  });
+
+  it('falls back to a plain link for a kind it does not know', async () => {
+    await send({ show: 'S', items: [item(1, { kind: 'weird' })], request: { headers: {}, cookies: [] } });
+    expect(episodeBatches.at(-1)!.items[0]!.kind).toBe('link');
   });
 });

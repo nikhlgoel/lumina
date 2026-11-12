@@ -3,6 +3,7 @@ import { SPONSOR_CATEGORIES } from '@shared/settings';
 import { previewTemplate, outputTemplate } from '@core/ytdlpArgs';
 import type { AiModelStatus, DownloadOptions } from '@shared/types';
 import { formatBytes } from '@core/format';
+import { PEER_PRESETS, SEED_PRESETS, describeSeeding, peerPresetOf, seedPresetOf } from '@core/torrentPrefs';
 import { cleanBindList, type LocalAddress } from '@core/networkBind';
 import { call, errorMessage } from '@/lib/bridge';
 import { useApp } from '@/stores/app';
@@ -255,11 +256,19 @@ export function SubtitlesSection({ s, set }: SectionProps) {
 
 export function TorrentsSection({ s, set }: SectionProps) {
   const t = s.torrents;
+  const peerPreset = peerPresetOf(t.maxPeers);
+  const seedPreset = seedPresetOf(t.seedRatio, t.seedMinutes);
   return (
     <>
       <Group title="Speed and peers">
-        <Row id="maxPeers" label="Peers per torrent" description="More peers can mean faster downloads on a good connection.">
-          <NumberInput value={t.maxPeers} min={10} max={500} onCommit={(v) => set({ torrents: { maxPeers: v } })} />
+        <Row id="maxPeers" label="Connections per torrent" description={peerPreset ? `${peerPreset.hint}. Up to ${peerPreset.peers} peers at once.` : `Set to ${t.maxPeers} peers by an imported setting. Pick a choice to replace it.`} stacked>
+          <Segmented
+            label="Connections per torrent"
+            size="sm"
+            value={peerPreset?.id ?? 'custom'}
+            onChange={(id) => { const p = PEER_PRESETS.find((x) => x.id === id); if (p) void set({ torrents: { maxPeers: p.peers } }); }}
+            options={[...PEER_PRESETS.map((p) => ({ value: p.id as string, label: p.label, hint: p.hint })), ...(peerPreset ? [] : [{ value: 'custom', label: `Custom (${t.maxPeers})` }])]}
+          />
         </Row>
         <Row id="uploadLimit" label="Upload limit" description={t.uploadLimitKbps ? `About ${(t.uploadLimitKbps / 1024).toFixed(1)} MB/s` : 'Automatic: about a tenth of the download speed (at least 50 KB/s) while downloading, no limit once everything is finished and seeding.'}>
           <NumberInput value={t.uploadLimitKbps} min={0} suffix="KB/s" onCommit={(v) => set({ torrents: { uploadLimitKbps: v } })} />
@@ -270,16 +279,22 @@ export function TorrentsSection({ s, set }: SectionProps) {
         <Row id="dht" label="Find peers without trackers (DHT)"><Switch label="DHT" checked={t.dht} onChange={(v) => set({ torrents: { dht: v } })} /></Row>
       </Group>
       <Group title="Sharing">
-        <Row id="seedRatio" label="Keep sharing until ratio" description="0 stops sharing as soon as the download finishes.">
-          <NumberInput value={t.seedRatio} min={0} max={10} step={0.5} onCommit={(v) => set({ torrents: { seedRatio: v } })} />
-        </Row>
-        <Row id="seedMinutes" label="Or for at most" description="0 means no time limit.">
-          <NumberInput value={t.seedMinutes} min={0} suffix="minutes" onCommit={(v) => set({ torrents: { seedMinutes: v } })} />
+        <Row id="seedRatio" label="After a download finishes" description={seedPreset ? `${seedPreset.hint}.${seedPreset.id === 'stop' ? ' Sharing for a while after a download is what keeps a torrent alive for everyone else.' : ''}` : describeSeeding(t.seedRatio, t.seedMinutes)} stacked>
+          <Segmented
+            label="After a download finishes"
+            size="sm"
+            value={seedPreset?.id ?? 'custom'}
+            onChange={(id) => { const p = SEED_PRESETS.find((x) => x.id === id); if (p) void set({ torrents: { seedRatio: p.ratio, seedMinutes: p.minutes } }); }}
+            options={[...SEED_PRESETS.map((p) => ({ value: p.id as string, label: p.label, hint: p.hint })), ...(seedPreset ? [] : [{ value: 'custom', label: 'Custom' }])]}
+          />
         </Row>
       </Group>
       <Group title="Connection">
-        <Row id="torrentPort" label="Listening port"><NumberInput value={t.listenPort} min={1024} max={65535} onCommit={(v) => set({ torrents: { listenPort: v } })} /></Row>
-        <Row id="encryption" label="Only connect with encryption" description="Can reduce peers, but helps on networks that slow down torrents.">
+        <Row id="torrentPort" label="Listening port" description="Other people connect to you here. Forwarding this port on your router lets more of them reach you, which speeds up popular and rare torrents alike. Takes effect the next time the download engine starts.">
+          <NumberInput value={t.listenPort} min={1024} max={65535} onCommit={(v) => set({ torrents: { listenPort: v } })} />
+        </Row>
+        <Row id="encryption" label="Only connect with encryption" description="Scrambles the traffic so a provider that slows torrents cannot easily spot it. It does not hide your address, and a few older clients that cannot encrypt will not connect.">
+          {/* aria2's own help: with this on, the old plain handshake is refused. */}
           <Switch label="Require encryption" checked={t.requireEncryption} onChange={(v) => set({ torrents: { requireEncryption: v } })} />
         </Row>
       </Group>

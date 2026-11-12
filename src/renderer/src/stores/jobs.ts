@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Job } from '@shared/types';
 import { groupJobs, summarizeGroup } from '@core/jobGroups';
+import { batchStateOf, batchSummary } from '@core/batchState';
 import { queuePosition } from '@core/jobOrder';
 import { isWaitingForNetwork } from '@core/jobDisplay';
 import { call, errorMessage, on } from '@/lib/bridge';
@@ -33,13 +34,18 @@ export const useJobs = create<JobsState>((set) => ({
     on('jobs:updated', (job) => set((s) => {
       const isNew = !s.byId[job.id];
       const prev = s.byId[job.id];
-      if (prev && prev.status !== 'completed' && job.status === 'completed') {
+      const byId = { ...s.byId, [job.id]: job };
+      // The files of a batch are announced together when the last one ends, not one toast each (core/batchState).
+      const ended = prev && ((prev.status !== 'completed' && job.status === 'completed') || (prev.status !== 'failed' && job.status === 'failed'));
+      const batch = ended ? batchStateOf(job, Object.values(byId)) : null;
+      const summary = batch ? batchSummary(batch) : null;
+      if (ended && batch) {
+        if (summary) useApp.getState().toast(`“${batch.title}”: ${summary.text}`, summary.ok ? 'success' : 'error');
+      } else if (prev && prev.status !== 'completed' && job.status === 'completed') {
         useApp.getState().toast(`Downloaded “${job.title}”`, 'success');
-      }
-      if (prev && prev.status !== 'failed' && job.status === 'failed') {
+      } else if (prev && prev.status !== 'failed' && job.status === 'failed') {
         useApp.getState().toast(`“${job.title}” failed: ${job.error?.message ?? 'unknown error'}`, 'error');
       }
-      const byId = { ...s.byId, [job.id]: job };
       return { byId, order: isNew ? sortIds(byId) : s.order };
     }));
 

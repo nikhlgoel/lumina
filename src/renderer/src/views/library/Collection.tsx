@@ -2,7 +2,7 @@
 // the scanner finds. Scanned playlists stay read-only; only user playlists can be edited.
 import { withArtSize } from '@core/artwork';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Film, Heart, ListMusic, ListPlus, Pencil, Play, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Film, FolderOpen, Heart, ListMusic, ListPlus, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import type { LibraryItem, LibraryPlaylist } from '@shared/types';
 import { formatDuration, plural } from '@core/format';
 import { call, errorMessage } from '@/lib/bridge';
@@ -12,6 +12,7 @@ import { isUserPlaylist, useLibrary } from '@/stores/library';
 import { usePlayer } from '@/stores/player';
 import { Artwork } from '@/components/Artwork';
 import { Badge, Button, Dialog, EmptyState, IconButton } from '@/components/ui';
+import { ContextMenu, type MenuItem } from '@/components/Menu';
 
 const art = (id: string) => withArtSize(`lumina-media://art/${id}`, 36)!;
 /** The Liked-songs list isn't a row in the playlists table; this id selects it in the UI. */
@@ -199,11 +200,78 @@ export function PlaylistGrid({ lists, loaded, searching, onOpen }: {
   );
 }
 
+/** What "Delete" will do to this playlist, in words: the dialog says it before anything is touched. */
+function deleteWords(pl: LibraryPlaylist): { title: string; body: string; button: string } {
+  if (pl.source === 'folder') {
+    return {
+      title: `Delete “${pl.name}”?`,
+      body: `The whole folder “${pl.name}” will be moved to the Recycle Bin: its ${plural(pl.itemCount, 'song')} and anything else inside it, such as other folders, covers and lyrics. Restore it from there and Lumina will find it again by itself.`,
+      button: 'Move folder to Recycle Bin',
+    };
+  }
+  if (pl.source === 'file') {
+    return {
+      title: `Delete “${pl.name}”?`,
+      body: 'The playlist file will be moved to the Recycle Bin. The songs it lists are not touched.',
+      button: 'Move playlist to Recycle Bin',
+    };
+  }
+  return { title: `Delete “${pl.name}”?`, body: 'This playlist is removed. The songs stay on your computer.', button: 'Delete playlist' };
+}
+
 function PlaylistCard({ pl, onOpen }: { pl: LibraryPlaylist; onOpen: (id: string) => void }) {
   const mine = isUserPlaylist(pl);
+  const toast = useApp((s) => s.toast);
+  const loadPlaylists = useLibrary((s) => s.loadPlaylists);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const words = deleteWords(pl);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const r = await call('library:playlist-trash', { id: pl.id });
+      if (!r.ok) {
+        toast(r.message ?? 'It could not be deleted.', 'error');
+        return;
+      }
+      setConfirming(false);
+      await loadPlaylists();
+      toast(pl.source === 'user' ? `Deleted “${pl.name}”` : `Moved “${pl.name}” to the Recycle Bin`, 'success');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const items: MenuItem[] = [
+    { key: 'open', label: 'Open', icon: <ListMusic />, onSelect: () => onOpen(pl.id) },
+    ...(pl.source === 'user' ? [] : [{ key: 'show', label: 'Show in folder', icon: <FolderOpen />, onSelect: () => void call('shell:show-in-folder', { path: pl.path }).catch((e) => toast(errorMessage(e), 'error')) }]),
+    { key: 'delete', label: pl.source === 'folder' ? 'Delete folder…' : 'Delete…', hint: pl.source === 'folder' ? 'Moves it and its songs to the Recycle Bin' : pl.source === 'file' ? 'Moves the playlist file to the Recycle Bin' : 'The songs stay', icon: <Trash2 />, tone: 'danger', onSelect: () => setConfirming(true) },
+  ];
+
   return (
+    <>
+    {menuAt && <ContextMenu at={menuAt} items={items} onClose={() => setMenuAt(null)} />}
+    <Dialog
+      open={confirming}
+      onClose={() => !busy && setConfirming(false)}
+      title={words.title}
+      width={440}
+      footer={(
+        <>
+          <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>Cancel</Button>
+          <Button variant="danger" onClick={() => void remove()} loading={busy} icon={<Trash2 className="size-4" />}>{words.button}</Button>
+        </>
+      )}
+    >
+      <p className="text-sm leading-relaxed text-ink-2">{words.body}</p>
+    </Dialog>
     <button
       onClick={() => onOpen(pl.id)}
+      onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}
       className="group flex items-center gap-3 rounded-xl border border-line bg-panel p-3 text-left shadow-sm transition-[transform,background-color] duration-150 hover:-translate-y-0.5 hover:bg-raised active:scale-[0.99]"
     >
       <span className="grid size-12 shrink-0 place-items-center rounded-lg text-white/85" style={{ background: `linear-gradient(135deg, oklch(58% 0.11 ${(pl.name.length * 47) % 360}), oklch(36% 0.08 ${(pl.name.length * 47 + 50) % 360}))` }}>
@@ -220,6 +288,7 @@ function PlaylistCard({ pl, onOpen }: { pl: LibraryPlaylist; onOpen: (id: string
       </span>
       {!mine && <span className="text-xs font-semibold text-ink-3 tabular">{pl.itemCount}</span>}
     </button>
+    </>
   );
 }
 
@@ -323,10 +392,7 @@ export function PlaylistDetail({ id, onBack }: { id: string; onBack: () => void 
           {list.map((item, index) => (
             <div
               key={`${item.id}-${index}`}
-              role="button"
-              tabIndex={0}
               onDoubleClick={() => void playAt(index)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target === e.currentTarget && void playAt(index)}
               className={cn('group grid grid-cols-[36px_1fr_auto] items-center gap-3 border-b border-line px-3 py-2 last:border-b-0 transition-colors hover:bg-hover',
                 item.id === currentId && 'bg-accent-soft')}
             >

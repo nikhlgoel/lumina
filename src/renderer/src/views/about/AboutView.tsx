@@ -79,7 +79,7 @@ export function AboutView() {
         <div className="mx-auto w-full max-w-[980px] px-8 pb-20">
           {/* Hero */}
           <div className="flex flex-wrap items-center gap-5 pt-2 pb-8">
-            <BrandMark className="size-16 shrink-0 drop-shadow-[0_6px_16px_rgb(232_117_47/0.35)]" />
+            <BrandMark className="size-16 shrink-0 drop-shadow-[0_6px_16px_color-mix(in_srgb,var(--accent)_35%,transparent)]" />
             <div className="min-w-0">
               <h1 className="font-serif text-[44px] leading-none tracking-[-0.01em]">Lumina</h1>
               <p className="mt-2 text-sm text-ink-3">

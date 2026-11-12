@@ -1,9 +1,10 @@
 import { memo, useState } from 'react';
-import { ChevronDown, CircleCheck, CirclePause, FolderOpen, Layers, Play, RotateCw, Trash2, X } from 'lucide-react';
+import { Ban, ChevronDown, CircleCheck, CirclePause, FolderOpen, Layers, Play, RotateCw, Trash2, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Job, JobStatus } from '@shared/types';
 import { formatBytes, formatEta, formatSpeed } from '@core/format';
-import { groupActionTargets, summarizeGroup } from '@core/jobGroups';
+import { batchBreakdown, groupActionTargets, summarizeGroup } from '@core/jobGroups';
+import { dominantKind, jobIconKind } from '@core/iconKind';
 import { isWaitingForNetwork } from '@core/jobDisplay';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
@@ -11,6 +12,7 @@ import { useApp } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
 import { Artwork } from '@/components/Artwork';
 import { IconButton, ProgressBar } from '@/components/ui';
+import { PopoverMenu, type MenuItem } from '@/components/Menu';
 import { JobRow } from './JobRow';
 
 const STATUS_LABEL: Record<JobStatus, string> = {
@@ -48,20 +50,40 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
 
   const parts = `${s.counts.total} files`;
   const meta: string[] = [];
-  if (active || s.status === 'queued' || s.status === 'paused') meta.push(`${s.counts.completed} of ${s.counts.total} done`);
+  if (s.status !== 'completed') meta.push(...batchBreakdown(s.counts));
   if (s.speedBps) meta.push(formatSpeed(s.speedBps));
   if (s.etaSec != null) meta.push(`${formatEta(s.etaSec)} left`);
   if (s.totalBytes) meta.push(`${formatBytes(s.downloadedBytes)} of ${formatBytes(s.totalBytes)}`);
 
   // A part waiting for the connection to come back is not a failed part.
   const waiting = members.some(isWaitingForNetwork);
+  // One part crawling because the host throttled it is the whole batch crawling: say why, the way a single row does.
+  const limited = members.some((j) => j.status === 'running' && j.progress.activity === 'limited');
   const status = waiting
     ? 'Waiting for the network'
+    : limited && active
+    ? 'Host is limiting speed'
     : s.status === 'failed'
     ? `${s.counts.failed} of ${s.counts.total} files failed`
     : s.status === 'completed'
       ? `Complete · ${parts}`
       : STATUS_LABEL[s.status];
+
+  // The cross asks which: only what is downloading now, or every file that is not finished (files already downloaded are kept either way).
+  const cancellable = groupActionTargets(members, 'cancel');
+  const running = members.filter((j) => j.status === 'running' || j.status === 'processing');
+  const cancelChoices: MenuItem[] = cancellable.length > 1 ? [
+    {
+      key: 'current', label: running.length > 1 ? `Cancel the ${running.length} downloading now` : 'Cancel the current download',
+      hint: running.length ? `${running[0]!.title}${running.length > 1 ? ` and ${running.length - 1} more` : ''}. The rest carry on.` : 'Nothing is downloading at the moment.',
+      icon: <Ban />, disabled: running.length === 0,
+      onSelect: () => void Promise.all(running.map((j) => act(j.id, 'cancel'))),
+    },
+    {
+      key: 'all', label: `Cancel all ${cancellable.length} files`, hint: 'Everything not finished stops. Files already downloaded are kept.',
+      icon: <X />, onSelect: () => run('cancel'),
+    },
+  ] : [];
 
   const canPause = groupActionTargets(members, 'pause').length > 0;
   const canResume = groupActionTargets(members, 'resume').length > 0;
@@ -75,7 +97,7 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
           <div className="relative">
             {lead.thumbnail
               ? <img src={lead.thumbnail} alt="" className={cn('shrink-0 rounded-md object-cover', compact ? 'h-9 w-12' : 'h-12 w-[72px]')} />
-              : <Artwork src={null} seed={title} kind="video" className={compact ? 'h-9 w-12' : 'h-12 w-[72px]'} rounded="rounded-md" />}
+              : <Artwork src={null} seed={title} kind={dominantKind(members.map(jobIconKind))} className={compact ? 'h-9 w-12' : 'h-12 w-[72px]'} rounded="rounded-md" />}
             {s.status === 'completed' && <CircleCheck className="absolute -right-1.5 -bottom-1.5 size-[18px] rounded-full bg-panel fill-success text-panel" />}
           </div>
 
@@ -87,7 +109,10 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
               </span>
             </div>
             <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
-              <span className={cn('font-medium', s.status === 'failed' && !waiting && 'text-danger', waiting && 'text-warning', active && 'text-ink-2')}>{status}</span>
+              <span className={cn('inline-flex items-center gap-1.5 font-medium', s.status === 'failed' && !waiting && 'text-danger', (waiting || limited) && 'text-warning', active && 'text-ink-2', s.status === 'cancelled' && 'text-cancelled')}>
+                {s.status === 'cancelled' && <Ban className="size-3.5 shrink-0" aria-hidden />}
+                {status}
+              </span>
               {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
             </div>
             {(active || s.status === 'queued' || s.status === 'paused') && (
@@ -101,7 +126,9 @@ export const ReleaseRow = memo(function ReleaseRow({ ids, compact }: { ids: stri
             {canPause && <IconButton label="Pause all files" onClick={() => run('pause')}><CirclePause /></IconButton>}
             {canResume && <IconButton label="Resume all files" onClick={() => run('resume')}><Play /></IconButton>}
             {canRetry && <IconButton label="Retry failed files" onClick={() => run('retry')}><RotateCw /></IconButton>}
-            {!compact && canCancel && <IconButton label="Cancel all files" onClick={() => run('cancel')}><X /></IconButton>}
+            {!compact && canCancel && (cancelChoices.length > 1
+              ? <PopoverMenu label="Cancel…" icon={<X />} items={cancelChoices} />
+              : <IconButton label="Cancel" onClick={() => run('cancel')}><X /></IconButton>)}
             {revealTarget && s.counts.completed > 0 && !canCancel && <IconButton label="Show in folder" onClick={reveal}><FolderOpen /></IconButton>}
             {!compact && !canCancel && <IconButton label="Remove from list" onClick={() => run('remove')}><Trash2 /></IconButton>}
             <IconButton label={expanded ? `Hide the ${s.counts.total} files` : `Show the ${s.counts.total} files`} onClick={() => setExpanded(!expanded)}>

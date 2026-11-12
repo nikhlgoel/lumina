@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
-import { ChevronDown, CircleCheck, CirclePause, FolderOpen, ListTree, PackageOpen, Play, RotateCw, Trash2, TriangleAlert, Tv, X } from 'lucide-react';
+import { Ban, ChevronDown, CircleCheck, CirclePause, Clock, FolderOpen, Gauge, HardDrive, ListChecks, ListTree, PackageOpen, Play, RotateCw, Trash2, TriangleAlert, Tv, X } from 'lucide-react';
 import type { Job } from '@shared/types';
-import { isWaitingForNetwork, pausedWord, rowDetail } from '@core/jobDisplay';
+import { isPartialSummary, isWaitingForNetwork, pausedWord, rowDetail, splitSummary, type RowStat } from '@core/jobDisplay';
 import { mediaKindOf } from '@core/mediaKind';
 import { call, errorMessage } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
@@ -9,12 +9,21 @@ import { useApp } from '@/stores/app';
 import { queuePosition, useJobs } from '@/stores/jobs';
 import { usePlayer } from '@/stores/player';
 import { Artwork } from '@/components/Artwork';
+import { jobIconKind } from '@core/iconKind';
+import { isWaitingToRetry } from '@core/jobGroups';
+import { formatBytes } from '@core/format';
 import { Badge, IconButton, ProgressBar } from '@/components/ui';
 import { TorrentDetail } from './TorrentDetail';
 
 const STATUS_LABEL: Record<Job['status'], string> = {
   queued: 'Queued', running: 'Downloading', paused: 'Paused', processing: 'Processing', completed: 'Done', failed: 'Failed', cancelled: 'Cancelled',
 };
+
+/** The icon that goes with a labelled fact, so a number is never bare. */
+function StatIcon({ kind }: { kind: RowStat['kind'] }) {
+  const Icon = { size: HardDrive, time: Clock, speed: Gauge, items: ListChecks }[kind];
+  return <Icon className="size-3.5 shrink-0 text-ink-3" aria-hidden />;
+}
 
 function playablePath(job: Job): string | null {
   return job.outputPaths.find((p) => mediaKindOf(p)) ?? null;
@@ -88,8 +97,10 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
 
   // A queued download waits its turn and starts on its own when a slot frees — say so, so there's
   // no need to babysit it or pause others by hand.
+  // How big it is, when the link said: someone with eight files waiting wants to know what is coming.
+  const waitingSize = job.source.direct?.sizeBytes ? ` · ${formatBytes(job.source.direct.sizeBytes)}` : '';
   const queuedLabel = job.status === 'queued'
-    ? position <= 1 ? 'Up next — starts automatically' : `Queued · ${position} in line — starts automatically`
+    ? `${position <= 1 ? 'Up next — starts automatically' : `Queued · ${position} in line — starts automatically`}${waitingSize}`
     : null;
 
   return (
@@ -98,7 +109,7 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
         <div className="relative">
           {job.thumbnail
             ? <img src={job.thumbnail} alt="" className={cn('shrink-0 rounded-md object-cover', compact ? 'h-9 w-12' : 'h-12 w-[72px]')} />
-            : <Artwork src={null} seed={job.title} kind={job.options.contentType === 'music' ? 'audio' : 'video'} className={compact ? 'h-9 w-12' : 'h-12 w-[72px]'} rounded="rounded-md" />}
+            : <Artwork src={null} seed={job.title} kind={jobIconKind(job)} className={compact ? 'h-9 w-12' : 'h-12 w-[72px]'} rounded="rounded-md" />}
           {job.status === 'completed' && <CircleCheck className="absolute -right-1.5 -bottom-1.5 size-[18px] rounded-full bg-panel fill-success text-panel" />}
         </div>
 
@@ -110,12 +121,36 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
               job.compat.tvSafe ? <Badge tone="success"><Tv className="size-3" /> TV-ready</Badge> : null
             )}
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
-            <span className={cn('font-medium', job.status === 'failed' && !waiting && 'text-danger', waiting && 'text-warning', (active || job.status === 'paused' || job.status === 'completed') && 'text-ink-2')}>
-              {job.status === 'failed' ? job.error?.message ?? 'Failed' : queuedLabel ? queuedLabel : active ? p.stage || STATUS_LABEL[job.status] : job.status === 'paused' ? pausedWord(p.stage) : job.status === 'completed' ? doneSummary : STATUS_LABEL[job.status]}
-            </span>
-            {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
-          </div>
+          {job.status === 'completed' ? (
+            <>
+              {/* What happened, in full sentences that wrap (a long one used to be squeezed beside the numbers), with a warning mark when
+                  some items did not make it; then the facts, each with its words and icon, wrapping rather than being cut off. */}
+              <p className={cn('mt-0.5 flex items-start gap-1.5 text-[13px] font-medium', isPartialSummary(job.compat?.summary) ? 'text-warning' : 'text-ink-2')}>
+                {isPartialSummary(job.compat?.summary) && <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />}
+                <span className="min-w-0 break-words">
+                  {isPartialSummary(job.compat?.summary) ? <>{splitSummary(doneSummary).headline}{splitSummary(doneSummary).rest && <span className="font-normal text-ink-2"> {splitSummary(doneSummary).rest}</span>}</> : doneSummary}
+                </span>
+              </p>
+              {(detail.stats?.length ?? 0) > 0 && (
+                <ul className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1" aria-label="Download details">
+                  {detail.stats?.map((st) => (
+                    <li key={st.kind} title={st.label} aria-label={st.label} className="inline-flex items-center gap-1 rounded-md bg-sunken px-1.5 py-0.5 text-[12px] text-ink-2 tabular">
+                      <StatIcon kind={st.kind} />
+                      {st.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+            <div className="mt-0.5 flex items-center gap-2 text-[13px] text-ink-3">
+              <span className={cn('inline-flex items-center gap-1.5 font-medium', job.status === 'failed' && !waiting && 'text-danger', waiting && 'text-warning', (active || job.status === 'paused') && 'text-ink-2', job.status === 'cancelled' && 'text-cancelled')}>
+                {job.status === 'cancelled' && <Ban className="size-3.5 shrink-0" aria-hidden />}
+                {job.status === 'failed' ? job.error?.message ?? 'Failed' : queuedLabel ? queuedLabel : active ? p.stage || STATUS_LABEL[job.status] : job.status === 'paused' ? pausedWord(p.stage) : STATUS_LABEL[job.status]}
+              </span>
+              {meta.length > 0 && <span className="truncate tabular">· {meta.join(' · ')}</span>}
+            </div>
+          )}
           {(active || job.status === 'paused' || job.status === 'queued') && (
             <>
               <ProgressBar className="mt-2" value={headline} tone={tone} indeterminate={active && detail.indeterminate} />
@@ -148,8 +183,11 @@ export const JobRow = memo(function JobRow({ id, compact }: { id: string; compac
           {(active || job.status === 'queued') && <IconButton label="Pause" onClick={() => act(id, 'pause')}><CirclePause /></IconButton>}
           {job.status === 'paused' && <IconButton label="Resume" onClick={() => act(id, 'resume')}><Play /></IconButton>}
           {(job.status === 'failed' || job.status === 'cancelled') && <IconButton label="Retry" onClick={() => act(id, 'retry')}><RotateCw /></IconButton>}
+          {job.status === 'completed' && (job.engineState?.failedItems?.length ?? 0) > 0 && (
+            <IconButton label={`Retry the ${job.engineState.failedItems?.length} missing item${job.engineState.failedItems?.length === 1 ? '' : 's'}`} onClick={() => act(id, 'retry')}><RotateCw /></IconButton>
+          )}
           {(job.outputPaths.length > 0 || job.outputDir) && job.status === 'completed' && <IconButton label="Show in folder" onClick={reveal}><FolderOpen /></IconButton>}
-          {!compact && (active || job.status === 'queued' || job.status === 'paused') && <IconButton label="Cancel" onClick={() => act(id, 'cancel')}><X /></IconButton>}
+          {!compact && (active || job.status === 'queued' || job.status === 'paused' || waiting || isWaitingToRetry(job)) && <IconButton label="Cancel" onClick={() => act(id, 'cancel')}><X /></IconButton>}
           {!compact && !(active || job.status === 'queued') && <IconButton label="Remove from list" onClick={() => act(id, 'remove')}><Trash2 /></IconButton>}
           {!compact && isTorrent && (
             <IconButton label={showTorrent ? 'Hide torrent details' : 'Torrent details and files'} onClick={() => setShowTorrent(!showTorrent)}>

@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowDownToLine, ClipboardPaste, FileDown, FileUp, Link2, Play, TriangleAlert, X } from 'lucide-react';
-import type { MediaInfo, RequestInfo, SearchHit, SearchResults as SearchResultsData } from '@shared/types';
+import type { EpisodeBatch, MediaInfo, RequestInfo } from '@shared/types';
 import { extractLinks, toInspectTarget } from '@core/url';
-import { planBatch, type BatchPlan } from '@core/batch';
+import { fileNameFromUrl, nameFromText, planBatch, type BatchPlan } from '@core/batch';
 import { isNoMediaMessage } from '@core/pageFiles';
 import { classifyFailure } from '@core/networkRetry';
 import { call, errorMessage, pathForFile } from '@/lib/bridge';
 import { cn } from '@/lib/cn';
 import { useApp, type PendingLink } from '@/stores/app';
 import { useJobs } from '@/stores/jobs';
-import { playLink } from '@/lib/playLink';
+import { playCollection, playLink } from '@/lib/playLink';
 import { Button, IconButton } from '@/components/ui';
 import { TitleBar } from '@/components/Shell';
 import { InspectResult } from './InspectResult';
 import { RecentStrip } from './RecentStrip';
 import { BatchPicker } from './BatchPicker';
-import { SearchResults } from './SearchResults';
+import { EpisodePicker } from './EpisodePicker';
+import { SearchPanel } from './SearchResults';
 import { SearchSuggestions } from './SearchSuggestions';
 import { addRecentSearch, clearRecentSearches, getRecentSearches } from './recentSearches';
 import { quickOptions } from './quickOptions';
@@ -26,8 +27,8 @@ type Phase =
   | { kind: 'ready'; url: string; info: MediaInfo; source?: PendingLink['source'] }
   | { kind: 'error'; url: string; message: string; request?: RequestInfo }
   | { kind: 'batch'; plan: BatchPlan; request?: RequestInfo }
-  | { kind: 'searching'; query: string }
-  | { kind: 'results'; results: SearchResultsData };
+  | { kind: 'episodes'; batch: EpisodeBatch }
+  | { kind: 'search'; query: string };
 
 const SOURCE_LABEL: Record<NonNullable<PendingLink['source']>, string> = {
   extension: 'Sent from your browser',
@@ -44,6 +45,8 @@ export function DownloadView() {
   const consumePending = useApp((s) => s.consumePending);
   const pendingBatch = useApp((s) => s.pendingBatch);
   const consumePendingBatch = useApp((s) => s.consumePendingBatch);
+  const pendingEpisodes = useApp((s) => s.pendingEpisodes);
+  const consumePendingEpisodes = useApp((s) => s.consumePendingEpisodes);
   const clipboardLink = useApp((s) => s.clipboardLink);
   const dismissClipboardLink = useApp((s) => s.dismissClipboardLink);
   const pasteRequest = useApp((s) => s.pasteRequest);
@@ -99,13 +102,30 @@ export function DownloadView() {
     }
   };
 
+  /**
+   * Show several links as a batch. Links whose address says nothing about the file (a share link) get their names from their host first, for a
+   * few seconds at most: the list then reads as files, and planning once keeps the person's choices (a second plan would change what they ticked).
+   */
+  const openBatch = async (urls: string[], names: Record<string, string>, batchRequest?: RequestInfo) => {
+    const token = ++request.current;
+    const unnamed = urls.filter((u) => !fileNameFromUrl(u) && !nameFromText(names[u]));
+    let all = names;
+    if (unnamed.length) {
+      setInput('');
+      setPhase({ kind: 'inspecting', url: `Reading the names of ${unnamed.length} file${unnamed.length === 1 ? '' : 's'}…`, source: 'extension' });
+      const found = await call('links:names', { urls: unnamed }).catch(() => ({} as Record<string, string>));
+      if (token !== request.current) return;
+      all = { ...found, ...names };
+    }
+    setInput('');
+    setPhase({ kind: 'batch', plan: planBatch(urls, all), request: batchRequest });
+  };
+
   /** One link inspects; several links become a batch; plain text becomes a YouTube search. */
   const handleText = (raw: string) => {
     const links = extractLinks(raw);
     if (links.length > 1) {
-      request.current++;
-      setInput('');
-      setPhase({ kind: 'batch', plan: planBatch(links) });
+      void openBatch(links, {});
       return;
     }
     if (links.length === 1) {
@@ -115,21 +135,16 @@ export function DownloadView() {
     // No link pasted: a bare domain becomes a URL, anything else searches (songs + videos).
     const { target, isSearch } = toInspectTarget(raw);
     if (!target) return;
-    if (isSearch) void runSearch(raw.trim());
+    if (isSearch) runSearch(raw.trim());
     else void inspect(target);
   };
 
-  const runSearch = async (query: string) => {
+  const runSearch = (query: string) => {
     setInput(query);
     setRecent(addRecentSearch(query));
-    const token = ++request.current;
-    setPhase({ kind: 'searching', query });
-    try {
-      const results = await call('search:query', { query });
-      if (token === request.current) setPhase({ kind: 'results', results });
-    } catch (err) {
-      if (token === request.current) setPhase({ kind: 'error', url: query, message: errorMessage(err) });
-    }
+    // The results screen asks for songs and videos itself and shows each as it arrives; a new search (or anything else) makes this one stale.
+    request.current++;
+    setPhase({ kind: 'search', query });
   };
 
   useEffect(() => {
@@ -144,9 +159,19 @@ export function DownloadView() {
     if (!batch) return;
     request.current++;
     setInput('');
-    setPhase({ kind: 'batch', plan: planBatch(batch.urls, batch.names), request: batch.request });
+    void openBatch(batch.urls, batch.names ?? {}, batch.request);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingBatch]);
+
+  // The episodes of a series picked in the browser: straight to their own list, each already carrying its video address.
+  useEffect(() => {
+    const episodes = consumePendingEpisodes();
+    if (!episodes) return;
+    request.current++;
+    setInput('');
+    setPhase({ kind: 'episodes', batch: episodes });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEpisodes]);
 
   useEffect(() => {
     if (pasteRequest) void pasteFromClipboard();
@@ -263,6 +288,8 @@ export function DownloadView() {
       <TitleBar />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className={cn('mx-auto w-full max-w-[860px] px-[var(--page-x)] pb-16 transition-[padding] duration-500 ease-out-soft', compact ? 'pt-2' : 'pt-[14vh]')}>
+          {/* The big heading goes away while a link is being worked on; the page keeps one for those who cannot see the layout. */}
+          {compact && <h1 className="sr-only">Download</h1>}
           {!compact && (
             <div className="mb-6 animate-rise">
               <h1 className="font-serif text-[40px] leading-none tracking-[-0.015em]">Paste a link</h1>
@@ -343,12 +370,10 @@ export function DownloadView() {
               <p className="mb-2 text-xs font-semibold tracking-[0.06em] text-ink-3 uppercase animate-rise">{SOURCE_LABEL[phase.source]}</p>
             )}
             {phase.kind === 'inspecting' && <InspectSkeleton />}
-            {phase.kind === 'searching' && (
-              <div className="rounded-xl border border-line bg-panel p-5 text-sm text-ink-3 animate-rise" aria-busy="true">Searching songs and videos for “{phase.query}”…</div>
-            )}
-            {phase.kind === 'results' && <SearchResults results={phase.results} onPick={(hit) => inspect(hit.url)} />}
+            {phase.kind === 'search' && <SearchPanel key={phase.query} query={phase.query} onPick={(hit) => inspect(hit.url)} onPlay={(hit) => void (hit.kind === 'album' || hit.kind === 'playlist' ? playCollection(hit.url, hit.title) : playLink(hit.url))} />}
             {phase.kind === 'error' && <InspectError message={phase.message} onRetry={() => void inspect(phase.url, { request: phase.request })} />}
             {phase.kind === 'ready' && <InspectResult key={phase.url} url={phase.url} info={phase.info} onDone={reset} />}
+            {phase.kind === 'episodes' && <EpisodePicker batch={phase.batch} onDone={reset} onCancel={reset} />}
             {phase.kind === 'batch' && <BatchPicker plan={phase.plan} request={phase.request} onDone={reset} onCancel={reset} />}
           </div>
 

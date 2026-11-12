@@ -1,7 +1,8 @@
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  // Under one byte the logarithm is negative and there is no such unit: 0.4 B/s used to print as "0.4 undefined/s".
+  let i = Math.max(0, Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))));
   // Show whole numbers from 100 up, one decimal below. Decide on the figure as it will be PRINTED:
   // 99.95 prints as "100.0" and 1023.9 rounds to "1024", and a number is not allowed to reach 1024
   // of one unit when it is 1.0 of the next (1,048,500 bytes used to read "1024 KB").

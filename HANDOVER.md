@@ -36,6 +36,26 @@ all passing · `vite build` · extension e2e 38/38 in real headless Chrome · be
 download. **Not proven:** the range-refusal retry end to end (the fatal case did not reproduce locally), yt-dlp with a real private video,
 Firefox, any real file host. (The note here that reusing a solved check was forbidden by rule 1 is superseded: the owner loosened rules 1
 and 2 in AGENTS.md, and session 58 built it.) Nothing was committed or released.
+**Also 2026-11-12 (sessions 63-68, release audit): what was built since, and what is still not proven** (SESSION-LOG 63-68; CHANGELOG 1.2.2). **The in-app Browser is off in the sidebar by default** (`browser.showInSidebar`; it is not used by downloading, the quick check or the page reader, which have their own windows; the Code tab's preview still opens it). The gate also runs hostile pages, IPC fuzz and a screen soak; accessibility was audited with axe-core (`LUMINA_AXE`).
+Cancel menu and a neutral Cancelled status; each batch in its own named folder; files already on disk skipped or replaced through the Recycle Bin; right-click delete
+of a playlist; search that finds albums and playlists and plays results directly; Best sound on by default; streaming proxy on classic http (no more undici crash);
+winget packaging (`scripts/winget-manifest.mjs`, `.github/workflows/winget.yml`, never run); torrent settings as choices with measured aria2 behaviour (a seed time
+of 0 stops sharing whatever the ratio is) and a checked tracker list; **sending a whole series from the browser** (`extension/episodes.js`, `probe.js`, bridge
+`/v1/capture-episodes`, `EpisodePicker.tsx`); **a new equalizer** (ten bands, shelves, headroom, soft ceiling, 16 presets, saved presets, glass panel).
+**Proven now:** `tsc` clean, all unit tests, the six real-app suites plus TORRENT, the extension end-to-end tests (links 42/42, episodes 25/25), and
+`LUMINA_PROBE_AUDIO` (the real chain within 0.001 dB of the maths; real pink noise through the real player within 0.3 dB of each preset), all run by
+`scripts/release-check.sh`. **Not proven:** the series feature on the owner's real streaming site (its pages would not load in the built-in browser, so only a
+replica and a local server were used; real list markup, real players' play buttons and real pop-up ads are untested); anything by ear; actual audio from a
+YouTube album (the scratch profile hits the bot check); a real winget install or workflow run; the installer on a second account; the real-world Recycle Bin
+restore round trip; Firefox; real torrent speed with peers; whether aria2 sends torrent peer traffic through `all-proxy` (the manual does not say).
+**Also 2026-11-12 (session 62): twelve links showed as three; batch notices; a full check** (SESSION-LOG 62). `JobQueue.add()` never announced a new
+job to the window, so waiting files were invisible until they started: fixed with a test. A batch now speaks once (toast, desktop notice, one
+Explorer window) when its last file ends (`core/batchState.ts`); the unpack job and cancelled files are not counted. The host-speed warning shares each
+host's recent best across files (`HostPeaks`), keeps saying so through a long throttle, and is switched off while the person's own limit is on. Waiting
+rows show the file's size; every download has an icon for its kind (`core/iconKind.ts`). **Unproven / known gaps from the independent review:** a
+playlist Retry uses playlist *positions* (a playlist that changed since would fetch other videos; storing video ids would fix it); an error with no
+video id, after archive-skipped items, can be blamed on the wrong position; pausing mid retry-pass loses the retry state; none of the batch notices has
+been seen with a real 12-file batch. **Later the same day, a third pass** (SESSION-LOG 62): property tests, mutation testing and a silent-failure review; fixed what is in CHANGELOG "Fixed (streams, names, and speed)". Still open from it: cancelling a paused job leaves its partial file; a sharded playlist worker that dies without an error line can finish "Done" short; links sent to a window that has not finished loading can overwrite each other; 7-Zip exit code 1 is treated as success.
 **Also 2026-11-11 (session 59): the owner's first live test** (SESSION-LOG 59). Found and fixed: every Pixeldrain download saved the share
 page (the queue got the pasted link, not the file address; `core/hosts.ts queueUrlFor`); Pixeldrain drops clients with many connections
 (`core/hostBudget.ts`: one file, four connections); FileDitch's file links sit behind a Cloudflare check (now routed through the quick check, and

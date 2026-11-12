@@ -1,3 +1,4 @@
+import { httpGet } from './httpGet';
 import { nativeImage, protocol } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -193,7 +194,8 @@ async function proxyStream(token: string, request: Request): Promise<Response> {
   if (range) headers.set('Range', range);
   let upstream: Response;
   try {
-    upstream = await fetch(plan.source.url, { headers, redirect: 'follow', signal: request.signal });
+    // Not `fetch`: its HTTP client throws an uncaught error when the player stops reading ahead and the server closes the connection (see media/httpGet).
+    upstream = await httpGet(plan.source.url, { headers: Object.fromEntries(headers.entries()), signal: request.signal });
   } catch (err) {
     log.warn('A stream could not be reached', err);
     return new Response('Bad gateway', { status: 502 });

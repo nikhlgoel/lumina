@@ -96,8 +96,27 @@ export function youtubeThumb(id: string): string {
   return `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
 }
 
+/**
+ * A link as it was pasted, without the punctuation of the sentence around it. A closing bracket belongs to the link only when the link has an
+ * opening one (`/Setup_(x64).exe`, a Wikipedia address); `(see https://a.test/x)` loses its `)`.
+ */
+function trimLink(raw: string): string {
+  let link = raw.replace(/[.,;:!?\]>]+$/, '');
+  while (link.endsWith(')') && link.split(')').length > link.split('(').length) link = link.slice(0, -1).replace(/[.,;:!?\]>]+$/, '');
+  return link;
+}
+
 /** Pull every http(s)/magnet link out of pasted text (for multi-link and repack pastes). */
 export function extractLinks(text: string): string[] {
-  const found = text.match(/(https?:\/\/[^\s"'<>()]+|magnet:\?[^\s"'<>]+)/gi) ?? [];
-  return [...new Set(found.map((l) => cleanUrl(l.replace(/[.,;:)\]>]+$/, ''))))];
+  const found = text.match(/(https?:\/\/[^\s"'<>]+|magnet:\?[^\s"'<>]+)/gi) ?? [];
+  return [...new Set(found.map((l) => cleanUrl(trimLink(l))))];
+}
+
+/** decodeURIComponent that does not throw: a file called `50%off.zip` has a `%` that is not an escape, and the throw used to end the whole inspection. */
+export function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
 }

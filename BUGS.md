@@ -282,9 +282,17 @@ one that was never wired, so the setting is now re-applied to the track already 
 **Still not proven:** nobody has *listened* to the result on this machine. The gain is measured,
 decided, applied to the graph and photographed, but no ear has confirmed it.
 
-### B3 · Equalizer is not a real equalizer — `Open`
-A few named presets and a weak display. Needs proper bands with gain control, a profile system that
-can be saved and named, and a display that shows the curve actually being applied.
+### B3 · Equalizer is not a real equalizer — `Fixed (2026-11-12, SESSION-LOG 66)`
+Was: a few named presets and a weak display. Now: ten bands with real shelves at both ends, a curve drawn
+from the same filter maths the audio uses and dragged with the mouse or keys, sixteen presets in three groups,
+presets of the person's own that can be named, saved and deleted (and are in the tray menu), automatic
+headroom, the limiter switched on for any boost (a bass boost on a loud track used to clip with Best sound off)
+and a soft ceiling after it. A glass panel that blurs what is behind it.
+
+**Proven:** the real Web Audio chain against the maths (16 presets x 11 frequencies, worst error 0.001 dB); real
+pink noise played through the real player, each preset's output spectrum within 0.3 dB of its curve; a hot
+62 Hz tone under a bass boost peaks at 0.973; a real mouse drag, the keys, Save as and delete in the real app
+(`LUMINA_PROBE_AUDIO`, run by `scripts/release-check.sh` step 4b). **Not proven:** by ear; Bluetooth outputs.
 
 ### B4 · No Like control while playing — `Fixed`
 Liking was only reachable from the library, which is the wrong moment. There is now a heart on the

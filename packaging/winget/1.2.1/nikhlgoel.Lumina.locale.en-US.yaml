@@ -1,0 +1,25 @@
+PackageIdentifier: nikhlgoel.Lumina
+PackageVersion: 1.2.1
+PackageLocale: en-US
+Publisher: nikhlgoel
+PublisherUrl: https://github.com/nikhlgoel
+PublisherSupportUrl: https://github.com/nikhlgoel/lumina/issues
+Author: nikhlgoel
+PackageName: Lumina
+PackageUrl: https://github.com/nikhlgoel/lumina
+License: MIT
+LicenseUrl: https://github.com/nikhlgoel/lumina/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Lumina
+ShortDescription: Download music, video and files from links, torrents and many sites, and play them, in one app.
+Description: Lumina is a free, open-source downloader and media player. It downloads from direct links, torrents, file hosts and many video and music sites, checks each file as it finishes, unpacks release archives, and plays what you have, with a browser extension that sends links from the page you are on.
+Tags:
+- downloader
+- media-player
+- music
+- video
+- torrent
+- yt-dlp
+- aria2
+ReleaseNotesUrl: https://github.com/nikhlgoel/lumina/releases/tag/1.2.1
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

@@ -4,8 +4,8 @@ import { MAX_VOLUME } from '../core/volume';
 import { z } from 'zod';
 import type {
   ShieldStatus,
-  AiKeyStatus, AiModelStatus, AppInfo, Bookmark, BrowserState, DownloadOptions, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats,
-  Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableInstallStatus, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchResults, GitView, DlnaStatus, EditorTheme, PackageManager, ProjectTask, ShellChoice, SyncStatus, TerminalPorts, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
+  AiKeyStatus, AiModelStatus, AppInfo, Bookmark, BrowserState, DownloadOptions, EpisodeBatch, FirewallStatus, FormatChoice, HostChallenge, Job, LibraryFile, LibraryItem, LibraryPlaylist, LibraryStats,
+  Lyrics, MediaInfo, PlayableItem, PortableDrive, PortableInstallStatus, PortableTransfer, CodeSearchHit, FileContent, McpServerState, Preset, RequestInfo, SearchPart, SearchResults, GitView, DlnaStatus, EditorTheme, PackageManager, ProjectTask, ShellChoice, SyncStatus, TerminalPorts, TerminalSession, TreeEntry, WorkspaceInfo, ToolStatus, TorrentDetail, UpdateState,
 } from './types';
 import type { Settings, SettingsPatch } from './settings';
 
@@ -41,6 +41,9 @@ export const downloadOptionsSchema = z.object({
   playlistItems: z.array(z.number().int().positive()).max(5000),
   series: z.object({ show: z.string().min(1).max(200), season: z.number().int().min(0).max(999) }).optional(),
   targetDir: z.string().max(4096).optional(),
+  fileName: z.string().max(200).optional(),
+  existingFiles: z.enum(['skip', 'replace']).optional(),
+  existingNames: z.array(z.string().max(512)).max(1000).optional(),
   release: z.object({
     id: z.string().min(1).max(64), title: z.string().max(300), dir: z.string().min(1).max(4096),
     role: z.enum(['archive', 'optional', 'checksum', 'file']), set: z.string().max(600).optional(),
@@ -74,7 +77,14 @@ export const inputSchemas = {
   'media:inspect': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
   'media:play': z.object({ url: z.string().min(1).max(8192), info: z.unknown().optional(), request: requestInfoSchema.optional() }),
   'page:files': z.object({ url: z.string().min(1).max(8192), request: requestInfoSchema.optional() }),
+  'links:names': z.object({ urls: z.array(z.string().min(1).max(8192)).max(500) }),
+  'series:folder': z.object({ base: z.string().min(1).max(4096), show: z.string().min(1).max(300), season: z.number().int().min(0).max(999) }),
+  'batch:folder': z.object({ base: z.string().min(1).max(4096), title: z.string().min(1).max(300), filenames: z.array(z.string().max(512)).max(1000), flat: z.boolean().optional() }),
   'search:query': z.object({ query: z.string().min(1).max(200) }),
+  'search:songs': z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(40).optional() }),
+  'search:videos': z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(40).optional() }),
+  'search:albums': z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(40).optional() }),
+  'search:playlists': z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(40).optional() }),
   'jobs:list': z.void(),
   'jobs:add': z.object({ url: z.string().min(1).max(8192), info: z.unknown(), options: downloadOptionsSchema }),
   'jobs:pause': id,
@@ -220,6 +230,7 @@ export const inputSchemas = {
   }),
   'library:playlist-rename': z.object({ id: z.string().min(1).max(200), name: z.string().max(200) }),
   'library:playlist-delete': z.object({ id: z.string().min(1).max(200) }),
+  'library:playlist-trash': z.object({ id: z.string().min(1).max(200) }),
   'library:playlist-add': z.object({
     id: z.string().min(1).max(200),
     paths: z.array(z.string().min(1).max(4096)).min(1).max(20000),
@@ -323,7 +334,16 @@ export interface InvokeOutputs {
   'media:inspect': MediaInfo;
   'media:play': PlayableItem;
   'page:files': { files: { url: string; name: string; sizeBytes?: number }[]; source: 'github' | 'folder' | 'page'; title: string | null };
+  /** The file name each share link has on its host, for the links the host could say (the rest are left out). */
+  'links:names': Record<string, string>;
+  'batch:folder': { dir: string; sameBatch: boolean; existing: { filename: string; size: number }[] };
+  /** The folder a series' episodes go in (made if it is not there), and the names already in it, extension removed. */
+  'series:folder': { dir: string; have: string[] };
   'search:query': SearchResults;
+  'search:songs': SearchPart;
+  'search:videos': SearchPart;
+  'search:albums': SearchPart;
+  'search:playlists': SearchPart;
   'jobs:list': Job[];
   'jobs:add': Job;
   'jobs:pause': void;
@@ -420,6 +440,7 @@ export interface InvokeOutputs {
   'library:playlist-create': LibraryPlaylist;
   'library:playlist-rename': boolean;
   'library:playlist-delete': boolean;
+  'library:playlist-trash': { ok: boolean; message?: string; kind?: 'file' | 'folder' | 'user' };
   'library:playlist-add': number;
   'library:playlist-remove': boolean;
   'library:playlist-move': boolean;
@@ -512,6 +533,8 @@ export interface EventPayloads {
   'app:open-url': { url: string; request?: RequestInfo; source?: 'extension' | 'clipboard' | 'system' };
   /** Several links the person picked on a page, to be planned together (archive parts, optional extras, checksums). */
   'app:open-links': { urls: string[]; request?: RequestInfo; names?: Record<string, string>; source?: 'extension' };
+  /** The episodes of a series picked in the extension. */
+  'app:open-episodes': EpisodeBatch;
   'app:clipboard-link': { url: string };
   'app:navigate': { view: 'download' | 'queue' | 'library' | 'settings'; section?: string };
   'player:command': PlayerCommand;

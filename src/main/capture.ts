@@ -3,6 +3,11 @@
 import type { BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { episodeSteps } from './captureEpisodes';
+import { audioSteps } from './captureAudio';
+import { fuzzSteps } from './captureFuzz';
+import { axeSteps } from './captureAxe';
+import { leakSteps } from './captureLeak';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -15,6 +20,10 @@ export const goto = (label: string) =>
   `(() => { const want = ${JSON.stringify(label)};`
   + ` const nav = [...document.querySelectorAll('nav[aria-label=Main] button'), ...document.querySelectorAll('button')];`
   + ` (nav.find((b) => b.textContent.trim() === want) ?? nav.find((b) => b.textContent.trim().startsWith(want)))?.click(); })()`;
+
+/** After a screen is up, log any text that looks like a leaked placeholder ("undefined", "NaN", "[object Object]"). */
+export const textScan = (what: string) =>
+  `; setTimeout(() => { const t = document.body.innerText; const bad = t.match(/undefined|NaN|\\[object|Infinity|\\bnull\\b/g); console.log('[scan] ' + ${JSON.stringify(what)} + ': ' + (bad ? [...new Set(bad)].join(',') : 'clean')); }, 1200)`;
 
 export const openSettings = (label: string) =>
   `${goto('Settings')}; setTimeout(() => [...document.querySelectorAll('nav[aria-label="Settings sections"] button')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click(), 400)`;
@@ -346,6 +355,16 @@ const STEPS: { name: string; script: string; delay?: number; before?: (win: Brow
       source: 'extension',
     }),
   },
+  // The series screen (episodes sent from the browser), with the real download behind it: LUMINA_PROBE_EPISODES=<scratch dir>.
+  ...(process.env.LUMINA_PROBE_EPISODES ? episodeSteps(process.env.LUMINA_PROBE_EPISODES) : []),
+  // The equalizer's sound and panel, measured: LUMINA_PROBE_AUDIO=<scratch dir> (see captureAudio.ts).
+  ...(process.env.LUMINA_PROBE_AUDIO ? audioSteps(process.env.LUMINA_PROBE_AUDIO) : []),
+  // Hostile input to the IPC channels that only read or ask: LUMINA_PROBE_FUZZ=<scratch dir> (see captureFuzz.ts).
+  ...(process.env.LUMINA_PROBE_FUZZ ? fuzzSteps(process.env.LUMINA_PROBE_FUZZ) : []),
+  // An accessibility audit with axe-core: LUMINA_AXE=<path to axe.min.js> (see captureAxe.ts).
+  ...(process.env.LUMINA_AXE ? axeSteps(process.env.LUMINA_AXE, { goto, openSettings }) : []),
+  // A leak and stability soak of the renderer: LUMINA_PROBE_LEAK=<scratch dir> (see captureLeak.ts).
+  ...(process.env.LUMINA_PROBE_LEAK ? leakSteps(process.env.LUMINA_PROBE_LEAK) : []),
   { name: '05b-library-videos', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 900)`, delay: 12000 },
   { name: '05c-library-playlists', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Playlists')?.click(), 900)`, delay: 3000 },
   { name: '05d-library-files', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Files')?.click(), 900)`, delay: 3000 },
@@ -441,11 +460,12 @@ const STEPS: { name: string; script: string; delay?: number; before?: (win: Brow
   // Songs in the full player. The earlier player steps play whatever is first in the library, which
   // can be a video — so the cover and the record were never photographed. These pin the theme, play a
   // real song from the Music tab, and open the player.
-  { name: '41a-player-song-aurora', script: `(async () => { await window.lumina.invoke('settings:update', { player: { theme: 'aurora' } }); ${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Music')?.click(), 900); setTimeout(() => document.querySelector('button[data-play]')?.click(), 2200); setTimeout(() => document.querySelector('[aria-label^="Open player"]')?.click(), 3400); setTimeout(() => [...document.querySelectorAll('[role=radio]')].find((b) => b.textContent.trim() === 'Art')?.click(), 4800); })()`, delay: 8500 },
+  { name: '41a-player-song-aurora', script: `(async () => { await window.lumina.invoke('settings:update', { player: { theme: 'aurora' }, library: { musicView: 'details' } }); ${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Music')?.click(), 900); setTimeout(() => document.querySelector('button[data-play]')?.click(), 2200); setTimeout(() => document.querySelector('[aria-label^="Open player"]')?.click(), 3400); setTimeout(() => [...document.querySelectorAll('[role=radio]')].find((b) => b.textContent.trim() === 'Art')?.click(), 4800); })()`, delay: 8500 },
   { name: '41b-player-song-vinyl', script: `window.lumina.invoke('settings:update', { player: { theme: 'vinyl' } })`, delay: 4500 },
   // Measure the record rather than trust the CSS: its animation, its playback rate, and how far it
   // actually turned in half a second. Full speed should be 360deg per PLATTER_PERIOD_MS.
-  { name: '41c-record-rotation', script: `(async () => { const el = document.querySelector('.p-record'); if (!el) { console.log('[record] no .p-record'); return; } const angle = () => { const m = new DOMMatrix(getComputedStyle(el).transform); return (Math.atan2(m.b, m.a) * 180 / Math.PI + 360) % 360; }; const a = el.getAnimations(); console.log('[record] animations=' + a.length + ' rate=' + (a[0] ? a[0].playbackRate.toFixed(3) : 'n/a') + ' state=' + (a[0] ? a[0].playState : 'n/a')); const t0 = performance.now(); const a0 = angle(); await new Promise((r) => setTimeout(r, 500)); const a1 = angle(); const dt = performance.now() - t0; console.log('[record] turned ' + (((a1 - a0) + 360) % 360).toFixed(1) + 'deg in ' + dt.toFixed(0) + 'ms => ' + ((((a1 - a0) + 360) % 360) / dt * 1000).toFixed(1) + ' deg/s (full speed = ' + (360000 / 2800).toFixed(1) + ')'); const l = document.querySelector('.p-label-art'); console.log('[record] label art ' + (l ? Math.round(l.getBoundingClientRect().width) + 'px inside ' + Math.round(el.querySelector('.p-label').getBoundingClientRect().width) + 'px label' : 'missing')); })()`, delay: 1500 },
+  { name: '41d-player-sound-panel', script: "document.querySelector('button[aria-label^=\"Sound\"]')?.click()", delay: 1500 },
+  { name: '41c-record-rotation', script: `(async () => { const el = document.querySelector('.p-record'); if (!el) { console.log('[record] no .p-record'); return; } const angle = () => { const m = new DOMMatrix(getComputedStyle(el).transform); return (Math.atan2(m.b, m.a) * 180 / Math.PI + 360) % 360; }; const a = el.getAnimations(); console.log('[record] animations=' + a.length + ' rate=' + (a[0] ? a[0].playbackRate.toFixed(3) : 'n/a') + ' state=' + (a[0] ? a[0].playState : 'n/a')); const t0 = performance.now(); const a0 = angle(); await new Promise((r) => setTimeout(r, 500)); const a1 = angle(); const dt = performance.now() - t0; console.log('[record] turned ' + (((a1 - a0) + 360) % 360).toFixed(1) + 'deg in ' + dt.toFixed(0) + 'ms => ' + ((((a1 - a0) + 360) % 360) / dt * 1000).toFixed(1) + ' deg/s (full speed = ' + (360000 / 2800).toFixed(1) + ')'); const l = document.querySelector('.p-label img'); console.log('[record] label art ' + (l ? Math.round(l.getBoundingClientRect().width) + 'px inside ' + Math.round(el.querySelector('.p-label').getBoundingClientRect().width) + 'px label' : 'missing')); })()`, delay: 1500 },
   // The video controls, end to end. Each step measures as well as photographs: whether the chrome is
   // hidden, what the element's playbackRate really is. A screenshot alone cannot tell "hidden" from "never shown".
   { name: '42a-video-open', script: `(() => { ${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 1200); setTimeout(() => [...document.querySelectorAll('button[aria-label^="Play "]')].pop()?.click(), 2600); setTimeout(() => { const v = document.querySelector('.p-video video'); if (v) v.play().catch((e) => console.log('[vctl] play blocked ' + e)); }, 5200); })()`, delay: 8000 },
@@ -502,11 +522,86 @@ const STEPS: { name: string; script: string; delay?: number; before?: (win: Brow
   { name: '15-batch', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); [...document.querySelectorAll('nav[aria-label=Main] button')][0].click(); setTimeout(() => { const nl = String.fromCharCode(10); const h = 'https://files.example.net/'; const parts = Array.from({ length: 24 }, (_, i) => h + 'k' + i + '/Sample_Release_--_example-site.net_--_.part' + String(i + 1).padStart(2, '0') + '.rar').filter((_, i) => i !== 17); const extra = ['german', 'japanese', 'spanish'].map((l) => h + l + '/fg-optional-' + l + '-vo.bin').concat([h + 'v1/fg-optional-hd-videos.part1.rar', h + 'v2/fg-optional-hd-videos.part2.rar', h + 'm/Sample_Release.md5']); const dt = new DataTransfer(); dt.setData('text/plain', parts.concat(extra).join(nl)); document.querySelector('input[aria-label^=\"Link to\"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, 600)", delay: 2000 },
   { name: '16-batch-expanded', script: "document.querySelector('button[aria-label=\"Show parts\"]').click(); document.querySelector('button[aria-label^=\"Include German\"]').click()", delay: 900 },
   { name: '17-batch-light', script: "document.documentElement.dataset.theme='light'", delay: 700 },
+  // Every Settings page, one after the other (each is opened from the sidebar the way a person would).
+  { name: '6000-tour-general', script: openSettings('General') + textScan('General'), delay: 1600 },
+  { name: '6001-tour-appearance', script: openSettings('Appearance') + textScan('Appearance'), delay: 1600 },
+  { name: '6002-tour-player', script: openSettings('Player') + textScan('Player'), delay: 1600 },
+  { name: '6003-tour-downloads', script: openSettings('Downloads') + textScan('Downloads'), delay: 1600 },
+  { name: '6004-tour-formats', script: openSettings('Formats') + textScan('Formats'), delay: 1600 },
+  { name: '6005-tour-subtitles', script: openSettings('Subtitles') + textScan('Subtitles'), delay: 1600 },
+  { name: '6006-tour-torrents', script: openSettings('Torrents') + textScan('Torrents'), delay: 1600 },
+  { name: '6007-tour-storage-library', script: openSettings('Storage & library') + textScan('Storage & library'), delay: 1600 },
+  { name: '6008-tour-portable-drive', script: openSettings('Portable drive') + textScan('Portable drive'), delay: 1600 },
+  { name: '6009-tour-accounts', script: openSettings('Accounts') + textScan('Accounts'), delay: 1600 },
+  { name: '6010-tour-browser-extension', script: openSettings('Browser extension') + textScan('Browser extension'), delay: 1600 },
+  { name: '6011-tour-network', script: openSettings('Network') + textScan('Network'), delay: 1600 },
+  { name: '6012-tour-share-to-tv', script: openSettings('Share to TV') + textScan('Share to TV'), delay: 1600 },
+  { name: '6013-tour-sync', script: openSettings('Sync') + textScan('Sync'), delay: 1600 },
+  { name: '6014-tour-ai-key', script: openSettings('AI key') + textScan('AI key'), delay: 1600 },
+  { name: '6015-tour-privacy', script: openSettings('Privacy') + textScan('Privacy'), delay: 1600 },
+  { name: '6016-tour-tools-updates', script: openSettings('Tools & updates') + textScan('Tools & updates'), delay: 1600 },
+  // The main screens and the Library's tabs, each scanned for leaked placeholders.
+  { name: '7000-tour-download', script: goto('Download') + textScan('Download'), delay: 1500 },
+  { name: '7001-tour-queue', script: goto('Queue') + textScan('Queue'), delay: 1500 },
+  { name: '7002-tour-library-music', script: goto('Library') + textScan('Library'), delay: 2200 },
+  { name: '7003-tour-library-videos', script: goto('Library') + "; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Videos')?.click(), 500)" + textScan('Library: Videos'), delay: 2200 },
+  { name: '7004-tour-library-playlists', script: goto('Library') + "; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Playlists')?.click(), 500)" + textScan('Library: Playlists'), delay: 2200 },
+  { name: '7005-tour-library-files', script: goto('Library') + "; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Files')?.click(), 500)" + textScan('Library: Files'), delay: 2200 },
+  // The sidebar and the keys that go with it, in the real app: no Browser by default (and Ctrl+4 is the code editor then), Browser after it is switched on (and Ctrl+4 is the browser).
+  { name: 'probe-nav', delay: 500, script: `(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const items = () => [...document.querySelectorAll('nav[aria-label=Main] button')].map((b) => b.title || b.textContent.trim());
+    const current = () => document.querySelector('nav[aria-label=Main] [aria-current=page]')?.textContent.trim() ?? '';
+    const press = async (k) => { dispatchEvent(new KeyboardEvent('keydown', { key: k, ctrlKey: true, bubbles: true })); await sleep(600); return current(); };
+    const settings = (v) => window.lumina.invoke('settings:update', { browser: { showInSidebar: v } });
+    await settings(false); await sleep(700);
+    const out = { defaultItems: items() };
+    out.defaultKeys = { '1': await press('1'), '2': await press('2'), '3': await press('3'), '4': await press('4'), '5': await press('5'), ',': await press(',') };
+    await settings(true); await sleep(900);
+    out.withBrowserItems = items();
+    out.withBrowserKeys = { '4': await press('4'), '5': await press('5') };
+    await settings(false); await sleep(700);
+    out.afterOffItems = items();
+    out.afterOffKeys = { '4': await press('4') };
+    await press('1');
+    return JSON.stringify(out);
+  })()` },
+  // The browser is not in the sidebar unless asked for: switched on first, the way a person would in Settings.
+  { name: '7005z-show-browser', script: "window.lumina.invoke('settings:update', { browser: { showInSidebar: true } })", delay: 900 },
+  { name: '7006-tour-browser', script: goto('Browser') + textScan('Browser'), delay: 2000 },
+  { name: '7007-tour-about', script: goto('About') + textScan('About'), delay: 1800 },
+  // The sound path itself, measured: the same chain the player uses, built offline and fed test tones. Reads out the clarity curve's real response per band and
+  // what the limiter does to a signal that is 6 dB over full scale.
+  { name: '9000-audio-chain', script: `(async () => { const A = window.__luminaAudio; if (!A) { console.log('[audio] no chain hook'); return; } const sr = 48000; const render = async (freq, amp, o) => { const c = new OfflineAudioContext(1, sr, sr); const buf = c.createBuffer(1, sr, sr); const d = buf.getChannelData(0); for (let i = 0; i < sr; i++) d[i] = amp * Math.sin(2 * Math.PI * freq * i / sr); const src = c.createBufferSource(); src.buffer = buf; const chain = A.buildChain(c, src, o); chain.output.connect(c.destination); src.start(); return (await c.startRendering()).getChannelData(0); }; const rms = (x) => { let s = 0; for (let i = sr / 2; i < sr; i++) s += x[i] * x[i]; return Math.sqrt(s / (sr / 2)); }; const peak = (x) => { let p = 0; for (let i = sr / 4; i < x.length; i++) p = Math.max(p, Math.abs(x[i])); return p; }; const gains = A.effectiveEq(true, false, [0, 0, 0, 0, 0]); const res = {}; for (const f of [60, 250, 1000, 4000, 12000]) { const y = await render(f, 0.05, { gains, trackGain: 1, boostGain: 1, protect: true }); res[f] = +(20 * Math.log10(rms(y) / (0.05 / Math.SQRT2))).toFixed(2); } const flat = [0, 0, 0, 0, 0]; const loud = await render(1000, 2.0, { gains: flat, trackGain: 1, boostGain: 1, protect: true }); const loudOff = await render(1000, 2.0, { gains: flat, trackGain: 1, boostGain: 1, protect: false }); const lifted = await render(1000, 0.5, { gains, trackGain: 2, boostGain: 1, protect: true }); const quiet = await render(1000, 0.1, { gains: flat, trackGain: 1, boostGain: 1, protect: true }); console.log('[audio] clarity response (dB at 60/250/1k/4k/12k Hz): ' + JSON.stringify(res)); console.log('[audio] 6 dB over full scale: peak with the limiter ' + peak(loud).toFixed(3) + ', without ' + peak(loudOff).toFixed(3)); console.log('[audio] a quiet track lifted 6 dB with the clarity curve: peak ' + peak(lifted).toFixed(3)); console.log('[audio] a quiet signal passes the limiter unchanged: ' + (peak(quiet) / 0.1).toFixed(3) + 'x'); })()`, delay: 6000 },
+  // The cross on a batch row asks which: the current download, or all of them.
+  { name: '30-cancel-menu', script: `${goto('Queue')}; setTimeout(() => document.querySelector('button[aria-label="Cancel…"]')?.click(), 900)`, delay: 2200 },
+  // Right-click on a playlist card, then "Delete…": what the person is told before anything is touched.
+  { name: '31-playlist-menu', script: `${goto('Library')}; setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Playlists')?.click(), 900); setTimeout(() => { const card = [...document.querySelectorAll('button')].find((b) => /folder/.test(b.textContent) && b.className.includes('rounded-xl')); card?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 380, clientY: 260 })); }, 2600)`, delay: 4200 },
+  { name: '32-playlist-delete-dialog', script: "[...document.querySelectorAll('[role=menuitem]')].find((b) => /Delete/.test(b.textContent))?.click()", delay: 1200 },
+  // A search from the link bar: songs and videos, shown as each arrives (this one goes to the network and only searches, nothing is downloaded).
+  { name: '40-search-list', script: `document.documentElement.dataset.theme='dark'; ${goto('Download')}; setTimeout(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'animal crossing'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); }, 700)`, delay: 9000 },
+  { name: '41-search-expanded', script: "[...document.querySelectorAll('section button[aria-expanded]')].forEach((b) => b.click())", delay: 1200 },
+  { name: '42-search-grid', script: "[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Grid')?.click()", delay: 1500 },
+  { name: '44-search-load-more', script: "[...document.querySelectorAll('section[aria-label=Videos] button')].find((b) => /Load more/.test(b.textContent))?.click()", delay: 9000 },
+  { name: '45-search-after-more', script: "const h = document.querySelector('section[aria-label=Videos] h2'); h?.parentElement?.nextElementSibling?.scrollIntoView({ block: 'start' }); console.log('[search] video cards: ' + document.querySelectorAll('section[aria-label=Videos] button.group').length + ' ' + document.querySelector('section[aria-label=Videos] h2').parentElement.textContent)", delay: 1500 },
+  // Albums and playlists in the results, and playing an album straight from them: the first track, then the next (its stream is worked out as its turn comes).
+  { name: '46-search-albums', script: `document.documentElement.dataset.theme='dark'; ${goto('Download')}; setTimeout(() => { const i = document.querySelector('input[aria-label^="Link to"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'daft punk'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit(); }, 700); setTimeout(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Albums')?.click(), 7000)`, delay: 9500 },
+  { name: '47-album-play', script: "const b = document.querySelector('section[aria-label=Albums] button[aria-label^=\"Play\"]'); console.log('[album] play button: ' + (b ? b.getAttribute('aria-label') : 'none')); b?.click(); setTimeout(() => { const m = navigator.mediaSession.metadata; console.log('[album] now playing: ' + (m ? m.title + ' / ' + m.artist + ' / ' + m.album : 'nothing')); }, 14000)", delay: 16000 },
+  { name: '48-album-next', script: "dispatchEvent(new KeyboardEvent('keydown', { key: 'n' })); setTimeout(() => { const m = navigator.mediaSession.metadata; console.log('[album] after next: ' + (m ? m.title + ' / ' + m.artist : 'nothing')); }, 9000)", delay: 11000 },
+  // The queue of an album, with local audio so nothing depends on YouTube: the first track is worked out and plays, the next is made ready while it plays, "next"
+  // moves on, and a track that cannot be found is skipped with a message. Needs the files served at http://127.0.0.1:8765 (see SESSION-LOG).
+  { name: '49a-lazy-queue-start', script: "const L = (n, u) => ({ id: 'l' + n, kind: 'audio', title: 'Listed track ' + n, artist: 'Lazy Band', album: 'Lazy Album', durationSec: 40, src: '', artworkUrl: null, path: null, lazyUrl: u }); __luminaPlayer.getState().playQueue([L(1, 'http://127.0.0.1:8765/t1.mp3'), L(2, 'http://127.0.0.1:8765/t2.mp3'), L(3, 'http://127.0.0.1:8765/missing.mp3')]); setTimeout(() => document.querySelector('[aria-label^=\"Open player\"]')?.click(), 2500); setTimeout(() => { const st = __luminaPlayer.getState(); console.log('[lazy] first: ' + (navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : 'nothing') + ' | playing=' + st.playing + ' | queue=' + st.queue.map((i) => (i.lazyUrl && !i.src ? 'listed' : 'ready')).join(',')); }, 8000)", delay: 10000 },
+  { name: '49b-lazy-queue-next', script: "dispatchEvent(new KeyboardEvent('keydown', { key: 'n' })); setTimeout(() => { const st = __luminaPlayer.getState(); console.log('[lazy] after next: ' + (navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : 'nothing') + ' | playing=' + st.playing + ' | index=' + st.index + ' | queue=' + st.queue.map((i) => (i.lazyUrl && !i.src ? 'listed' : 'ready')).join(',')); }, 5000)", delay: 7000 },
+  { name: '49c-lazy-queue-missing', script: "dispatchEvent(new KeyboardEvent('keydown', { key: 'n' })); setTimeout(() => { const st = __luminaPlayer.getState(); console.log('[lazy] after the missing track: index=' + st.index + ' | buffering=' + st.buffering + ' | toast=' + [...document.querySelectorAll('[role=status],[role=alert]')].map((e) => e.textContent.trim().slice(0, 90)).join(' / ')); }, 5000)", delay: 7000 },
+  { name: '43-search-videos-grid', script: "document.querySelector('section[aria-label=Videos]')?.scrollIntoView({ block: 'start' })", delay: 1500 },
+  // A batch whose first two files are already in its folder: the notice with the two choices (the files are put there by LUMINA_CAPTURE_BATCH_DIR's setup).
+  { name: '33-batch-existing', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); [...document.querySelectorAll('nav[aria-label=Main] button')][0].click(); setTimeout(() => { const nl = String.fromCharCode(10); const h = 'https://files.example.net/'; const parts = Array.from({ length: 12 }, (_, i) => h + 'k' + i + '/Game_Test.part' + String(i + 1).padStart(2, '0') + '.rar'); const dt = new DataTransfer(); dt.setData('text/plain', parts.join(nl)); document.querySelector('input[aria-label^=\"Link to\"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, 600)", delay: 3500 },
   { name: '30-about', script: `document.documentElement.dataset.theme='dark'; ${goto('About')}`, delay: 1400 },
   { name: '31-sidebar-collapsed', script: "document.querySelector('button[aria-label=\"Collapse sidebar\"]').click()", delay: 1000 },
   { name: '32-sidebar-expanded', script: "document.querySelector('button[aria-label=\"Expand sidebar\"]').click()", delay: 900 },
   { name: '33-about-bottom', script: `document.documentElement.dataset.theme='dark'; ${goto('About')}; setTimeout(() => { const s = document.querySelector('main .overflow-auto'); if (s) s.scrollTop = s.scrollHeight; }, 500)`, delay: 1400 },
   { name: '40-shortcuts', script: "document.documentElement.dataset.theme='dark'; dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))", delay: 900 },
+  { name: '50-show-browser', script: "window.lumina.invoke('settings:update', { browser: { showInSidebar: true } })", delay: 900 },
   { name: '50-browser', script: `document.documentElement.dataset.theme='dark'; ${goto('Browser')}`, delay: 2500 },
   { name: '41-supported-sites', script: `document.documentElement.dataset.theme='dark'; ${goto('About')}; setTimeout(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('every site')); if (b) b.click(); }, 600)`, delay: 4000 },
   { name: '42-supported-sites-search', script: "(() => { const i = document.querySelector('input[aria-label=\"Search supported sites\"]'); if (!i) return; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, 'tube'); i.dispatchEvent(new Event('input', { bubbles: true })); })()", delay: 900 },

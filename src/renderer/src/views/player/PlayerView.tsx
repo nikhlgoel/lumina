@@ -41,6 +41,7 @@ export function PlayerView() {
   const [colors, setColors] = useState<RGB[]>([[0.3, 0.25, 0.5], [0.5, 0.3, 0.25], [0.15, 0.4, 0.4]]);
   const [queueOpen, setQueueOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [soundOpen, setSoundOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const [idle, setIdle] = useState(false);
   const [overChrome, setOverChrome] = useState(false);
@@ -208,7 +209,7 @@ export function PlayerView() {
       data-player-theme={theme}
       data-playing={playing || undefined}
       data-video={isVideo || undefined}
-      data-idle={(isVideo && controlsHidden({ idle, playing, pointerOverChrome: overChrome, menuOpen: settingsOpen, queueOpen })) || undefined}
+      data-idle={(isVideo && controlsHidden({ idle, playing, pointerOverChrome: overChrome, menuOpen: settingsOpen || soundOpen, queueOpen })) || undefined}
       data-lyrics-size={settings.player.lyricsSize}
       style={{ viewTransitionName: 'player', ['--p-c1' as string]: toCss(colors[0]!), ['--p-c2' as string]: toCss(colors[1]!) }}
     >
@@ -296,6 +297,7 @@ export function PlayerView() {
                   queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)}
                   settingsOpen={settingsOpen} onSettings={setSettingsOpen}
                   statsOpen={statsOpen} onStats={setStatsOpen}
+                  soundOpen={soundOpen} onSound={setSoundOpen}
                 />
               )
               : <Dock item={item} stage={view} onStage={setStage} queueOpen={queueOpen} onQueue={() => setQueueOpen((o) => !o)} />}

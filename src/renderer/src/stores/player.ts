@@ -1,4 +1,5 @@
 import { applyTrackGain, applyVolumeBoost } from '@/lib/audio';
+import { media } from '@/lib/mediaElement';
 import { create } from 'zustand';
 import type { Lyrics, PlayableItem } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
@@ -48,10 +49,8 @@ interface PlayerState {
 }
 
 /** The single media element used by the whole app. Video elements also play audio-only files. */
-export const media: HTMLVideoElement = document.createElement('video');
-media.preload = 'auto';
-media.crossOrigin = 'anonymous';
-media.playsInline = true;
+// Still exported from here, where the rest of the app has always imported it from.
+export { media };
 
 // When Chromium can't decode a file, it is streamed through ffmpeg; seeking then restarts the stream at an offset.
 let remuxOffset = 0;
@@ -81,10 +80,62 @@ function applyLoudness(item: PlayableItem) {
     .catch(() => { if (loudnessFor === key) applyTrackGain(1); });
 }
 export const usePlayer = create<PlayerState>((set, get) => {
+  /** Which lazy track the player is waiting on, so a slow answer for a track the person has already skipped is thrown away. */
+  let lazyToken = 0;
+
+  /** Work out the stream of a track that was only listed (an album's or playlist's), and put it in the queue in place of the listing. */
+  const resolveAt = async (index: number): Promise<PlayableItem | null> => {
+    const listed = get().queue[index];
+    if (!listed?.lazyUrl) return listed ?? null;
+    const resolved = await call('media:play', { url: listed.lazyUrl });
+    const now = get().queue[index];
+    if (!now || now.lazyUrl !== listed.lazyUrl) return null; // the queue changed while it was being worked out
+    // What the listing knew (the album's own title, artist and cover) is kept; the stream is what the answer adds.
+    const full: PlayableItem = { ...resolved, title: listed.title || resolved.title, artist: listed.artist ?? resolved.artist, album: listed.album ?? resolved.album, artworkUrl: listed.artworkUrl ?? resolved.artworkUrl };
+    const queue = [...get().queue];
+    queue[index] = full;
+    set({ queue });
+    return full;
+  };
+
+  /** While a track plays, quietly get the next one ready, so moving on is instant instead of a pause. */
+  const prepareNext = (from: number) => {
+    const next = get().queue[from + 1];
+    if (next?.lazyUrl) void resolveAt(from + 1).catch(() => undefined);
+  };
+
+  const loadLazy = async (index: number, autoplay: boolean) => {
+    const listed = get().queue[index];
+    if (!listed) return;
+    const token = ++lazyToken;
+    media.pause();
+    // Let go of the track that was playing: left in place, its position would keep showing on a track that has not started (or could not).
+    media.removeAttribute('src');
+    media.load();
+    set({ index, time: 0, duration: listed.durationSec ?? 0, buffering: true, lyrics: null, lyricsState: 'idle' });
+    try {
+      const full = await resolveAt(index);
+      if (token !== lazyToken || !full) return;
+      load(index, autoplay);
+    } catch (err) {
+      if (token !== lazyToken) return;
+      useApp.getState().toast(`Couldn’t play “${listed.title}”: ${errorMessage(err)}`, 'error');
+      set({ buffering: false });
+      // On to the next track, if there is one to try.
+      if (index < get().queue.length - 1) load(index + 1, autoplay);
+    }
+  };
+
   const load = (index: number, autoplay: boolean) => {
     const { queue } = get();
     const item = queue[index];
     if (!item) return;
+    // A track that is only listed has no stream yet: work it out first, then come back here.
+    if (item.lazyUrl && !item.src) {
+      void loadLazy(index, autoplay);
+      return;
+    }
+    lazyToken++;
     // A link that can only be played through ffmpeg already points at it; seeking then restarts that pipe.
     usingRemux = Boolean(item.pipe);
     remuxOffset = 0;
@@ -127,6 +178,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     if (autoplay) void media.play().catch(() => undefined);
     updateSession(item);
     void fetchLyrics(item);
+    prepareNext(index);
   };
 
   const fetchLyrics = async (item: PlayableItem) => {
@@ -461,7 +513,8 @@ useApp.subscribe((s) => {
   if (!player || player === lastLoudnessSettings) return;
   const changed = !lastLoudnessSettings
     || player.normalizeLoudness !== lastLoudnessSettings.normalizeLoudness
-    || player.loudnessTarget !== lastLoudnessSettings.loudnessTarget;
+    || player.loudnessTarget !== lastLoudnessSettings.loudnessTarget
+    || player.bestSound !== lastLoudnessSettings.bestSound;
   lastLoudnessSettings = player;
   if (!changed) return;
   const item = usePlayer.getState().current();
@@ -475,3 +528,6 @@ usePlayer.subscribe((s, prev) => {
   if (volumeTimer) clearTimeout(volumeTimer);
   volumeTimer = setTimeout(() => void useApp.getState().updateSettings({ player: { volume: s.volume } }), 600);
 });
+
+// A hook for checking the player from outside its own code (the capture harness drives a queue through it).
+(window as unknown as { __luminaPlayer?: unknown }).__luminaPlayer = usePlayer;

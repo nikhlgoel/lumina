@@ -1,0 +1,43 @@
+name: Publish to winget
+
+# When a release is published on GitHub, sends the new version to winget (a pull request to microsoft/winget-pkgs, made with Microsoft's own
+# `wingetcreate`). Needs two things done once by the owner, described in PUBLISHING.md:
+#   1. The package already exists in winget: the first version is submitted by hand (`wingetcreate submit`), because `update` changes an existing one.
+#   2. A repository secret named WINGET_TOKEN: a GitHub personal access token (classic) with the "public_repo" scope.
+# Pre-releases (release candidates) are skipped: winget gets only what the owner has soaked and published as the Latest release.
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to send (for example 1.2.2); its release must already be published with the Standard installer'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  winget:
+    runs-on: windows-latest
+    steps:
+      - name: Work out the version
+        id: v
+        shell: pwsh
+        run: |
+          $version = '${{ github.event.inputs.version }}'
+          if (-not $version) { $version = '${{ github.event.release.tag_name }}' }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { Write-Error "'$version' is not a plain version (for example 1.2.2); nothing sent."; exit 1 }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Send it to winget
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          if (-not $env:WINGET_TOKEN) { Write-Error 'The WINGET_TOKEN secret is not set (see PUBLISHING.md).'; exit 1 }
+          $url = "https://github.com/nikhlgoel/lumina/releases/download/$($env:VERSION)/Lumina-$($env:VERSION)-Standard-Setup.exe"
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          ./wingetcreate.exe update nikhlgoel.Lumina --version $env:VERSION --urls $url --token $env:WINGET_TOKEN --submit

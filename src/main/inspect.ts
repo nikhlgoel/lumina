@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MediaInfo, PlaylistEntry, RequestInfo } from '../shared/types';
-import { classifyUrl, cleanUrl, isMusicSite, siteName } from '../core/url';
+import { classifyUrl, cleanUrl, isMusicSite, safeDecode, siteName } from '../core/url';
 import { app } from 'electron';
 import { directApiUrl, isBotCheckResponse, isLinkFromPage, isPageHost } from '../core/hosts';
 import { fetchFollowing } from '../core/safeFetch';
@@ -50,7 +50,7 @@ export async function inspect(rawUrl: string, request?: RequestInfo): Promise<Me
   if (kind === 'torrent-file') {
     return fs.existsSync(url)
       ? inspectTorrentFile(url)
-      : { ...base(url, 'BitTorrent'), sourceKind: 'torrent', title: decodeURIComponent(path.basename(new URL(url).pathname)), torrent: { name: '', files: [], infoHash: null }, request };
+      : { ...base(url, 'BitTorrent'), sourceKind: 'torrent', title: safeDecode(path.basename(new URL(url).pathname)), torrent: { name: '', files: [], infoHash: null }, request };
   }
   if (parseSpotifyUrl(url)) return inspectSpotify(url);
   const api = directApiUrl(url, !app.isPackaged ? process.env.LUMINA_SELFTEST_DIRECT_API_HOST : undefined);
@@ -184,12 +184,12 @@ async function inspectDirect(url: string, request?: RequestInfo, anyFile = false
   const disposition = res.headers.get('content-disposition');
   if (!anyFile && !MEDIA_OR_FILE.test(type) && !disposition) return null;
 
-  let filename = decodeURIComponent(path.basename(new URL(res.url || url).pathname)) || 'download';
+  let filename = safeDecode(path.basename(new URL(res.url || url).pathname)) || 'download';
   const m = disposition?.match(/filename\*=(?:UTF-8'')?([^;]+)|filename="?([^";]+)"?/i);
   const raw = m?.[1] ?? m?.[2];
   if (raw) {
     try {
-      filename = decodeURIComponent(raw.trim());
+      filename = safeDecode(raw.trim());
     } catch {
       filename = raw.trim();
     }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Settings, SettingsPatch } from '@shared/settings';
-import type { AppInfo, Preset, RequestInfo, ToolStatus } from '@shared/types';
+import type { AppInfo, EpisodeBatch, Preset, RequestInfo, ToolStatus } from '@shared/types';
 import { call, errorMessage, on } from '@/lib/bridge';
 import { transition } from '@/lib/motion';
 
@@ -41,6 +41,8 @@ interface AppState {
   toasts: Toast[];
   pending: PendingLink | null;
   pendingBatch: PendingBatch | null;
+  /** The episodes of a series sent from the browser, waiting for the downloader screen to take them. */
+  pendingEpisodes: EpisodeBatch | null;
   clipboardLink: string | null;
   pasteRequest: number;
   /** Version already announced by a toast, so a re-check doesn't nag twice. */
@@ -53,6 +55,7 @@ interface AppState {
   dismissToast: (id: number) => void;
   consumePending: () => PendingLink | null;
   consumePendingBatch: () => PendingBatch | null;
+  consumePendingEpisodes: () => EpisodeBatch | null;
   dismissClipboardLink: () => void;
 }
 
@@ -70,6 +73,7 @@ export const useApp = create<AppState>((set, get) => ({
   toasts: [],
   pending: null,
   pendingBatch: null,
+  pendingEpisodes: null,
   clipboardLink: null,
   pasteRequest: 0,
   announcedUpdate: null,
@@ -95,6 +99,11 @@ export const useApp = create<AppState>((set, get) => ({
     });
     on('app:open-links', ({ urls, request, names }) => {
       set({ pendingBatch: { urls, request, names }, clipboardLink: null });
+      get().setMode('downloader');
+      get().setView('download');
+    });
+    on('app:open-episodes', (batch) => {
+      set({ pendingEpisodes: batch, clipboardLink: null });
       get().setMode('downloader');
       get().setView('download');
     });
@@ -158,6 +167,12 @@ export const useApp = create<AppState>((set, get) => ({
   consumePendingBatch: () => {
     const batch = get().pendingBatch;
     if (batch) set({ pendingBatch: null });
+    return batch;
+  },
+
+  consumePendingEpisodes: () => {
+    const batch = get().pendingEpisodes;
+    if (batch) set({ pendingEpisodes: null });
     return batch;
   },
 

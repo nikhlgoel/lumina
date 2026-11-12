@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import { Check, FolderOpen, Keyboard } from 'lucide-react';
 import type { Settings, SettingsPatch } from '@shared/settings';
 import { call } from '@/lib/bridge';
@@ -27,16 +27,29 @@ export function Group({ title, description, children, action }: { title?: string
   );
 }
 
+/**
+ * The id of a row's label, for the inputs inside it: a field with no name of its own is named by its row, as a screen reader needs. (The description is left as
+ * the text beside it: linking it with aria-describedby made axe-core's "visible label" rule fail the very same fields.)
+ */
+const RowName = createContext<string | null>(null);
+const useRowName = () => {
+  const label = useContext(RowName);
+  return label ? { 'aria-labelledby': label } : {};
+};
+
 /** One setting. `id` lets settings search scroll to and highlight it. */
 export function Row({ id, label, description, children, stacked }: { id?: string; label: ReactNode; description?: ReactNode; children?: ReactNode; stacked?: boolean }) {
+  const labelId = useId();
   return (
+    <RowName.Provider value={labelId}>
     <div data-setting={id} className={cn('rounded-lg transition-[background-color,box-shadow] duration-700', stacked ? 'py-[var(--row-y)]' : 'flex items-center justify-between gap-6 py-[var(--row-y)]')}>
       <div className="min-w-0">
-        <div className="text-sm font-semibold text-ink">{label}</div>
+        <div id={labelId} className="text-sm font-semibold text-ink">{label}</div>
         {description && <div className="mt-0.5 text-[13px] leading-relaxed text-ink-3">{description}</div>}
       </div>
       {children && <div className={cn('flex items-center gap-2', stacked ? 'mt-3' : 'shrink-0')}>{children}</div>}
     </div>
+    </RowName.Provider>
   );
 }
 
@@ -45,6 +58,7 @@ const inputClass = 'h-9 rounded-lg border border-line-strong bg-raised px-3 text
 export function NumberInput({ value, onCommit, suffix, step = 1, min, max, width = 'w-24' }: {
   value: number; onCommit: (v: number) => void; suffix?: string; step?: number; min?: number; max?: number; width?: string;
 }) {
+  const names = useRowName();
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
   const commit = () => {
@@ -58,7 +72,7 @@ export function NumberInput({ value, onCommit, suffix, step = 1, min, max, width
   return (
     <span className="flex items-center gap-2">
       <input type="number" step={step} min={min} max={max} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()}
-        className={cn(inputClass, width, 'px-2.5 text-right tabular')} />
+        {...names} className={cn(inputClass, width, 'px-2.5 text-right tabular')} />
       {suffix && <span className="text-xs text-ink-3">{suffix}</span>}
     </span>
   );
@@ -67,6 +81,7 @@ export function NumberInput({ value, onCommit, suffix, step = 1, min, max, width
 export function TextInput({ value, onCommit, placeholder, width = 'w-64', mono, validate }: {
   value: string; onCommit: (v: string) => void; placeholder?: string; width?: string; mono?: boolean; validate?: (v: string) => string | null;
 }) {
+  const names = useRowName();
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
   useEffect(() => setDraft(value), [value]);
@@ -81,7 +96,7 @@ export function TextInput({ value, onCommit, placeholder, width = 'w-64', mono, 
     <span className="flex flex-col items-end gap-1">
       <span className="relative flex items-center">
         <input value={draft} placeholder={placeholder} spellCheck={false} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()}
-          className={cn(inputClass, width, mono && 'font-mono text-[13px]', error && 'border-danger focus:border-danger')} />
+          {...names} className={cn(inputClass, width, mono && 'font-mono text-[13px]', error && 'border-danger focus:border-danger')} />
         {saved && <Check className="absolute right-2.5 size-4 text-success animate-pop" />}
       </span>
       {error && <span className="max-w-72 text-right text-xs text-danger">{error}</span>}

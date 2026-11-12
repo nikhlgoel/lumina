@@ -13,6 +13,24 @@ export interface RowChip {
   tone: 'neutral' | 'warning';
 }
 
+/** A finished playlist's sentence that reports items that did not make it: shown as a warning, not as plain "Done". */
+export const isPartialSummary = (summary: string | null | undefined): boolean => /could not be downloaded|recovered on a second try/i.test(summary ?? '');
+
+/** A long sentence-by-sentence summary split into its headline (the first sentence) and the rest, so only the headline needs to be strong. */
+export function splitSummary(summary: string): { headline: string; rest: string } {
+  const m = /^(.+?[.!?])(?:\s+([\s\S]*))?$/.exec(summary.trim());
+  return m ? { headline: m[1] ?? summary, rest: m[2]?.trim() ?? '' } : { headline: summary, rest: '' };
+}
+
+/** One labelled fact about a finished download. The words are on the row itself: a bare "13.5 GB · 34 min 49 s · 6.6 M…" does not say what any of it is. */
+export interface RowStat {
+  kind: 'size' | 'time' | 'speed' | 'items';
+  /** What is shown, with its meaning in it: "13.5 GB downloaded", "took 34 min 49 s". */
+  text: string;
+  /** The same in a full sentence, for a tooltip and a screen reader. */
+  label: string;
+}
+
 export interface RowDetail {
   /** The parts of the line after the status word, joined with " · ". */
   meta: string[];
@@ -21,9 +39,11 @@ export interface RowDetail {
   /** True when the bar should loop because nothing about how far along it is can honestly be drawn. */
   indeterminate: boolean;
   chip: RowChip | null;
+  /** For a finished download: its facts, each labelled. Empty otherwise. (`meta` keeps the same facts as bare text.) */
+  stats?: RowStat[];
 }
 
-type RowJob = Pick<Job, 'status' | 'progress' | 'engine'> & { summary?: Job['summary'] };
+type RowJob = Pick<Job, 'status' | 'progress' | 'engine'> & { summary?: Job['summary']; engineState?: Job['engineState'] };
 
 export const connectionsLabel = (n: number): string => `${n} connection${n === 1 ? '' : 's'}`;
 
@@ -46,6 +66,8 @@ export function rowChip(job: Pick<Job, 'status' | 'progress'>): RowChip | null {
   if (p.activity === 'waiting') return { label: 'Waiting for network', tone: 'warning' };
   if (job.status !== 'running' && job.status !== 'processing') return null;
   if (p.activity === 'reconnecting') return { label: 'Reconnecting', tone: 'warning' };
+  // The speed fell from a high one and stayed down: the host's own limit, not a fault of the connection (core/slowdown).
+  if (p.activity === 'limited') return { label: 'Host is limiting speed', tone: 'warning' };
   if (p.activity === 'writing') return { label: 'Writing to disk', tone: 'neutral' };
   if (job.status === 'running' && p.connections && p.connections > 0) return { label: connectionsLabel(p.connections), tone: 'neutral' };
   return null;
@@ -108,15 +130,32 @@ export function rowDetail(job: RowJob, headline: number, multi: boolean): RowDet
 
   if (job.status === 'completed') {
     const meta: string[] = [];
+    const stats: RowStat[] = [];
     // Only for downloads: a conversion or an unpack has its own sentence, and "average speed" means nothing for it.
     if ((job.engine === 'ytdlp' || job.engine === 'aria2') && job.summary) {
       const { bytes, tookMs } = job.summary;
-      if (bytes != null && bytes > 0) meta.push(formatBytes(bytes));
+      if (bytes != null && bytes > 0) {
+        meta.push(formatBytes(bytes));
+        stats.push({ kind: 'size', text: `${formatBytes(bytes)} downloaded`, label: `Total size of the files that downloaded: ${formatBytes(bytes)}` });
+      }
       const took = formatTook(tookMs);
-      if (took) meta.push(took);
-      if (bytes != null && bytes > 0 && tookMs != null && tookMs >= 2000) meta.push(`${formatSpeed(bytes / (tookMs / 1000))} average`);
+      if (took) {
+        meta.push(took);
+        stats.push({ kind: 'time', text: `took ${took}`, label: `Time spent downloading: ${took}` });
+      }
+      if (bytes != null && bytes > 0 && tookMs != null && tookMs >= 2000) {
+        const speed = formatSpeed(bytes / (tookMs / 1000));
+        meta.push(`${speed} average`);
+        stats.push({ kind: 'speed', text: `${speed} average`, label: `Average download speed: ${speed}` });
+      }
+      // A playlist: how many of its items made it. The count is the thing a partly failed one is judged by.
+      const finished = job.engineState?.finishedItems;
+      const total = job.progress.item?.count ?? 0;
+      if (typeof finished === 'number' && total > 1) {
+        stats.unshift({ kind: 'items', text: `${finished} of ${total} items`, label: `${finished} of the ${total} items in the playlist downloaded` });
+      }
     }
-    return { meta, right: null, indeterminate: false, chip: null };
+    return { meta, right: null, indeterminate: false, chip: null, stats };
   }
 
   return { meta: [], right: null, indeterminate: false, chip };

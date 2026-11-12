@@ -16,7 +16,10 @@ import { tools } from './tools';
 import { loudnessFor } from './media/loudness';
 import { inspect } from './inspect';
 import { findPageFiles } from './pageFiles';
-import { searchMulti } from './search';
+import { resolveLinkNames } from './linkNames';
+import { planBatchFolder, seriesFolder } from './batchFolder';
+import { effectiveLoudnessTarget } from '../core/sound';
+import { searchAlbumsPart, searchMulti, searchPlaylistsPart, searchSongsPart, searchVideosPart } from './search';
 import { queue } from './jobs/queue';
 import { runTool } from './process';
 import { challengeAction, currentChallenge, placeChallenge } from './hosters';
@@ -208,12 +211,19 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
 
   'media:inspect': ({ url, request }: { url: string; request?: RequestInfo }) => inspect(url, request),
   'page:files': ({ url, request }: { url: string; request?: RequestInfo }) => findPageFiles(url, request),
+  'links:names': ({ urls }: { urls: string[] }) => resolveLinkNames(urls),
+  'series:folder': ({ base, show, season }: { base: string; show: string; season: number }) => seriesFolder(base, show, season),
+  'batch:folder': ({ base, title, filenames, flat }: { base: string; title: string; filenames: string[]; flat?: boolean }) => planBatchFolder(base, title, filenames, flat),
   'media:play': ({ url, info, request }: { url: string; info?: unknown; request?: RequestInfo }) => {
     // `info` comes from the page; it is only trusted for what the link bar already read, and is read again when it isn't a MediaInfo.
     const known = info && typeof info === 'object' && typeof (info as MediaInfo).sourceKind === 'string' ? (info as MediaInfo) : undefined;
     return playableFromLink(url, request, known);
   },
   'search:query': ({ query }: { query: string }) => searchMulti(query),
+  'search:songs': ({ query, limit }: { query: string; limit?: number }) => searchSongsPart(query, limit),
+  'search:videos': ({ query, limit }: { query: string; limit?: number }) => searchVideosPart(query, limit),
+  'search:albums': ({ query, limit }: { query: string; limit?: number }) => searchAlbumsPart(query, limit),
+  'search:playlists': ({ query, limit }: { query: string; limit?: number }) => searchPlaylistsPart(query, limit),
 
   'jobs:list': () => queue.list(),
   'jobs:add': ({ url, info, options }: { url: string; info: MediaInfo; options: DownloadOptions }) => {
@@ -361,6 +371,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   'library:playlist-create': ({ name, paths }: { name: string; paths?: string[] }) => library.createPlaylist(name, paths ?? []),
   'library:playlist-rename': ({ id, name }: { id: string; name: string }) => library.renamePlaylist(id, name),
   'library:playlist-delete': ({ id }: { id: string }) => library.deletePlaylist(id),
+  'library:playlist-trash': ({ id }: { id: string }) => library.trashPlaylist(id),
   'library:playlist-add': ({ id, paths }: { id: string; paths: string[] }) => library.addToPlaylist(id, paths),
   'library:playlist-remove': ({ id, index, paths }: { id: string; index?: number; paths?: string[] }) => library.removeFromPlaylist(id, { index, paths }),
   'library:playlist-move': ({ id, from, to }: { id: string; from: number; to: number }) => library.movePlaylistItem(id, from, to),
@@ -369,7 +380,7 @@ const handlers: { [K in InvokeChannel]: Handler<K> } = {
   },
 
   'player:resolve': ({ ids }: { ids: string[] }) => ids.map(toPlayable).filter((x): x is PlayableItem => Boolean(x)),
-  'player:loudness': ({ path: p }: { path: string }) => loudnessFor(p, settings.get().player.loudnessTarget),
+  'player:loudness': ({ path: p }: { path: string }) => loudnessFor(p, effectiveLoudnessTarget(settings.get().player.bestSound, settings.get().player.loudnessTarget)),
   'player:resolve-path': async ({ path: p }: { path: string }) => {
     assertKnownPath(p);
     const item = await library.ingest(p);

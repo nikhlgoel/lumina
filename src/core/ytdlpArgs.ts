@@ -227,6 +227,8 @@ export function outputTemplate(
   options: DownloadOptions, isPlaylist: boolean, numbering: boolean, base: string,
   layout: { music: MusicLayout; video: VideoLayout } = { music: 'flat', video: 'flat' },
 ): string {
+  // A name chosen by the sender (an episode of a series): used as it is, with any '%' made literal for yt-dlp.
+  if (options.fileName && !isPlaylist) return `${options.fileName.replace(/%/g, '%%')}.%(ext)s`;
   if (options.contentType === 'series' && options.series) {
     const season = String(options.series.season).padStart(2, '0');
     const show = options.series.show.replace(/[\\/:*?"<>|%]/g, '_');

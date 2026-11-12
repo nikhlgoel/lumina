@@ -240,7 +240,7 @@ export function NetworkSection({ s, set }: SectionProps) {
   const n = s.network;
   return (
     <Group title="Connection">
-      <Row id="proxy" label="Proxy" description="For example socks5://127.0.0.1:1080 or http://user:pass@host:8080. Leave empty to connect directly.">
+      <Row id="proxy" label="Proxy" description="For example socks5://127.0.0.1:1080 or http://user:pass@host:8080. Leave empty to connect directly. Meant for web downloads: torrent peers are not guaranteed to use it, so to hide your address while torrenting use a VPN.">
         <TextInput value={n.proxy} placeholder="None" mono validate={(v) => (v && !/^(https?|socks4a?|socks5h?):\/\/\S+$/i.test(v) ? 'Start with http://, https://, socks4:// or socks5://' : null)} onCommit={(v) => set({ network: { proxy: v } })} />
       </Row>
       <Row id="userAgent" label="Custom user agent" description="Leave empty unless a site blocks the default.">

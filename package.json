@@ -1,6 +1,6 @@
 {
   "name": "lumina-media",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Lumina - media downloader and player",
   "main": "dist-electron/main/index.js",
   "author": {
@@ -34,10 +34,10 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.46.0",
     "monaco-editor": "^0.56.0",
-    "music-metadata": "^11.15.0",
+    "music-metadata": "^11.16.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "zod": "^4.6.5",
+    "zod": "^4.6.7",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -49,6 +49,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.4.1",
     "electron-builder": "^26.15.3",
+    "fast-check": "^4.10.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
     "vite": "^8.3.0",

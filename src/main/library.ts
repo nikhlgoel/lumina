@@ -11,6 +11,7 @@ import {
 } from '../core/collection';
 import { isDownloaderArtifact, isTrailingVolume } from '../core/fileKind';
 import { shouldForget } from '../core/libraryPrune';
+import { canTrashFolder } from '../core/trashGuard';
 import { database, transaction } from './db';
 import { settings } from './settings';
 import { probe } from './media/probe';
@@ -232,6 +233,37 @@ class Library extends EventEmitter<{ changed: [LibraryStats] }> {
     database().prepare("DELETE FROM playlists WHERE id = ? AND source = 'user'").run(id);
     this.emit('changed', this.stats());
     return true;
+  }
+
+  /**
+   * "Delete" on a playlist found on this computer. A folder playlist is a folder: it goes to the Recycle Bin whole, songs and all, and can be
+   * restored from there (the library notices it again on its own). A playlist file goes alone and its songs stay. One of the person's own
+   * playlists (kept inside Lumina) is only forgotten, since no file is involved. A folder Lumina keeps the library in is never removed.
+   */
+  async trashPlaylist(id: string): Promise<{ ok: boolean; message?: string; kind?: LibraryPlaylist['source'] }> {
+    const pl = this.playlists().find((p) => p.id === id);
+    if (!pl) return { ok: false, message: 'That playlist is gone already.' };
+    if (pl.source === 'user') return { ok: this.deletePlaylist(id), kind: 'user' };
+    const s = settings.get().storage;
+    if (pl.source === 'folder') {
+      const verdict = canTrashFolder(pl.path, this.roots(), [...s.libraryRoots, s.otherDir, s.musicDir, s.videoDir, s.seriesDir].filter(Boolean));  // roots() drops folders nested inside others; every one stays protected
+      if (!verdict.ok) return { ok: false, message: verdict.reason, kind: 'folder' };
+    } else if (!this.isAllowedPath(pl.path)) {
+      return { ok: false, message: 'That playlist file is outside your library folders.', kind: 'file' };
+    }
+    if (!fs.existsSync(pl.path)) return { ok: false, message: 'It is not on the disk any more.', kind: pl.source };
+    try {
+      const { shell } = await import('electron');
+      await shell.trashItem(pl.path);
+    } catch (err) {
+      log.warn('Could not move a playlist to the Recycle Bin', { path: pl.path, err: String(err) });
+      return { ok: false, message: `It could not be moved to the Recycle Bin (${err instanceof Error ? err.message : String(err)}).`, kind: pl.source };
+    }
+    log.info('Moved a playlist to the Recycle Bin', { source: pl.source, path: pl.path, songs: pl.itemCount });
+    database().prepare("DELETE FROM playlists WHERE id = ? AND source != 'user'").run(id);
+    this.emit('changed', this.stats());
+    void this.scan();
+    return { ok: true, kind: pl.source };
   }
 
   addToPlaylist(id: string, paths: string[]): number {

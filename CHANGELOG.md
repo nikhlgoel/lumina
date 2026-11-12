@@ -8,11 +8,106 @@ Engineering detail lives in `SESSION-LOG.md`, reasoning in `DECISIONS.md`, open 
 
 ---
 
-## [Unreleased]
+## [1.2.2] — 2026-11-12
 
-Not released yet; everything below is in the working tree only.
+### New and improved
+- **The Browser is no longer in the sidebar by default.** Downloads, the quick check some sites ask for, and the page reader all use windows of their own and never needed it, and the Lumina extension covers browsing in your own browser. It is still there for anyone who wants a browser that hands its downloads to Lumina (Settings > Privacy > Lumina's browser > "Show it in the sidebar"), and the Code tab's preview opens it either way. The keyboard shortcuts follow what is shown: Ctrl+4 is the next item, never a gap, and a build without the editor or the browser no longer has a shortcut that lands on an empty page.
+- **The extension asks for less.** The "tabs" permission is gone (its host access already covers what it read), so the install prompt no longer says it can read your browsing history, and the Firefox build declares that it collects no data. On a page of 100,000 links, or one that never stops changing, or with malformed addresses, a closed shadow root or a 20,000-character title, it answers in about a second or two without an error (ten hostile pages are part of the end-to-end test); an episode list far down a huge page is still found.
+- **Screen readers and the keyboard.** An automated accessibility audit (axe-core) of every main screen, every settings page, the Sound panel, the video player and the series picker now reports nothing. What it found and fixed: number and text fields in Settings had no name (each is now named by its row), the mini player was a button with buttons inside it (now one button over the bar, with the controls beside it), library rows claimed to be buttons while holding real ones, a few labels did not contain the words shown on screen, and empty screens had no proper heading.
+- **A new equalizer.** Ten bands from 31 Hz to 12 kHz with real shelves at both ends ("Treble boost" lifts the whole top, not a narrow bump), drawn as a curve you drag: a dot per band, the arrow keys for half-decibel steps, and a faint live spectrum of what is playing behind it. Sixteen presets in three groups (everyday, genres, situations such as Podcast and speech, Late night and Small speakers), and your own: edit a curve, Save as, and it is in the list, in the tray menu, and kept. Boosts now make their own room: the level is lowered by what the curve lifts (shown as "Headroom -3.1 dB"), the limiter switches on for any boost (a bass boost on a loud track used to clip with Best sound off), and a soft ceiling after it keeps anything from leaving over full scale. The Sound panel is frosted glass that blurs and tints what is behind it (the cover's colours, the video's picture), is about 320 by 425 pixels, never outgrows the window, and in the video player keeps the controls on screen while it is open. Old five-band curves are re-fitted to ten.
+- **Send a whole series from the browser.** On a series page the extension now reads the list of episodes (the sidebar of "Ep 1, Ep 2 ...", also when the rows are not links) and shows all of them in its popup. "Find the ones with a video" opens each episode in a background tab (muted, closed again, pop-up ads closed too), starts the player, and sees whether a video turns up, so a series that is still being added to is listed in full but only the episodes that have a video can be ticked; the empty ones say "No video yet". "Send N episodes" hands them to Lumina as one series: a list to confirm, saved as `Series/<Show>/Season 01/<Show> - S01E03.mkv`, with an episode already in the folder left out. It works the same on any site, not one in particular.
+- **Torrent settings you can pick, and that say what they do.** *Connections per torrent* is now three choices (Balanced 60, Fast 120, Maximum 250) instead of a number to type in; a number from an imported settings file shows as Custom until you pick one. *After a download finishes* replaces the two sharing numbers with Stop, A little (1:1 or 2 hours), Fair share (2:1 or a day) and Keep sharing (up to a week). The old fields were misleading: measured against the bundled aria2, a sharing time of 0 stops sharing at once whatever the ratio is, so "ratio 2, time 0" never shared and "0 means no time limit" was untrue. The descriptions of the listening port, encryption and proxy now say what they really do (a proxy is for web downloads, and torrent peers are not guaranteed to use it).
+- **The tracker list is checked before use.** Addresses that point at this computer or your own network, other schemes, logins in the address, and oversized lines are dropped, both when the list is downloaded and when it is read back from disk, and the download is size-limited.
+- **Search finds albums and playlists, and everything can be played from the results.** Beside Songs and Videos there are now Albums (with year, type and big cover
+  art) and Playlists (YouTube Music's own, then ones people made), each found in about 0.6 s, with a row of choices (All, Songs, Albums, Playlists, Videos) to narrow
+  it. Every result has a round Play button: a song or video plays at once without downloading; an album or playlist plays from its first track on, each track's
+  stream worked out as its turn comes (the next one is made ready while the current one plays) and a track that cannot be played is skipped with a clear message.
+  "Open album" / "Open playlist" lists its tracks to pick from and download, as before.
+- **Streaming playback no longer throws an uncaught error.** The player's streaming proxy used Node's built-in HTTP client, which throws out of a socket handler when
+  the player stops reading ahead and the server closes the connection (seen twice in one short test). It now uses Node's classic http/https modules; the same test
+  shows none.
+- **Best sound, on by default.** Music and video now play clear and a little louder than before, without distortion. Three things work together: loudness matched to
+  -12 LUFS (a little above the streaming services' -14; a louder target of your own is left alone), a gentle "Clarity" curve (warmer lows, less mud, more presence
+  and air) used while your own equalizer is off, and a limiter just under full scale that is on whenever anything has added gain, so the extra loudness cannot clip.
+  One switch turns it all off, in Settings > Player and in the player's Sound panel; "Clarity" is also a normal equalizer profile. Measured in the app: the limiter
+  holds a signal 6 dB over full scale to 0.987, and a quiet track lifted 6 dB with the curve peaks at 0.945. The audio runs at the output device's own sample rate.
+- **Video player:** the settings and Sound pop-ups no longer sit on top of the progress bar and the time.
+- **The record player shows the whole picture.** On the disc theme the song's artwork now fills the whole round label (before it was a small square in the
+  middle of a ring). A wide picture such as a video thumbnail is shown across the full width of the label over a blurred copy of itself, instead of having its
+  sides cut off.
+- **Browser protection can be set.** The in-app browser told you "the shield is switched off in Settings", but Settings had no such controls. Privacy now has
+  switches for blocking ads and trackers, each filter list (ads, trackers, malware and phishing, pop-ups and cookie banners), hiding the empty space where ads
+  were, secure connections, and an "Update now" button. Changes apply at once.
+- **"Sync bookmarks" does what it says.** The switch changed nothing (bookmarks were always synced); with it off, bookmarks now neither go out nor come in.
+- **A damaged settings file no longer wipes everything.** One section of the wrong type (a hand edit, `null`) used to make Lumina forget every setting,
+  folders included, and save the defaults over the file. Now only that section falls back, and a file that cannot be read at all is copied to
+  `settings.json.unreadable` first.
+- **Every setting can be found in Settings search** (15 could not), and the browser's filter lists download through Electron's own network stack, which avoids an
+  uncaught error from Node's HTTP client seen in the log while the lists were fetched.
+- **Search from the link bar is faster and shows more.** Songs and videos are now asked for separately and each appears the moment it is ready (before, both
+  waited for the slower video list, about 4 s). Videos come from YouTube's own search first (about 0.8 s for 12 results; yt-dlp is the fallback, about 4 s),
+  answers are remembered for ten minutes, and a repeat search is instant. Measured against the real YouTube.
+- **Results are bigger and say more.** A List view (a picture beside each result) and a Grid view (big pictures), remembered between searches. Videos show
+  their length on the picture, the channel with a tick if verified, views and how long ago; songs show big album art, artist, album and length. Each section
+  shows its first few results with "Show N more", and "Load more videos/songs" asks for more (up to 40). A source that cannot be reached says so with
+  "Try again" instead of leaving the other one waiting.
+- **Safer replace.** "Download all again and replace" never deletes a file for good: if the Recycle Bin cannot take the old copy, it is kept and the new one is saved
+  beside it. It only touches files that were in the folder when the batch was planned, a file of unknown size is never taken for "the same file", the old copy
+  moves only when the download is certain to start, and two links of the same name in one batch no longer take the same file name. (An independent review found
+  these in the first version.) The batch picker also no longer lets a click queue into the folder of an earlier choice.
+- **Cancel asks which.** The cross on a batch row opens a small menu beside it: cancel only what is downloading now, or all of the batch's files
+  (files already downloaded are kept). A download that was "waiting for the network" could not be cancelled at all and stayed on the row looking failed;
+  it can now.
+- **"Cancelled" is its own status.** A calm blue-grey with a stop icon in both themes (never red), on the file's row and on a batch ("Cancelled · 3 done · 9
+  cancelled"). Checked in the real app: a cancelled download goes queued, running, cancelled and never through "failed".
+- **Each batch gets its own folder, named for what it is.** Any batch of more than one file now defaults to a folder of its own (twelve parts of one archive used to
+  be poured into the main folder). Another batch with the same name gets "(2)", "(3)", and a batch whose links do not name their files is named by the day
+  and time instead of "Batch download".
+- **Files you already have are recognised.** When a batch's folder already holds files with the same names, the picker says so and offers "Skip them" (the
+  default; a file is skipped only if it is the same size, and shows "Already on this computer") or "Download all again and replace" (the old copies go to the
+  Recycle Bin first). Before, a repeat quietly made `name (1)` copies of everything. Split archives still unpack when some parts were skipped.
+- **Right-click a playlist to delete it.** The menu has Open, Show in folder and Delete. Deleting a folder playlist moves the folder and its songs to the
+  Recycle Bin after asking (restore it from there and the library finds it again); a playlist file goes alone and its songs stay. A library folder itself, or a
+  folder that holds one, is never removed.
+- **Pasted links with brackets keep them.** A link like `https://x.test/Setup_(x64).exe` was cut at the first `(`; only a bracket left over from the
+  sentence around the link is now dropped.
+- **Odd file names no longer break link checking.** A `%` that is not an escape (`50%off.zip`) made the check throw; links with such names are read, and a
+  browser hand-off with no name is titled from its address instead of being left blank.
+- **Sizes under one byte read as numbers.** `0.4 B/s` used to print as "0.4 undefined/s".
+- **A broken notification handler can no longer freeze the queue.** An error thrown while announcing a finished or failed download skipped the step that
+  starts the next one, so everything waiting stayed waiting.
+- **Downloads that were "waiting for the network" when Lumina closed start again** instead of saying "waiting" for ever; one that gave up after six hours
+  now says it failed.
+- **Cancelling while a download is still being set up stops it** (a torrent that was checking its files used to carry on unseen), and a cancel or quit
+  during set-up is no longer reported as a failure.
+- **A paused-then-resumed download ignores its old run.** What the first run said while winding down could end or fail the second.
+- Extension: when a hand-off fails the badge says why (a timeout, a refusal), and a browser download that Lumina declined and the browser could not
+  restart is reported instead of vanishing.
+- **A batch speaks once.** Twelve files used to raise twelve "Downloaded" toasts, twelve desktop notifications and, with "show in folder" on, twelve
+  Explorer windows. Now one notice says how the whole batch came out ("9 of 12 files downloaded, 3 did not"), when its last file ends.
+- **The speed warning remembers the host.** A second file that started already throttled had nothing fast to compare with and crawled without a word; it
+  now compares with what earlier files from the same host reached in the last half hour.
+- **Waiting files show their size** ("Up next, starts automatically · 5.0 GB").
+- Extension: two media requests arriving together no longer overwrite each other in the page's list, and a second warning badge no longer clears the
+  first one's early.
+- **A batch shows every file it was sent.** Twelve links sent from the browser showed as "3 files": a download that had to wait its turn was saved but
+  never announced to the window, so only the ones that had started were visible. Every download now appears the moment it is added, and the batch row
+  says how it stands ("3 done · 1 downloading · 8 waiting"), and when a host is limiting its speed.
+- **Downloads have the right picture.** A .rar, .zip, installer, video, song, image or document each gets its own icon, and a batch of archive parts shows
+  an archive. A .rar is no longer drawn as music.
+- **A video from a streaming page is downloaded as a video.** A 45-minute episode came out as an audio-only FLAC because a stream that lists no tracks was
+  taken for music. It now opens on Video, with the subtitle choices (a separate file, a track inside the video, or burned in). Checked in the real app with a
+  local stream.
+- **Share links are listed by their file names even if the browser extension is old.** Lumina asks the host for the names before showing the list.
+- **A slow-down is explained.** When a host cuts the speed of a file far below where it started and keeps it there, the row says "Host is limiting speed"
+  (Pixeldrain, for instance, limits files that have already moved a lot of data). Lumina cannot lift that limit.
+- **A finished playlist that lost items has a Retry button** that fetches only the missing ones.
+- **A bigger, better-placed logo and name** in a taller header.
 
 ### Fixed
+- **A locked clipboard no longer raises an error every second.** Another program holding the clipboard open (Windows allows only one at a time) made the link watcher throw on every check; it now quietly looks again.
+- **Typing a series name no longer leaves empty folders behind.** Planning a series created its folder each time the name changed ("The R", "The Rep" ...); the folder is made when the download starts.
+- **Three components with published security problems were updated.** The library's file reader (`music-metadata`: a crafted MP4 or MKV file could hang Lumina or exhaust its memory while it scanned, and downloaded files are scanned), the settings and input checker (`zod`: memory exhaustion on oversized input), and the code editor's text sanitiser (`dompurify`, one critical and one high). `pnpm audit` now reports none; a tagged mp3, an mp4 and corrupt files were read and scanned in the real app afterwards.
 - **A playlist you had downloaded before no longer ends as "Done" with nothing in the folder.** Lumina remembered every YouTube video it had
   ever fetched in one list, so songs you had deleted, moved, or fetched as a video were skipped silently. It now remembers per kind (music or
   video) and per folder, notices when "already downloaded" songs are not actually in the playlist's folder and downloads them, and says
@@ -32,6 +127,17 @@ Not released yet; everything below is in the working tree only.
   fails too. The retry itself is only unit-tested; see `SESSION-LOG.md` (54).
 - **Pop-ups for a release's parts come one after another faster:** once a check is solved, the next part's pop-up opens while the first page
   finishes (stand-in host, 6 parts: 39.6 s to 18.7 s). Each part may still ask for its own check.
+
+### Fixed (long playlists, and how finished downloads are shown)
+- **A playlist that loses items on the way is finished, not abandoned.** A 438-song playlist ended with 105 missing and the message "The download
+  engine stopped unexpectedly", which was not true: some songs were really gone, and most were refused when YouTube began asking Lumina to
+  confirm it is not a bot. The items that can recover are now tried again after a rest, gently, up to twice; the rest are counted by reason, and
+  the message says what to do ("press Retry in an hour, which fetches only the missing ones"). Checked against a scripted yt-dlp; not yet against
+  real YouTube.
+- **A finished download says what its numbers are.** "13.5 GB · 34 min 49 s · 6.6 M…" is now "331 of 438 items", "13.5 GB downloaded",
+  "took 34 min 49 s", "6.6 MB/s average", each with an icon, and a playlist's failures are written out in full instead of being squeezed
+  beside them.
+- **The logo follows the theme colour** instead of staying orange when another accent is chosen.
 
 ### Fixed (after the first live test)
 - **Pixeldrain links now download the file.** Every one used to save Pixeldrain's own web page (about 4 KB) and fail with "the server sent a
@@ -79,6 +185,8 @@ Not released yet; everything below is in the working tree only.
   script, so the extension saw only the first host. It now reads those lists too, so the mirror chooser can offer Pixeldrain or Gofile, and
   leaves out any entry the page itself marks as dangerous. Checked on a real hoster page by reading it (3 usable lists, 2 flagged ones
   skipped); not yet tried in the extension in a real browser, only in tests.
+
+---
 
 ## [1.2.1] — 2026-11-03
 

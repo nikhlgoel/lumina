@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Job, JobProgress, ReleaseTag } from '@shared/types';
-import { groupActionTargets, groupJobs, summarizeGroup } from '@core/jobGroups';
+import { batchBreakdown, groupActionTargets, groupJobs, summarizeGroup } from '@core/jobGroups';
 
 const progress = (p: Partial<JobProgress> = {}): JobProgress =>
   ({ percent: 0, speedBps: null, etaSec: null, downloadedBytes: null, totalBytes: null, stage: '', ...p });
@@ -196,5 +196,69 @@ describe('groupActionTargets', () => {
 
   it('removes only finished rows, never a live download', () => {
     expect(groupActionTargets(members, 'remove')).toEqual(['fail', 'done', 'cancel']);
+  });
+});
+
+describe('saying how a batch stands', () => {
+  it('counts every file in every state, the way the owner’s twelve-file batch stood (3 done, 1 going, 8 waiting)', () => {
+    const rel = { release: { id: 'r' } };
+    const members = [
+      ...['a', 'b', 'c'].map((n) => job(n, 'completed', rel)),
+      job('d', 'running', rel),
+      ...['e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'].map((n) => job(n, 'queued', rel)),
+    ];
+    const s = summarizeGroup(members);
+    expect(s.counts.total).toBe(12);
+    expect(batchBreakdown(s.counts)).toEqual(['3 done', '1 downloading', '8 waiting']);
+  });
+
+  it('leaves out states with no files, and names the ones that need attention', () => {
+    const rel = { release: { id: 'r' } };
+    const s = summarizeGroup([job('a', 'completed', rel), job('b', 'failed', rel), job('c', 'paused', rel)]);
+    expect(batchBreakdown(s.counts)).toEqual(['1 done', '1 paused', '1 failed']);
+  });
+});
+
+describe('a group’s figures, case by case', () => {
+  const rel = { release: { id: 'r' } };
+
+  it('counts cancelled files on their own, and the group is done only when nothing is active', () => {
+    const s = summarizeGroup([job('a', 'completed', rel), job('b', 'cancelled', rel)]);
+    expect(s.counts).toMatchObject({ total: 2, completed: 1, cancelled: 1, failed: 0 });
+    expect(s.status).toBe('cancelled');
+  });
+
+  it('counts a finished file as whole even if its last progress reading never reached 100', () => {
+    const s = summarizeGroup([job('a', 'completed', { ...rel, progress: { percent: 90 } }), job('b', 'queued', { ...rel, progress: { percent: 0 } })]);
+    expect(s.percent).toBe(50);
+  });
+
+  it('gives an empty group no progress and counts it as done', () => {
+    const s = summarizeGroup([]);
+    expect(s.percent).toBe(0);
+    expect(s.counts.total).toBe(0);
+  });
+
+  it('does not weigh by bytes when a size is zero or missing', () => {
+    const withSize = (percent: number, total: number | null) => job('x', 'running', { ...rel, progress: { percent, totalBytes: total, downloadedBytes: total ? total / 2 : null } });
+    expect(summarizeGroup([withSize(100, 1000), withSize(0, 0)]).percent).toBe(50);
+    expect(summarizeGroup([withSize(100, 1000), withSize(0, null)]).percent).toBe(50);
+    expect(summarizeGroup([withSize(40, 1000), withSize(40, 9000)]).totalBytes).toBe(10_000);
+  });
+
+  it('ranks the status by what needs attention: a failure outranks a finished file, an active one outranks both', () => {
+    expect(summarizeGroup([job('a', 'completed', rel), job('b', 'failed', rel)]).status).toBe('failed');
+    expect(summarizeGroup([job('a', 'failed', rel), job('b', 'running', rel)]).status).toBe('running');
+  });
+});
+
+describe('which files "cancel all" reaches', () => {
+  const rel = { release: { id: 'r' } };
+  it('includes files waiting for the network or for a retry, and leaves finished and failed ones alone', () => {
+    const waiting = job('w', 'failed', { ...rel, progress: { activity: 'waiting', stage: 'Waiting for the network' } });
+    const retrying = job('t', 'failed', { ...rel, progress: { stage: 'Retrying in 30 s' } });
+    const failed = job('f', 'failed', { ...rel, progress: { stage: 'Failed' } });
+    const members = [job('a', 'running', rel), job('b', 'queued', rel), job('c', 'paused', rel), job('d', 'completed', rel), waiting, retrying, failed];
+    expect(groupActionTargets(members, 'cancel')).toEqual(['a', 'b', 'c', 'w', 't']);
   });
 });

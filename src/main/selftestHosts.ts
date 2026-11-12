@@ -14,6 +14,7 @@ import { inspect } from './inspect';
 import { queue } from './jobs/queue';
 import { DRIVER_VARIANTS } from './selftestDriverPages';
 import { queueUrlFor } from '../core/hosts';
+import { defaultPresetFor, guessContentType } from '../core/presets';
 import { challengeAction, challengeEvents, forgetLearnedClicks, forgetSolvedChecks, learnedFor, resolveHostedLink } from './hosters';
 import { createWindow } from './window';
 import { settings } from './settings';
@@ -822,4 +823,67 @@ export async function runShotsSelftest(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1000));
   }
   server.close();
+}
+
+/**
+ * A captured HLS stream with no codec details (like `index-s1080p-v1-a1.m3u8` from a video page) must come out as a VIDEO. It was read as music
+ * and downloaded as an audio-only FLAC. Generated locally (a short test picture and a tone, cut into HLS) and served here: no outside content.
+ * `LUMINA_SELFTEST=1 LUMINA_SELFTEST_STREAM=1`.
+ */
+export async function runStreamSelftest(dir: string): Promise<void> {
+  const media = path.join(dir, 'hls');
+  fs.rmSync(media, { recursive: true, force: true });
+  fs.mkdirSync(media, { recursive: true });
+  const ffmpeg = tools.require('ffmpeg');
+  const made = await runTool(ffmpeg, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=25:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod', '-hls_segment_filename', path.join(media, 'seg-%d.ts'), path.join(media, 'index-s1080p-v1-a1.m3u8')], { timeoutMs: 120_000 });
+  check('a test stream could be made', made.code === 0, made.stderr.slice(0, 160));
+
+  const server = http.createServer((req, res) => {
+    const name = path.basename(new URL(req.url ?? '/', 'http://x').pathname);
+    const file = path.join(media, name);
+    if (!fs.existsSync(file)) return void res.writeHead(404).end('no');
+    const type = name.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
+    res.writeHead(200, { 'Content-Type': type }).end(fs.readFileSync(file));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/vd/token/index-s1080p-v1-a1.m3u8?s=1`;
+
+  try {
+    const info = await inspect(url);
+    const guess = guessContentType(info);
+    check('a stream that lists no tracks is read as a video, not as music', guess === 'video', `${info.sourceKind}, ${info.videoStreams.length} video / ${info.audioStreams.length} audio streams listed -> ${guess}`);
+
+    // Options as the screens build them (renderer quickOptions): the default for what it was guessed to be.
+    const s = settings.get();
+    const preset = defaultPresetFor(guess, s.downloads.defaultPreset);
+    const target = path.join(dir, 'Videos', 'stream');
+    fs.mkdirSync(target, { recursive: true });
+    const job = queue.addFromInfo(url, info, {
+      contentType: guess, format: preset.format, englishSubtitles: false, subtitleOutput: s.subtitles.output, embedMetadata: s.downloads.embedMetadata,
+      embedLyrics: s.downloads.embedLyrics, sponsorBlock: false, playlistItems: [], targetDir: target,
+    }, target);
+    const done = await Promise.race([
+      new Promise<Job>((resolve) => {
+        const timer = setInterval(() => {
+          const j = queue.get(job.id);
+          if (j && ['completed', 'failed', 'cancelled'].includes(j.status)) {
+            clearInterval(timer);
+            resolve(j);
+          }
+        }, 500);
+      }),
+      new Promise<Job>((_, reject) => setTimeout(() => reject(new Error('the stream download did not finish in 120 s')), 120_000)),
+    ]);
+    check('the stream downloads', done.status === 'completed' && done.outputPaths.length > 0, `${done.status} ${done.error?.message ?? ''} ${done.outputPaths.map((p) => path.basename(p)).join(', ')}`);
+    const out = done.outputPaths[0] ?? '';
+    const probe = out ? await runTool(tools.require('ffprobe'), ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', out], { timeoutMs: 30_000 }) : null;
+    const kinds = (probe?.stdout ?? '').split(/\s+/).filter(Boolean);
+    check('and the file has the picture as well as the sound', kinds.includes('video') && kinds.includes('audio'), `${path.basename(out)}: ${kinds.join(', ') || 'unreadable'}`);
+  } catch (err) {
+    check('the stream scenario ran to the end', false, String(err));
+  }
+  server.close();
+  const failed = results.filter((r) => !r.ok);
+  out(`${results.length - failed.length}/${results.length} checks passed`);
 }

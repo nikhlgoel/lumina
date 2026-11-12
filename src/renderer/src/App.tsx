@@ -7,6 +7,7 @@ import { useJobs } from '@/stores/jobs';
 import { useLibrary } from '@/stores/library';
 import { applyStoredVolume, media, usePlayer } from '@/stores/player';
 import { HAS_BROWSER, HAS_IDE } from '@shared/features';
+import { navKeys } from '@core/nav';
 import { MiniBar, Sidebar, Toasts } from '@/components/Shell';
 import { QuickCheck } from '@/components/QuickCheck';
 import { Shortcuts } from '@/components/Shortcuts';
@@ -91,8 +92,9 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || useApp.getState().mode === 'player') return;
-      const map: Record<string, View> = { '1': 'download', '2': 'queue', '3': 'library', '4': 'browser', '5': 'ide', ',': 'settings' };
-      const target = map[e.key];
+      // The same rule as the sidebar (core/nav): a screen that is not offered has no key, and the numbers follow what is shown.
+      const s = useApp.getState().settings;
+      const target = navKeys({ hasBrowser: HAS_BROWSER, showBrowser: s?.browser.showInSidebar ?? false, hasIde: HAS_IDE })[e.key] as View | undefined;
       if (target) {
         e.preventDefault();
         setView(target);

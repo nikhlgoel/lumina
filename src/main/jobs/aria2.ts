@@ -21,6 +21,7 @@ import { bindArg, bindArgFromSlots, cleanBindList, weightedBindList } from '../.
 import { activeBindList, measureLines } from '../lineSpeed';
 import { classifyStartFailure, ENGINE_WILL_NOT_START, nextStartFix, type StartFix } from '../../core/engineStart';
 import { autoUploadCapKbps, worthChanging } from '../../core/uploadCap';
+import { sanitizeTrackers } from '../../core/torrentPrefs';
 import { isSparse, markSparse } from '../sparse';
 import { allocatedBytes, spaceShortfall } from '../../core/diskSpace';
 import { compareValidators } from '../../core/resumeCheck';
@@ -31,8 +32,13 @@ import { resolveHostedLink } from '../hosters';
 import type { Runner } from './queue';
 import { hostOfUrl } from '../../core/hostBudget';
 import { hostBudgets } from './budgets';
+import { HostPeaks, SlowdownWatch } from '../../core/slowdown';
+import { actionForExisting } from '../../core/existingFiles';
 
 const log = logger('aria2');
+
+/** The best recent speed from each host, shared by every download in this run of the app (core/slowdown). */
+const hostSpeeds = new HostPeaks();
 
 const FALLBACK_TRACKERS = [
   'udp://tracker.opentrackr.org:1337/announce',
@@ -54,7 +60,8 @@ async function trackers(): Promise<string[]> {
     try {
       const res = await fetch(TRACKER_LIST_URL, { signal: AbortSignal.timeout(8000) });
       if (res.ok) {
-        const list = (await res.text()).split(/\s+/).filter((t) => /^(udp|https?|wss?):\/\/[^\s,]+$/.test(t)).slice(0, 60);
+        // A list is a few KB; a huge answer is not one. Local and private addresses are dropped (core/torrentPrefs).
+        const list = sanitizeTrackers((await res.text()).slice(0, 256 * 1024));
         if (list.length) fs.writeFileSync(file, list.join('\n'));
       }
     } catch (err) {
@@ -62,7 +69,8 @@ async function trackers(): Promise<string[]> {
     }
   }
   try {
-    const list = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    // Read back through the same check: the file sits in a folder other programs can write to.
+    const list = sanitizeTrackers(fs.readFileSync(file, 'utf8').slice(0, 256 * 1024));
     return list.length ? [...new Set([...list, ...FALLBACK_TRACKERS])] : FALLBACK_TRACKERS;
   } catch {
     return FALLBACK_TRACKERS;
@@ -503,6 +511,10 @@ export const aria2Runner: Runner = (ctx) => {
   let rangeRetried = false;
   /** Running average of the download speed, for the ETA (see core/progress smoothSpeed). */
   let avgSpeed: number | null = null;
+  const slowdownHost = job.engine === 'aria2' ? hostOfUrl(job.url) : null;
+  const slowdown = new SlowdownWatch(slowdownHost ? { host: slowdownHost, peaks: hostSpeeds } : undefined);
+  let wasLimited = false;
+  let wasUserLimited = false;
   let stall: StallState = initialStall(Date.now());
   let spaceBlocked = false;
   let spaceCheckedAt = 0;
@@ -677,7 +689,7 @@ export const aria2Runner: Runner = (ctx) => {
           const existing = (status.files ?? []).find((f) => f.path)?.path;
           if (existing) {
             nameRetried = true;
-            const fresh = uniqueName(path.dirname(existing), path.basename(existing));
+            const fresh = uniqueName(path.dirname(existing), path.basename(existing), job.id);
             log.warn('A file with this name already exists without a control file; saving under a new name', { job: job.title, name: fresh });
             addSpec.opts = { ...addSpec.opts, dir: path.dirname(existing), out: fresh };
             ctx.progress({ stage: `A file with this name already exists; saving as ${fresh}`, speedBps: null, etaSec: null }, 'running');
@@ -730,6 +742,19 @@ export const aria2Runner: Runner = (ctx) => {
         timer = setTimeout(poll, 1000);
         return;
       }
+      // A speed that fell from a high one and stayed down is the host limiting this file; say so (core/slowdown). Not for torrents: peers vary.
+      // The person's own speed limit (or its schedule) is not the host's: while one is on, speeds say nothing about the host, and when it
+      // switches on or off what was seen before no longer applies.
+      const userLimited = speedLimitActive(settings.get());
+      if (userLimited !== wasUserLimited) {
+        wasUserLimited = userLimited;
+        slowdown.reset();
+      }
+      const limited = !userLimited && !isTorrent && !metadata && slowdown.update(Date.now(), p.speedBps);
+      if (limited !== wasLimited) {
+        wasLimited = limited;
+        log.info(limited ? `The speed of ${job.title} fell far below its best and stayed there; the host looks to be limiting it` : `The speed of ${job.title} recovered`);
+      }
       ctx.progress({
         percent: metadata ? 0 : p.percent, speedBps: p.speedBps,
         // From a running average of the speed, not the last moment's: the raw one swings, and so did the ETA built on it.
@@ -741,7 +766,7 @@ export const aria2Runner: Runner = (ctx) => {
           : 'Downloading',
         connections: isTorrent ? null : Number(status.connections) || 0,
         // Still "reconnecting" while recovery steps have run and no bytes have moved since: the next poll must not claim all is well.
-        activity: stall.steps > 0 ? 'reconnecting' : null,
+        activity: stall.steps > 0 ? 'reconnecting' : limited ? 'limited' : null,
       }, 'running');
     } catch (err) {
       if (stopped) return;
@@ -806,13 +831,82 @@ export const aria2Runner: Runner = (ctx) => {
   };
   let polls = 0;
 
+  /**
+   * A file of this name that is already in the folder, and what to do about it (core/existingFiles). "reused": it is the same file, so this
+   * job is finished without downloading it. "replace": the old copy is to be moved to the Recycle Bin, which `makeRoom` does just before the download
+   * is handed to the engine (not earlier: a dead link or a cancel in between must not cost the person their file). "none": nothing to do (nothing there,
+   * or the person did not choose, which keeps both).
+   *
+   * Only a file that was there when the batch was planned counts (`existingNames`): a file of this name that has appeared since is another job of this
+   * batch, and neither skipping nor replacing may touch it.
+   */
+  const planned = job.options.existingNames ? new Set(job.options.existingNames.map((n) => n.replace(/[\\/:*?"<>|]/g, '_').toLowerCase())) : null;
+  let replacing: string | null = null;
+  const settleExisting = (name: string): 'reused' | 'replace' | 'none' => {
+    if (planned && !planned.has(name.toLowerCase())) return 'none';
+    const full = path.join(dir, name);
+    let size: number | null = null;
+    try {
+      const st = fs.statSync(full);
+      // A half-finished file (with its control file) is resumed by the download itself; it is not an existing file.
+      if (st.isFile() && !fs.existsSync(`${full}.aria2`)) size = st.size;
+    } catch {
+      return 'none';
+    }
+    if (size === null) return 'none';
+    const action = actionForExisting(job.options.existingFiles, job.source.direct?.sizeBytes ?? null, { size });
+    if (action === 'reuse') {
+      log.info(`Already have ${name}; not downloading it again`, { size });
+      ctx.patch({ outputPaths: [full], compat: { tvSafe: false, summary: 'Already on this computer' } });
+      ctx.progress({ percent: 100, downloadedBytes: size, totalBytes: size, speedBps: null, etaSec: 0, stage: 'Already on this computer' }, 'running');
+      ctx.complete();
+      return 'reused';
+    }
+    if (action === 'replace') {
+      replacing = full;
+      return 'replace';
+    }
+    return 'none';
+  };
+
+  /**
+   * Move the old copy to the Recycle Bin. Never deletes it for good: if the Recycle Bin cannot take it (a drive without one, a path too long), the new
+   * file is saved beside the old one instead and the row says so. Returns whether the name is free.
+   */
+  const makeRoom = async (): Promise<boolean> => {
+    if (!replacing) return true;
+    const full = replacing;
+    replacing = null;
+    try {
+      // Development-only: a test must not fill the real Recycle Bin. "delete" stands in for a working one (the file is removed), "fail" for one that
+      // cannot take the file.
+      const test = process.env.LUMINA_TRASH_TEST;
+      if (test === 'fail') throw new Error('the Recycle Bin is switched off for this run');
+      if (test === 'delete') {
+        fs.rmSync(full, { force: true });
+        return true;
+      }
+      const { shell } = await import('electron');
+      await shell.trashItem(full);
+      log.info(`Replacing ${path.basename(full)}: the old copy went to the Recycle Bin`);
+      return true;
+    } catch (err) {
+      log.warn(`Could not move ${path.basename(full)} to the Recycle Bin, so it is kept and the new file saved beside it`, err);
+      ctx.progress({ stage: 'The old copy could not go to the Recycle Bin, so it is kept; saving the new one beside it' });
+      return false;
+    }
+  };
+
   (async () => {
     await aria2.ensure();
     const opts: Record<string, string | string[]> = { dir };
     if (job.source.direct?.filename) {
       const name = job.source.direct.filename.replace(/[\\/:*?"<>|]/g, '_');
-      // Starting fresh (not resuming): pick "name (1).ext" like browsers do instead of overwriting.
-      opts.out = fs.existsSync(path.join(dir, `${name}.aria2`)) ? name : uniqueName(dir, name);
+      // The same file may already be here, and the person may have said what to do about that (skip it, or replace it).
+      const settled = settleExisting(name);
+      if (settled === 'reused' || stopped) return;
+      // Starting fresh (not resuming): pick "name (1).ext" like browsers do instead of overwriting, unless the old copy is to be replaced.
+      opts.out = settled === 'replace' || fs.existsSync(path.join(dir, `${name}.aria2`)) ? name : uniqueName(dir, name, job.id);
     }
 
     // File-host links open a download page: click through it now (links it hands out expire, so never cache them).
@@ -830,7 +924,13 @@ export const aria2Runner: Runner = (ctx) => {
       if (stopped) return;
       url = resolved.url;
       req = resolved.request;
-      if (!job.source.direct.filename && resolved.filename) opts.out = uniqueName(dir, resolved.filename.replace(/[\\/:*?"<>|]/g, '_'));
+      if (!job.source.direct.filename && resolved.filename) {
+        const name = resolved.filename.replace(/[\\/:*?"<>|]/g, '_');
+        const settled = settleExisting(name);
+        if (settled === 'reused' || stopped) return;
+        // A page that was resumed finds its own half-finished file by its control file, as above; only a fresh start picks a new name.
+        opts.out = settled === 'replace' || fs.existsSync(path.join(dir, `${name}.aria2`)) ? name : uniqueName(dir, name, job.id);
+      }
     }
 
     // A host that drops a client with too many connections open is given fewer, for the host the link names and for the one the file is on.
@@ -927,12 +1027,22 @@ export const aria2Runner: Runner = (ctx) => {
       }
     }
 
+    // The old copy (when the person chose to replace it) goes to the Recycle Bin only now, when the download is certain to start.
+    if (!(await makeRoom()) && typeof opts.out === 'string') opts.out = uniqueName(dir, opts.out, job.id);
+    if (stopped) return;
     addSpec = {
       url,
       torrentPath: url.toLowerCase().endsWith('.torrent') && fs.existsSync(url) ? url : null,
       opts,
     };
+    // Stopped while the engine was still being got ready (a tracker list, a host's page): nothing may be handed to it now.
+    if (stopped) return;
     await addToAria();
+    // Stopped while the download was being added: the stop found no download to remove, so remove it here, or it goes on unseen.
+    if (stopped) {
+      if (gid) await aria2.call('aria2.forceRemove', gid).catch(() => undefined);
+      return;
+    }
     // The stall clock starts now, when the engine has the download, not when this job began. A download that first waited on a host's page
     // (a check, a countdown) was declared "stalled for 65 s" three milliseconds after it started (log, 2 Nov) and was paused and resumed.
     stall = initialStall(Date.now());
@@ -964,7 +1074,10 @@ export const aria2Runner: Runner = (ctx) => {
       })();
     }
     void poll();
-  })().catch((err) => ctx.fail(err instanceof Error ? err.message : String(err)));
+  })().catch((err) => {
+    // Stopped on purpose (cancelled, or Lumina closing): what the start-up threw on the way out is not a failure of the download.
+    if (!stopped) ctx.fail(err instanceof Error ? err.message : String(err));
+  });
 
   return {
     stop: (reason) => {
@@ -1050,15 +1163,23 @@ async function removeWhenFree(file: string, tries = 40): Promise<void> {
   }
 }
 
-function uniqueName(dir: string, name: string): string {
-  if (!fs.existsSync(path.join(dir, name))) return name;
+/** Names a download has just chosen for its file, by path, so two downloads of the same name in one batch do not both take it. */
+const reservedNames = new Map<string, string>();
+
+function uniqueName(dir: string, name: string, owner?: string): string {
+  const key = (n: string) => path.join(dir, n).toLowerCase();
+  // A name another download chose a moment ago is taken even though its file may not exist yet; one's own earlier choice (a retry) is not.
+  const taken = (n: string) => fs.existsSync(path.join(dir, n)) || fs.existsSync(path.join(dir, `${n}.aria2`)) || (reservedNames.has(key(n)) && reservedNames.get(key(n)) !== owner);
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
-  for (let i = 1; i < 10_000; i++) {
-    const candidate = `${stem} (${i})${ext}`;
-    if (!fs.existsSync(path.join(dir, candidate)) && !fs.existsSync(path.join(dir, `${candidate}.aria2`))) return candidate;
+  let pick = name;
+  for (let i = 1; taken(pick) && i < 10_000; i++) pick = `${stem} (${i})${ext}`;
+  if (owner) {
+    reservedNames.set(key(pick), owner);
+    // Only for as long as it takes the engine to create the file, which then shows for itself.
+    setTimeout(() => { if (reservedNames.get(key(pick)) === owner) reservedNames.delete(key(pick)); }, 120_000).unref();
   }
-  return name;
+  return pick;
 }
 
 function commonRoot(files: string[], base: string): string {

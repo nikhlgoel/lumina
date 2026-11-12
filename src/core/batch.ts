@@ -109,7 +109,8 @@ function missing(parts: number[], firstPart: number): number[] {
 
 /** A name a web page gave a link, if it is a file name; otherwise ''. Link text like "Download" or "Mirror 1" is not one. */
 export function nameFromText(text: string | undefined): string {
-  const name = (text ?? '').replace(/[\\/:*?"<>|]/g, ' ').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Looked up by link in a plain object, so a link that is also a property name ("valueOf") hands back a function, not text.
+  const name = (typeof text === 'string' ? text : '').replace(/[\\/:*?"<>|]/g, ' ').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
   return name.length <= 200 && /^[^\s].*\.[A-Za-z0-9]{1,6}$/.test(name) && !/\s{2,}/.test(name) ? name : '';
 }
 

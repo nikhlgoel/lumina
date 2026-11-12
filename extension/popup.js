@@ -103,6 +103,7 @@ async function render() {
     list.append(li);
   }
 
+  await renderEpisodes(tab);
   await renderLinks(tab);
 
   // Offered only when this Lumina can take a sign-in (an older one answers without `accounts`).
@@ -118,6 +119,129 @@ async function render() {
     note.hidden = false;
     note.textContent = r.ok ? 'Done. Lumina can now download private and age-restricted YouTube videos as you.' : (r.reason || 'Lumina didn’t respond');
   };
+}
+
+/** The episodes of a series on this page: all of them listed, the ones with a video found by opening each, and those sent together. */
+let episodeTimer = 0;
+async function renderEpisodes(tab) {
+  clearInterval(episodeTimer);
+  const usable = tab?.id && /^https?:/.test(tab.url ?? '');
+  const found = usable ? await chrome.runtime.sendMessage({ type: 'episodes-read', tabId: tab.id }).catch(() => null) : null;
+  $('episodes-box').hidden = !found;
+  if (!found) return;
+
+  const episodes = found.episodes;
+  const list = $('episodes');
+  list.replaceChildren();
+  const chosen = new Set();
+  const rows = [];
+  const label = (e) => `Episode ${e.number}${e.title ? ` · ${e.title}` : ''}`;
+  const seasons = new Set(episodes.map((e) => e.season));
+  $('episodes-title').textContent = `${found.show || 'Episodes'} · ${episodes.length} episode${episodes.length === 1 ? '' : 's'}`;
+  $('episodes-hint').textContent = 'A list shows every episode, including ones that are not out yet. Lumina opens each one in the background to see which has a video.';
+
+  for (const [i, e] of episodes.entries()) {
+    const li = document.createElement('li');
+    li.className = 'ep-row';
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.disabled = true;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const title = document.createElement('b');
+    title.textContent = `${seasons.size > 1 ? `S${e.season} ` : ''}${label(e)}`;
+    title.title = e.url;
+    const sub = document.createElement('small');
+    meta.append(title, sub);
+    const tag = document.createElement('span');
+    tag.className = 'ep-tag';
+    li.append(check, meta, tag);
+    li.onclick = (ev) => { if (ev.target !== check && !check.disabled) check.click(); };
+    check.onchange = () => { if (check.checked) chosen.add(String(i)); else chosen.delete(String(i)); refresh(); };
+    rows.push({ li, check, sub, tag, e });
+    list.append(li);
+  }
+
+  const TEXT = {
+    waiting: ['Not checked yet', ''], checking: ['Checking…', 'checking'], found: ['Video found', 'found'],
+    none: ['No video yet', 'none'], error: ['Couldn’t check', 'error'],
+  };
+  let last = null;
+  let ticked = false; // the first time the check finishes, everything with a video is ticked for the person
+  const apply = (snap) => {
+    last = snap;
+    for (const [i, r] of rows.entries()) {
+      const item = snap?.items?.[i];
+      const status = item?.status ?? 'waiting';
+      const [text, tone] = TEXT[status] ?? TEXT.waiting;
+      r.li.dataset.status = status;
+      r.tag.textContent = text;
+      r.tag.dataset.status = tone;
+      r.sub.textContent = status === 'found' ? (item.kind === 'stream' ? 'Streaming video' : 'Video file') : status === 'none' ? (r.e.unavailable ? 'Not out yet, according to the page' : 'The page opened, but no video played') : status === 'error' ? (item.reason || '') : (r.e.unavailable && status === 'waiting' ? 'The page marks this one as not out yet' : '');
+      r.check.disabled = status !== 'found';
+      if (status !== 'found') { r.check.checked = false; chosen.delete(String(i)); }
+      else if (!snap.running && !ticked) { r.check.checked = true; chosen.add(String(i)); }
+    }
+    if (snap && !snap.running && snap.items.some((x) => x.status !== 'waiting')) ticked = true;
+    refresh();
+  };
+  const refresh = () => {
+    const found = last?.items?.filter((x) => x.status === 'found').length ?? 0;
+    const checked = last?.items?.filter((x) => ['found', 'none', 'error'].includes(x.status)).length ?? 0;
+    const running = Boolean(last?.running);
+    $('eps-all').disabled = found === 0;
+    $('eps-all').checked = found > 0 && chosen.size === found;
+    $('eps-all').indeterminate = chosen.size > 0 && chosen.size < found;
+    $('eps-count').textContent = running ? `Checking · ${checked} of ${episodes.length}` : checked ? `${found} of ${episodes.length} have a video` : `${episodes.length} listed`;
+    $('eps-check').textContent = running ? 'Stop' : checked ? 'Check again' : 'Find the ones with a video';
+    const send = $('eps-send');
+    send.disabled = chosen.size === 0;
+    send.textContent = chosen.size ? `Send ${chosen.size} episode${chosen.size === 1 ? '' : 's'} to Lumina` : (checked && !running ? 'No episode with a video is picked' : 'Check the episodes first');
+  };
+  const poll = async () => {
+    const snap = await chrome.runtime.sendMessage({ type: 'episodes-status', tabId: tab.id }).catch(() => null);
+    if (snap && snap.items?.length === episodes.length) apply(snap);
+    if (!snap?.running) clearInterval(episodeTimer);
+  };
+
+  $('eps-check').onclick = async () => {
+    if (last?.running) {
+      await chrome.runtime.sendMessage({ type: 'episodes-stop', tabId: tab.id }).catch(() => undefined);
+      return poll();
+    }
+    ticked = false;
+    chosen.clear();
+    const snap = await chrome.runtime.sendMessage({ type: 'episodes-probe', tabId: tab.id, show: found.show, episodes }).catch(() => null);
+    if (snap) apply(snap);
+    clearInterval(episodeTimer);
+    episodeTimer = setInterval(poll, 1000);
+  };
+  $('eps-all').onchange = (ev) => {
+    for (const [i, r] of rows.entries()) {
+      if (r.check.disabled) continue;
+      r.check.checked = ev.target.checked;
+      if (ev.target.checked) chosen.add(String(i)); else chosen.delete(String(i));
+    }
+    refresh();
+  };
+  $('eps-send').onclick = async () => {
+    const send = $('eps-send');
+    send.disabled = true;
+    send.textContent = 'Sending…';
+    const r = await chrome.runtime.sendMessage({ type: 'episodes-send', tabId: tab.id, show: found.show, keys: [...chosen] }).catch(() => null);
+    if (r?.accepted) {
+      send.textContent = 'Sent to Lumina ✓';
+      setTimeout(() => window.close(), 900);
+    } else {
+      send.textContent = r?.reason || 'Lumina didn’t respond';
+      setTimeout(refresh, 3000);
+    }
+  };
+
+  // A check that was already started (the popup was closed meanwhile) is picked up where it is.
+  apply(null);
+  await poll();
+  if (last?.running) episodeTimer = setInterval(poll, 1000);
 }
 
 /** Every download link on the page, to pick from and send together. */

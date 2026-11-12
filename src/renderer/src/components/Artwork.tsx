@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Film, Music } from 'lucide-react';
+import { Captions, File, FileArchive, FileText, Film, HardDriveDownload, Image as ImageIcon, Magnet, Music } from 'lucide-react';
+import type { IconKind } from '@core/iconKind';
 import { gradientCss } from '@core/coverArt';
 import { cn } from '@/lib/cn';
 
@@ -11,8 +12,14 @@ import { cn } from '@/lib/cn';
  */
 export const fallbackGradient = gradientCss;
 
+/** The picture that stands in for a file with no artwork: one per kind of file, so a .rar is never a music note. */
+const KIND_ICON: Record<IconKind, React.ReactNode> = {
+  audio: <Music />, video: <Film />, archive: <FileArchive />, image: <ImageIcon />, document: <FileText />,
+  installer: <HardDriveDownload />, torrent: <Magnet />, subtitle: <Captions />, other: <File />,
+};
+
 export function Artwork({ src, seed, kind = 'audio', className, rounded = 'rounded-lg', fit = 'cover', style, onRatio }: {
-  src: string | null; seed: string; kind?: 'audio' | 'video'; className?: string; rounded?: string;
+  src: string | null; seed: string; kind?: IconKind; className?: string; rounded?: string;
   /** `cover` fills the box and crops; `contain` shows the whole picture. Big covers want `contain`. */
   fit?: 'cover' | 'contain';
   style?: React.CSSProperties;
@@ -33,7 +40,7 @@ export function Artwork({ src, seed, kind = 'audio', className, rounded = 'round
           className={fit === 'contain' ? 'size-full object-contain' : 'size-full object-cover'}
         />
       ) : (
-        <div className="grid size-full place-items-center text-white/70 [&_svg]:size-[38%]">{kind === 'video' ? <Film /> : <Music />}</div>
+        <div className="grid size-full place-items-center text-white/70 [&_svg]:size-[38%]">{KIND_ICON[kind]}</div>
       )}
     </div>
   );
